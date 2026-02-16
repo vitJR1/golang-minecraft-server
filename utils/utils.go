@@ -471,3 +471,33 @@ func ReadByteFromBuf(buf *bytes.Buffer) (byte, error) {
 	}
 	return buf.ReadByte()
 }
+
+func WriteVarInt32ToBuffer(buf *bytes.Buffer, value int32) {
+	u := uint32(value)
+	for {
+		b := byte(u & 0x7F)
+		u >>= 7
+		if u != 0 {
+			b |= 0x80
+		}
+		buf.WriteByte(b)
+		if u == 0 {
+			break
+		}
+	}
+}
+
+func WriteVarInt64ToBuffer(buf *bytes.Buffer, value int64) {
+	u := uint64(value)
+	for {
+		b := byte(u & 0x7F)
+		u >>= 7
+		if u != 0 {
+			b |= 0x80
+		}
+		buf.WriteByte(b)
+		if u == 0 {
+			break
+		}
+	}
+}

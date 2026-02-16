@@ -1,4 +1,4 @@
-package utils
+package encryption
 
 import (
 	"crypto/cipher"
@@ -10,7 +10,7 @@ type cfb8 struct {
 	decrypt bool
 }
 
-func newCFB8(block cipher.Block, iv []byte, decrypt bool) cipher.Stream {
+func NewCFB8(block cipher.Block, iv []byte, decrypt bool) cipher.Stream {
 	ivCopy := make([]byte, len(iv))
 	copy(ivCopy, iv)
 

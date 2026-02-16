@@ -142,6 +142,8 @@ func (w *Writer) StartList(name string, elementType byte, length int32) {
 	binary.Write(&w.buf, binary.BigEndian, length)
 }
 
+func (w *Writer) EndList() {}
+
 // Helper to write tag header
 func (w *Writer) writeTagHeader(tag byte, name string) {
 	w.buf.WriteByte(tag)

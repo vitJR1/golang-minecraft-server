@@ -3,13 +3,13 @@ package connection
 import (
 	"bytes"
 	"crypto/aes"
-	"crypto/cipher"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
+	"minecraft-server/encryption"
 	"minecraft-server/mojang"
 	"minecraft-server/nbt"
 	"minecraft-server/utils"
@@ -26,6 +26,8 @@ type ClientConnection struct {
 	closed     int32 // atomic flag
 	done       chan struct{}
 }
+
+var publicASN1, private, _ = generateRSA()
 
 func HandleConn(conn net.Conn) {
 	client := &ClientConnection{
@@ -174,7 +176,8 @@ func (c *ClientConnection) handleReadError(err error) {
 }
 
 func (c *ClientConnection) processPacket(packet *bytes.Buffer) error {
-	packetID, err := utils.ReadByteFromBuf(packet)
+	fmt.Println("Processing packet in state:", c.state)
+	packetID, err := utils.ReadVarInt(packet)
 	if err != nil {
 		return fmt.Errorf("reading packet ID: %w", err)
 	}
@@ -193,7 +196,7 @@ func (c *ClientConnection) processPacket(packet *bytes.Buffer) error {
 	}
 }
 
-func (c *ClientConnection) handleHandshake(packet *bytes.Buffer, packetID byte) error {
+func (c *ClientConnection) handleHandshake(packet *bytes.Buffer, packetID int) error {
 	if packetID != 0x00 {
 		return fmt.Errorf("expected handshake packet (0x00), got 0x%02X", packetID)
 	}
@@ -233,7 +236,7 @@ func (c *ClientConnection) handleHandshake(packet *bytes.Buffer, packetID byte) 
 	return nil
 }
 
-func (c *ClientConnection) handleStatus(packet *bytes.Buffer, packetID byte) error {
+func (c *ClientConnection) handleStatus(packet *bytes.Buffer, packetID int) error {
 	switch packetID {
 	case 0x00: // Status Request
 		fmt.Println("Received status request")
@@ -275,7 +278,7 @@ func (c *ClientConnection) handleStatus(packet *bytes.Buffer, packetID byte) err
 	}
 }
 
-func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID byte) error {
+func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error {
 	switch packetID {
 	case 0x00: // Login Start
 		var err error
@@ -291,25 +294,14 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID byte) erro
 			return fmt.Errorf("connection closed during login")
 		}
 
-		// Генерируем RSA ключи
-		priv, err := rsa.GenerateKey(rand.Reader, 1024)
-		if err != nil {
-			return fmt.Errorf("generating RSA key: %w", err)
-		}
-
-		pubASN1, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
-		if err != nil {
-			return fmt.Errorf("marshaling public key: %w", err)
-		}
-
 		serverID := ""
 		verifyToken := make([]byte, 4)
 		rand.Read(verifyToken)
 
 		// Отправляем Encryption Request
 		payload := utils.WriteString(serverID)
-		payload = append(payload, utils.WriteVarInt32(int32(len(pubASN1)))...)
-		payload = append(payload, pubASN1...)
+		payload = append(payload, utils.WriteVarInt32(int32(len(publicASN1)))...)
+		payload = append(payload, publicASN1...)
 		payload = append(payload, utils.WriteVarInt32(int32(len(verifyToken)))...)
 		payload = append(payload, verifyToken...)
 
@@ -345,12 +337,12 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID byte) erro
 		}
 
 		// Расшифровываем
-		sharedSecret, err := rsa.DecryptPKCS1v15(rand.Reader, priv, sharedEnc)
+		sharedSecret, err := rsa.DecryptPKCS1v15(rand.Reader, private, sharedEnc)
 		if err != nil {
 			return fmt.Errorf("decrypting shared secret: %w", err)
 		}
 
-		verifyBack, err := rsa.DecryptPKCS1v15(rand.Reader, priv, verifyEnc)
+		verifyBack, err := rsa.DecryptPKCS1v15(rand.Reader, private, verifyEnc)
 		if err != nil {
 			return fmt.Errorf("decrypting verify token: %w", err)
 		}
@@ -362,7 +354,7 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID byte) erro
 
 		// Проверяем через Mojang
 		fmt.Printf("Verifying player %s with Mojang...\n", c.playerName)
-		profile, err := mojang.VerifyWithMojang(c.playerName, serverID, sharedSecret, pubASN1)
+		profile, err := mojang.VerifyWithMojang(c.playerName, serverID, sharedSecret, publicASN1)
 		if err != nil {
 			fmt.Printf("Mojang verification failed: %v\n", err)
 			msg := []byte(`{"text":"Authentication failed: ` + err.Error() + `"}`)
@@ -371,15 +363,15 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID byte) erro
 		}
 		fmt.Printf("✅ Authentication successful: %s (%s)\n", profile.Name, profile.ID)
 
-		// Создаем шифрованное соединение ПОСЛЕ успешной верификации
+		//Создаем шифрованное соединение ПОСЛЕ успешной верификации
 		block, err := aes.NewCipher(sharedSecret)
 		if err != nil {
 			return fmt.Errorf("creating cipher: %w", err)
 		}
 
-		encryptStream := cipher.NewCFBEncrypter(block, sharedSecret)
-		decryptStream := cipher.NewCFBDecrypter(block, sharedSecret)
-		c.conn = utils.WrapEncryptedConn(c.conn, encryptStream, decryptStream)
+		encryptStream := encryption.NewCFB8(block, sharedSecret, false)
+		decryptStream := encryption.NewCFB8(block, sharedSecret, true)
+		c.conn = encryption.WrapEncryptedConn(c.conn, encryptStream, decryptStream)
 		fmt.Println("Encrypted connection established")
 
 		// Отправляем Login Success
@@ -412,7 +404,7 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID byte) erro
 	return nil
 }
 
-func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID byte) error {
+func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error {
 	// Проверяем, не закрыто ли соединение
 	if c.isClosed() {
 		return fmt.Errorf("connection closed")
@@ -474,10 +466,10 @@ func (c *ClientConnection) sendPlayPackets() error {
 		f    func() error
 	}{
 		{"Join Game", func() error { return c.sendJoinGame(c.playerID, registryNBT) }},
-		{"Chunk data", c.sendChunk},
-		{"Light data", c.sendLightData},
+		//{"Chunk data", c.sendChunk},
+		//{"Light data", c.sendLightData},
 		{"Player position", func() error { return c.sendPlayerPosition(0, 64, 0) }},
-		{"Player abilities", c.sendPlayerAbilities},
+		//{"Player abilities", c.sendPlayerAbilities},
 	}
 
 	for _, p := range packets {
@@ -572,59 +564,26 @@ func (c *ClientConnection) sendChunk() error {
 	return c.safeWrite(0x22, payload)
 }
 
+func writeEmptyBitSet(buf *bytes.Buffer) {
+	utils.WriteVarInt32ToBuffer(buf, 0) // length = 0 long'ов
+}
+
 func (c *ClientConnection) sendLightData() error {
-	payload := []byte{}
+	payload := bytes.NewBuffer(nil)
 
-	chunkX := int32(0)
-	chunkZ := int32(0)
+	utils.WriteVarInt32ToBuffer(payload, 0) // chunkX
+	utils.WriteVarInt32ToBuffer(payload, 0) // chunkZ
+	payload.WriteByte(1)                    // trust edges
 
-	payload = append(payload, utils.WriteVarInt32(chunkX)...)
-	payload = append(payload, utils.WriteVarInt32(chunkZ)...)
-	payload = append(payload, 1) // Trust Edges
+	writeEmptyBitSet(payload) // sky mask
+	writeEmptyBitSet(payload) // block mask
+	writeEmptyBitSet(payload) // empty sky mask
+	writeEmptyBitSet(payload) // empty block mask
 
-	// Sky Light Mask
-	skyLightMask := int64(0)
-	for i := 0; i < 24; i++ {
-		skyLightMask |= 1 << i
-	}
-	payload = append(payload, utils.WriteVarInt64(skyLightMask)...)
+	utils.WriteVarInt32ToBuffer(payload, 0) // sky arrays count
+	utils.WriteVarInt32ToBuffer(payload, 0) // block arrays count
 
-	// Block Light Mask
-	blockLightMask := int64(0)
-	for i := 0; i < 24; i++ {
-		blockLightMask |= 1 << i
-	}
-	payload = append(payload, utils.WriteVarInt64(blockLightMask)...)
-
-	// Empty Sky Light Mask
-	payload = append(payload, utils.WriteVarInt64(0)...)
-
-	// Empty Block Light Mask
-	payload = append(payload, utils.WriteVarInt64(0)...)
-
-	// Sky Light arrays
-	payload = append(payload, utils.WriteVarInt32(24)...)
-	for i := 0; i < 24; i++ {
-		if c.isClosed() {
-			return fmt.Errorf("connection closed during light data")
-		}
-		lightData := make([]byte, 2048)
-		payload = append(payload, utils.WriteVarInt32(2048)...)
-		payload = append(payload, lightData...)
-	}
-
-	// Block Light arrays
-	payload = append(payload, utils.WriteVarInt32(24)...)
-	for i := 0; i < 24; i++ {
-		if c.isClosed() {
-			return fmt.Errorf("connection closed during light data")
-		}
-		lightData := make([]byte, 2048)
-		payload = append(payload, utils.WriteVarInt32(2048)...)
-		payload = append(payload, lightData...)
-	}
-
-	return c.safeWrite(0x24, payload)
+	return c.safeWrite(0x24, payload.Bytes())
 }
 
 func (c *ClientConnection) sendPlayerPosition(x, y, z float64) error {
@@ -681,7 +640,7 @@ func buildRegistryNBT() []byte {
 	w.Bool("has_ceiling", false)
 	w.EndCompound() // element
 	w.EndCompound() // dimension entry
-	w.EndCompound() // value list
+	w.EndList()     // value list
 	w.EndCompound() // dimension_type registry
 
 	// Biome Registry
@@ -703,8 +662,31 @@ func buildRegistryNBT() []byte {
 	w.EndCompound() // effects
 	w.EndCompound() // element
 	w.EndCompound() // biome entry
-	w.EndCompound() // value list
+	w.EndList()     // value list
 	w.EndCompound() // biome registry
+
+	// Chat Type Registry
+	w.StartCompound("minecraft:chat_type")
+	w.String("type", "minecraft:chat_type")
+	w.StartList("value", nbt.TagCompound, 1)
+
+	w.StartCompound("")
+	w.String("name", "minecraft:chat")
+	w.Int("id", 0)
+
+	w.StartCompound("element")
+	w.StartCompound("chat")
+	w.String("translation_key", "chat.type.text")
+	w.StartList("parameters", nbt.TagString, 2)
+	w.String("", "sender")
+	w.String("", "content")
+	w.EndList()     // parameters
+	w.EndCompound() // chat
+	w.EndCompound() // element
+
+	w.EndCompound() // entry
+	w.EndList()     // list
+	w.EndCompound() // chat_type registry
 
 	w.EndCompound() // root
 	return w.Bytes()
@@ -731,4 +713,18 @@ func buildEmptyChunkData() []byte {
 		data = append(data, utils.WriteVarInt32(0)...) // Biome data length
 	}
 	return data
+}
+
+func generateRSA() ([]byte, *rsa.PrivateKey, error) {
+	// Генерируем RSA ключи
+	priv, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		return nil, nil, fmt.Errorf("generating RSA key: %w", err)
+	}
+
+	pubASN1, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("marshaling public key: %w", err)
+	}
+	return pubASN1, priv, nil
 }
