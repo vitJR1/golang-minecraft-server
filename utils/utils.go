@@ -2,6 +2,7 @@ package utils
 
 import (
 	"bytes"
+	"crypto/md5"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -10,8 +11,10 @@ import (
 	"net"
 )
 
-const SegmentBits = 0x7F
-const ContinueBit = 0x80
+const (
+	SegmentBits = 0x7F
+	ContinueBit = 0x80
+)
 
 // ReadPacket читает полный пакет из соединения (длина + данные)
 func ReadPacket(conn net.Conn) (*bytes.Buffer, error) {
@@ -142,31 +145,6 @@ func ReadVarInt(buf *bytes.Buffer) (int, error) {
 	return value, nil
 }
 
-func ReadVarInt32(buf *bytes.Buffer) (int32, error) {
-	var result uint32
-	var shift uint
-
-	for {
-		if buf.Len() == 0 {
-			return 0, errors.New("unexpected end of buffer while reading VarInt")
-		}
-		b, err := buf.ReadByte()
-		if err != nil {
-			return 0, err
-		}
-		result |= uint32(b&SegmentBits) << shift
-
-		if b&ContinueBit == 0 {
-			break
-		}
-		shift += 7
-		if shift > 35 {
-			return 0, errors.New("VarInt is too long")
-		}
-	}
-	return int32(result), nil
-}
-
 // ReadVarIntFromBytes читает VarInt из среза байт
 func ReadVarIntFromBytes(data []byte) (value int, bytesRead int, err error) {
 	var numRead int
@@ -199,10 +177,10 @@ func WriteVarInt32(value int32) []byte {
 	u := uint32(value)
 
 	for {
-		b := byte(u & SegmentBits)
+		b := byte(u & 0x7F)
 		u >>= 7
 		if u != 0 {
-			b |= ContinueBit
+			b |= 0x80
 		}
 		buf = append(buf, b)
 		if u == 0 {
@@ -211,45 +189,6 @@ func WriteVarInt32(value int32) []byte {
 	}
 
 	return buf
-}
-
-// WriteVarInt64 записывает int64 как VarInt
-func WriteVarInt64(value int64) []byte {
-	buf := make([]byte, 0, 10)
-	u := uint64(value)
-
-	for {
-		b := byte(u & SegmentBits)
-		u >>= 7
-		if u != 0 {
-			b |= ContinueBit
-		}
-		buf = append(buf, b)
-		if u == 0 {
-			break
-		}
-	}
-
-	return buf
-}
-
-// ReadString читает строку с префиксом VarInt из io.Reader
-func ReadString(r io.Reader) (string, error) {
-	length, err := ReadVarIntFromReader(r)
-	if err != nil {
-		return "", fmt.Errorf("failed to read string length: %w", err)
-	}
-
-	if length < 0 {
-		return "", errors.New("negative string length")
-	}
-
-	buf := make([]byte, length)
-	if _, err := io.ReadFull(r, buf); err != nil {
-		return "", fmt.Errorf("failed to read string data: %w", err)
-	}
-
-	return string(buf), nil
 }
 
 // ReadStringFromBuf читает строку с префиксом VarInt из bytes.Buffer
@@ -279,45 +218,10 @@ func ReadStringFromBuf(buf *bytes.Buffer) (string, error) {
 func WriteString(s string) []byte {
 	data := []byte(s)
 	length := WriteVarInt32(int32(len(data)))
-	return append(length, data...)
-}
-
-// ReadUShort читает uint16 из io.Reader
-func ReadUShort(r io.Reader) (uint16, error) {
-	var buf [2]byte
-	if _, err := io.ReadFull(r, buf[:]); err != nil {
-		return 0, fmt.Errorf("failed to read uint16: %w", err)
-	}
-	return binary.BigEndian.Uint16(buf[:]), nil
-}
-
-// WriteUInt16 записывает uint16 как 2 байта (big endian)
-func WriteUInt16(value uint16) []byte {
-	buf := make([]byte, 2)
-	binary.BigEndian.PutUint16(buf, value)
-	return buf
-}
-
-// ReadByteArray читает массив байт с префиксом VarInt
-func ReadByteArray(data []byte) (out []byte, rest []byte, err error) {
-	length, bytesRead, err := ReadVarIntFromBytes(data)
-	if err != nil {
-		return nil, data, fmt.Errorf("failed to read byte array length: %w", err)
-	}
-	if bytesRead == 0 {
-		return nil, data, errors.New("no bytes read for byte array length")
-	}
-	if length < 0 {
-		return nil, data, errors.New("negative byte array length")
-	}
-
-	if len(data) < bytesRead+length {
-		return nil, data, fmt.Errorf("insufficient data for byte array: need %d, have %d", bytesRead+length, len(data))
-	}
-
-	out = data[bytesRead : bytesRead+length]
-	rest = data[bytesRead+length:]
-	return out, rest, nil
+	out := make([]byte, 0, len(length)+len(data))
+	out = append(out, length...)
+	out = append(out, data...)
+	return out
 }
 
 // ReadByteArrayFromBuf читает массив байт с префиксом VarInt из bytes.Buffer
@@ -381,19 +285,6 @@ func WriteDouble(value float64) []byte {
 	return buf
 }
 
-// ReadFloat читает float32 из bytes.Buffer
-func ReadFloat(buf *bytes.Buffer) (float32, error) {
-	if buf.Len() < 4 {
-		return 0, fmt.Errorf("insufficient data for float: need 4, have %d", buf.Len())
-	}
-
-	var value float32
-	if err := binary.Read(buf, binary.BigEndian, &value); err != nil {
-		return 0, fmt.Errorf("failed to read float: %w", err)
-	}
-	return value, nil
-}
-
 // WriteFloat записывает float32 как 4 байта (big endian)
 func WriteFloat(value float32) []byte {
 	buf := make([]byte, 4)
@@ -415,27 +306,6 @@ func ReadBool(buf *bytes.Buffer) (bool, error) {
 	return b != 0, nil
 }
 
-// WriteBool записывает булево значение как 1 байт
-func WriteBool(value bool) []byte {
-	if value {
-		return []byte{1}
-	}
-	return []byte{0}
-}
-
-// ReadShort читает int16 из bytes.Buffer
-func ReadShort(buf *bytes.Buffer) (int16, error) {
-	if buf.Len() < 2 {
-		return 0, fmt.Errorf("insufficient data for short: need 2, have %d", buf.Len())
-	}
-
-	var value int16
-	if err := binary.Read(buf, binary.BigEndian, &value); err != nil {
-		return 0, fmt.Errorf("failed to read short: %w", err)
-	}
-	return value, nil
-}
-
 // WriteShort записывает int16 как 2 байта (big endian)
 func WriteShort(value int16) []byte {
 	buf := make([]byte, 2)
@@ -443,46 +313,11 @@ func WriteShort(value int16) []byte {
 	return buf
 }
 
-// ReadInt читает int32 из bytes.Buffer
-func ReadInt(buf *bytes.Buffer) (int32, error) {
-	if buf.Len() < 4 {
-		return 0, fmt.Errorf("insufficient data for int: need 4, have %d", buf.Len())
-	}
-
-	var value int32
-	if err := binary.Read(buf, binary.BigEndian, &value); err != nil {
-		return 0, fmt.Errorf("failed to read int: %w", err)
-	}
-	return value, nil
-}
-
 // WriteInt записывает int32 как 4 байта (big endian)
 func WriteInt(value int32) []byte {
 	buf := make([]byte, 4)
 	binary.BigEndian.PutUint32(buf, uint32(value))
 	return buf
-}
-
-// ReadByte читает один байт из bytes.Buffer
-func ReadByte(buf *bytes.Buffer) (byte, error) {
-	if buf.Len() < 1 {
-		return 0, fmt.Errorf("insufficient data for byte: need 1, have %d", buf.Len())
-	}
-	return buf.ReadByte()
-}
-
-// ReadFull читает точное количество байт из io.Reader
-func ReadFull(r io.Reader, length int) ([]byte, error) {
-	if length < 0 {
-		return nil, errors.New("negative read length")
-	}
-
-	data := make([]byte, length)
-	_, err := io.ReadFull(r, data)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read %d bytes: %w", length, err)
-	}
-	return data, nil
 }
 
 func ReadUShortFromBuf(buf *bytes.Buffer) (uint16, error) {
@@ -494,14 +329,6 @@ func ReadUShortFromBuf(buf *bytes.Buffer) (uint16, error) {
 		return 0, err
 	}
 	return value, nil
-}
-
-// ReadByteFromBuf читает один байт из bytes.Buffer
-func ReadByteFromBuf(buf *bytes.Buffer) (byte, error) {
-	if buf.Len() < 1 {
-		return 0, fmt.Errorf("insufficient data for byte: need 1, have %d", buf.Len())
-	}
-	return buf.ReadByte()
 }
 
 func WriteVarInt32ToBuffer(buf *bytes.Buffer, value int32) {
@@ -519,17 +346,17 @@ func WriteVarInt32ToBuffer(buf *bytes.Buffer, value int32) {
 	}
 }
 
-func WriteVarInt64ToBuffer(buf *bytes.Buffer, value int64) {
-	u := uint64(value)
-	for {
-		b := byte(u & SegmentBits)
-		u >>= 7
-		if u != 0 {
-			b |= ContinueBit
-		}
-		buf.WriteByte(b)
-		if u == 0 {
-			break
-		}
-	}
+func OfflineUUID(name string) string {
+	sum := md5.Sum([]byte("OfflinePlayer:" + name))
+	b := sum[:]
+	b[6] = (b[6] & 0x0f) | 0x30
+	b[8] = (b[8] & 0x3f) | 0x80
+
+	return fmt.Sprintf("%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+		b[0], b[1], b[2], b[3],
+		b[4], b[5],
+		b[6], b[7],
+		b[8], b[9],
+		b[10], b[11], b[12], b[13], b[14], b[15],
+	)
 }

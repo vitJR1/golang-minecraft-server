@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"minecraft-server/cfg"
@@ -70,29 +71,28 @@ func (c *ClientConnection) safeWrite(packetID int32, payload []byte) error {
 		return fmt.Errorf("connection already closed")
 	}
 
-	// Устанавливаем таймаут на запись
-	c.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	_ = c.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	defer c.conn.SetWriteDeadline(time.Time{})
 
-	err := utils.WritePacket(c.conn, packetID, payload)
-	if err != nil {
-		// Проверяем тип ошибки
-		if c.isClosed() {
-			return fmt.Errorf("connection closed during write")
+	if err := utils.WritePacket(c.conn, packetID, payload); err != nil {
+		// timeout?
+		if ne, ok := err.(net.Error); ok && ne.Timeout() {
+			// можно не закрывать, а вернуть ошибку наверх
+			return fmt.Errorf("write timeout: %w", err)
 		}
 
-		// Проверяем на специфические ошибки сети
-		if opErr, ok := err.(*net.OpError); ok {
-			if opErr.Err.Error() == "write: broken pipe" ||
-				opErr.Err.Error() == "connection reset by peer" {
-				c.cleanup()
-				return fmt.Errorf("client disconnected: %v", err)
-			}
+		// клиент закрылся / pipe
+		// (лучше errors.Is + syscall, но даже так лучше чем строки)
+		var op *net.OpError
+		if errors.As(err, &op) {
+			c.cleanup()
+			return fmt.Errorf("client disconnected: %w", err)
 		}
 
 		c.cleanup()
 		return fmt.Errorf("write error: %w", err)
 	}
+
 	return nil
 }
 
@@ -112,7 +112,7 @@ func (c *ClientConnection) keepAlive() {
 			keepAliveID := time.Now().UnixNano()
 			payload := utils.WriteLong(keepAliveID)
 
-			err := c.safeWrite(0x21, payload)
+			err := c.safeWrite(Pong, payload)
 			if err != nil {
 				fmt.Printf("Keep-alive error: %v\n", err)
 				return
@@ -299,92 +299,110 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 			return fmt.Errorf("connection closed during login")
 		}
 
-		verifyToken := make([]byte, 4)
-		rand.Read(verifyToken)
+		if cfg.OnlineMode {
+			fmt.Printf("Online mode enabled, will verify player %s with Mojang\n", c.playerName)
+			verifyToken := make([]byte, 4)
+			rand.Read(verifyToken)
 
-		// Отправляем Encryption Request
-		payload := utils.WriteString(cfg.ServerId)
-		payload = append(payload, utils.WriteVarInt32(int32(len(publicKey)))...)
-		payload = append(payload, publicKey...)
-		payload = append(payload, utils.WriteVarInt32(int32(len(verifyToken)))...)
-		payload = append(payload, verifyToken...)
+			// Отправляем Encryption Request
+			payload := utils.WriteString(cfg.ServerId)
+			payload = append(payload, utils.WriteVarInt32(int32(len(publicKey)))...)
+			payload = append(payload, publicKey...)
+			payload = append(payload, utils.WriteVarInt32(int32(len(verifyToken)))...)
+			payload = append(payload, verifyToken...)
 
-		if err := c.safeWrite(0x01, payload); err != nil {
-			return fmt.Errorf("sending encryption request: %w", err)
-		}
-		fmt.Println("Sent encryption request")
-
-		// Читаем Encryption Response через обычное соединение (еще не зашифровано)
-		id, data, err := utils.ReadPacket2(c.conn)
-		if err != nil {
-			// Если клиент отключился во время чтения, просто выходим
-			if c.isClosed() {
-				return nil
+			if err := c.safeWrite(0x01, payload); err != nil {
+				return fmt.Errorf("sending encryption request: %w", err)
 			}
-			return fmt.Errorf("reading encryption response: %w", err)
-		}
-		if id != 0x01 {
-			return fmt.Errorf("expected encryption response (0x01), got 0x%02X", id)
-		}
-		fmt.Println("Received encryption response")
+			fmt.Println("Sent encryption request")
 
-		// Парсим ответ
-		dataBuf := bytes.NewBuffer(data)
-		sharedEnc, err := utils.ReadByteArrayFromBuf(dataBuf)
-		if err != nil {
-			return fmt.Errorf("reading shared secret: %w", err)
-		}
+			// Читаем Encryption Response через обычное соединение (еще не зашифровано)
+			id, data, err := utils.ReadPacket2(c.conn)
+			if err != nil {
+				// Если клиент отключился во время чтения, просто выходим
+				if c.isClosed() {
+					return nil
+				}
+				return fmt.Errorf("reading encryption response: %w", err)
+			}
+			if id != 0x01 {
+				return fmt.Errorf("expected encryption response (0x01), got 0x%02X", id)
+			}
+			fmt.Println("Received encryption response")
 
-		verifyEnc, err := utils.ReadByteArrayFromBuf(dataBuf)
-		if err != nil {
-			return fmt.Errorf("reading verify token: %w", err)
-		}
+			// Парсим ответ
+			dataBuf := bytes.NewBuffer(data)
+			sharedEnc, err := utils.ReadByteArrayFromBuf(dataBuf)
+			if err != nil {
+				return fmt.Errorf("reading shared secret: %w", err)
+			}
 
-		// Расшифровываем
-		sharedSecret, err := rsa.DecryptPKCS1v15(rand.Reader, private, sharedEnc)
-		if err != nil {
-			return fmt.Errorf("decrypting shared secret: %w", err)
-		}
+			verifyEnc, err := utils.ReadByteArrayFromBuf(dataBuf)
+			if err != nil {
+				return fmt.Errorf("reading verify token: %w", err)
+			}
 
-		verifyBack, err := rsa.DecryptPKCS1v15(rand.Reader, private, verifyEnc)
-		if err != nil {
-			return fmt.Errorf("decrypting verify token: %w", err)
-		}
+			// Расшифровываем
+			sharedSecret, err := rsa.DecryptPKCS1v15(rand.Reader, private, sharedEnc)
+			if err != nil {
+				return fmt.Errorf("decrypting shared secret: %w", err)
+			}
 
-		if !bytes.Equal(verifyBack, verifyToken) {
-			return fmt.Errorf("verify token mismatch")
-		}
-		fmt.Println("Encryption verification successful")
+			verifyBack, err := rsa.DecryptPKCS1v15(rand.Reader, private, verifyEnc)
+			if err != nil {
+				return fmt.Errorf("decrypting verify token: %w", err)
+			}
 
-		// Проверяем через Mojang
-		fmt.Printf("Verifying player %s with Mojang...\n", c.playerName)
-		profile, err := mojang.VerifyWithMojang(c.playerName, cfg.ServerId, sharedSecret, publicKey)
-		if err != nil {
-			fmt.Printf("Mojang verification failed: %v\n", err)
-			msg := []byte(`{"text":"Authentication failed: ` + err.Error() + `"}`)
-			c.safeWrite(0x00, utils.WriteString(string(msg)))
-			return fmt.Errorf("mojang verification: %w", err)
-		}
-		fmt.Printf("✅ Authentication successful: %s (%s)\n", profile.Name, profile.ID)
+			if !bytes.Equal(verifyBack, verifyToken) {
+				return fmt.Errorf("verify token mismatch")
+			}
+			fmt.Println("Encryption verification successful")
 
-		//Создаем шифрованное соединение ПОСЛЕ успешной верификации
-		block, err := aes.NewCipher(sharedSecret)
-		if err != nil {
-			return fmt.Errorf("creating cipher: %w", err)
-		}
+			// Проверяем через Mojang
+			fmt.Printf("Verifying player %s with Mojang...\n", c.playerName)
+			profile, err := mojang.VerifyWithMojang(c.playerName, cfg.ServerId, sharedSecret, publicKey)
+			if err != nil {
+				fmt.Printf("Mojang verification failed: %v\n", err)
+				msg := []byte(`{"text":"Authentication failed: ` + err.Error() + `"}`)
+				c.safeWrite(0x00, utils.WriteString(string(msg)))
+				return fmt.Errorf("mojang verification: %w", err)
+			}
+			fmt.Printf("✅ Authentication successful: %s (%s)\n", profile.Name, profile.ID)
 
-		encryptStream := encryption.NewCFB8(block, sharedSecret, false)
-		decryptStream := encryption.NewCFB8(block, sharedSecret, true)
-		c.conn = encryption.WrapEncryptedConn(c.conn, encryptStream, decryptStream)
-		fmt.Println("Encrypted connection established")
+			//Создаем шифрованное соединение ПОСЛЕ успешной верификации
+			block, err := aes.NewCipher(sharedSecret)
+			if err != nil {
+				return fmt.Errorf("creating cipher: %w", err)
+			}
 
-		// Отправляем Login Success
-		payload = utils.WriteString(profile.ID)
-		payload = append(payload, utils.WriteString(profile.Name)...)
-		if err := c.safeWrite(0x02, payload); err != nil {
-			return fmt.Errorf("sending login success: %w", err)
+			encryptStream := encryption.NewCFB8(block, sharedSecret, false)
+			decryptStream := encryption.NewCFB8(block, sharedSecret, true)
+			c.conn = encryption.WrapEncryptedConn(c.conn, encryptStream, decryptStream)
+			fmt.Println("Encrypted connection established")
+
+			// Отправляем Login Success
+			payload = utils.WriteString(profile.ID)
+			payload = append(payload, utils.WriteString(profile.Name)...)
+			if err := c.safeWrite(LoginSuccess, payload); err != nil {
+				return fmt.Errorf("sending login success: %w", err)
+			}
+			fmt.Println("Sent login success")
+		} else {
+			uuid := utils.OfflineUUID(c.playerName)
+
+			fmt.Println("Player uuid", uuid)
+
+			payload := []byte{}
+			payload = append(payload, utils.WriteString("69a19ea74f2e4a68bbe262363c7aeaf0")...)
+			payload = append(payload, utils.WriteString(c.playerName)...)
+			payload = append(payload, utils.WriteVarInt32(0)...) // properties count = 0
+
+			if err := c.safeWrite(LoginSuccess, payload); err != nil {
+				return fmt.Errorf("sending login success: %w", err)
+			}
+
+			c.state = "play"
 		}
-		fmt.Println("Sent login success")
 
 		// Переходим в play состояние
 		c.state = "play"
@@ -468,14 +486,16 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 func (c *ClientConnection) sendPlayPackets() error {
 	registryNBT := nbt.BuildRegistryNBT()
 
+	fmt.Println("registryNBT length", len(registryNBT))
+
 	// Проверяем соединение перед каждой отправкой
 	packets := []struct {
 		name string
 		f    func() error
 	}{
-		{"Join Game", func() error { return c.sendJoinGame(c.playerID, registryNBT) }},
-		//{"Chunk Data", c.sendChunkData},
-		//{"Update Light", func() error { return c.sendUpdateLight(0, 0) }},
+		{"Join Game", func() error { return c.sendJoinGame(registryNBT) }},
+		{"Chunk Data", c.sendChunkData},
+		{"Update Light", func() error { return c.sendUpdateLight(0, 0) }},
 		{"Player abilities", c.sendPlayerAbilities},
 		{"Player position", func() error { return c.sendPlayerPosition(0, 64, 0) }},
 	}
@@ -505,11 +525,11 @@ func (c *ClientConnection) sendPlayPackets() error {
 }
 
 // Методы для отправки пакетов
-func (c *ClientConnection) sendJoinGame(playerID int32, registryNBT []byte) error {
+func (c *ClientConnection) sendJoinGame(registryNBT []byte) error {
 	payload := []byte{}
 
 	// 1. Entity ID (int)
-	payload = append(payload, utils.WriteInt(playerID)...)
+	payload = append(payload, utils.WriteInt(c.playerID)...)
 
 	// 2. Is hardcore (boolean) - 0 = false, 1 = true
 	payload = append(payload, 0)
@@ -526,6 +546,8 @@ func (c *ClientConnection) sendJoinGame(playerID int32, registryNBT []byte) erro
 
 	// 6. Dimension names (array of strings)
 	payload = append(payload, utils.WriteString("minecraft:overworld")...)
+	payload = append(payload, utils.WriteString("minecraft:the_nether")...)
+	payload = append(payload, utils.WriteString("minecraft:the_end")...)
 
 	// 7. Registry codec (NBT)
 	payload = append(payload, registryNBT...)
@@ -558,7 +580,7 @@ func (c *ClientConnection) sendJoinGame(playerID int32, registryNBT []byte) erro
 	payload = append(payload, 0)
 
 	// 17. Is flat (boolean)
-	payload = append(payload, 1)
+	payload = append(payload, 0)
 
 	// 18. Death location (optional) - 0 = no death location
 	payload = append(payload, 0)

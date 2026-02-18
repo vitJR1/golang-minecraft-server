@@ -160,3 +160,8 @@ func (w *Writer) StartCompoundPayload() {
 func (w *Writer) EndCompoundPayload() {
 	w.buf.WriteByte(TagEnd)
 }
+
+// Пишем TAG_* БЕЗ имени (для payload list<TagString> и т.п.)
+func (w *Writer) writeUnnamedTag(tag byte) {
+	w.buf.WriteByte(tag)
+}
