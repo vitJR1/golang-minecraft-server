@@ -108,15 +108,6 @@ func (w *Writer) IntArray(name string, value []int32) {
 }
 
 // Write an int array
-func (w *Writer) IntArray64(name string, value []int64) {
-	w.writeTagHeader(TagIntArray, name)
-	binary.Write(&w.buf, binary.BigEndian, int64(len(value)))
-	for _, v := range value {
-		binary.Write(&w.buf, binary.BigEndian, v)
-	}
-}
-
-// Write a long array
 func (w *Writer) LongArray(name string, value []int64) {
 	w.writeTagHeader(TagLongArray, name)
 	binary.Write(&w.buf, binary.BigEndian, int32(len(value)))
@@ -153,4 +144,19 @@ func (w *Writer) writeTagHeader(tag byte, name string) {
 func (w *Writer) WriteRootCompound() {
 	w.buf.WriteByte(TagCompound)
 	w.WriteString("") // Empty string for root name
+}
+
+// Пишет NBT string payload (без tag header)
+func (w *Writer) StringPayload(value string) {
+	w.WriteString(value) // u16 length + bytes
+}
+
+// Начать compound payload (для элемента list<TagCompound>) — без tag header
+func (w *Writer) StartCompoundPayload() {
+	// ничего не пишем, compound payload начинается сразу с вложенных тегов
+}
+
+// Закончить compound payload — TagEnd
+func (w *Writer) EndCompoundPayload() {
+	w.buf.WriteByte(TagEnd)
 }

@@ -5,18 +5,24 @@ import (
 	"crypto/aes"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
+	"minecraft-server/cfg"
+	"minecraft-server/chunk"
 	"minecraft-server/encryption"
 	"minecraft-server/mojang"
 	"minecraft-server/nbt"
+	"minecraft-server/server"
 	"minecraft-server/utils"
 	"net"
 	"sync/atomic"
 	"time"
 )
+
+var encryptionReq, private, e = server.NewEncryptionRequest()
+
+var publicKey = encryptionReq.PublicKey
 
 type ClientConnection struct {
 	conn       net.Conn
@@ -26,8 +32,6 @@ type ClientConnection struct {
 	closed     int32 // atomic flag
 	done       chan struct{}
 }
-
-var publicASN1, private, _ = generateRSA()
 
 func HandleConn(conn net.Conn) {
 	client := &ClientConnection{
@@ -178,6 +182,7 @@ func (c *ClientConnection) handleReadError(err error) {
 func (c *ClientConnection) processPacket(packet *bytes.Buffer) error {
 	fmt.Println("Processing packet in state:", c.state)
 	packetID, err := utils.ReadVarInt(packet)
+	fmt.Println("Reading packet ID:", packetID)
 	if err != nil {
 		return fmt.Errorf("reading packet ID: %w", err)
 	}
@@ -197,7 +202,7 @@ func (c *ClientConnection) processPacket(packet *bytes.Buffer) error {
 }
 
 func (c *ClientConnection) handleHandshake(packet *bytes.Buffer, packetID int) error {
-	if packetID != 0x00 {
+	if packetID != Check {
 		return fmt.Errorf("expected handshake packet (0x00), got 0x%02X", packetID)
 	}
 
@@ -238,7 +243,7 @@ func (c *ClientConnection) handleHandshake(packet *bytes.Buffer, packetID int) e
 
 func (c *ClientConnection) handleStatus(packet *bytes.Buffer, packetID int) error {
 	switch packetID {
-	case 0x00: // Status Request
+	case Status: // Status Request
 		fmt.Println("Received status request")
 		resp := map[string]any{
 			"version": map[string]any{
@@ -257,7 +262,7 @@ func (c *ClientConnection) handleStatus(packet *bytes.Buffer, packetID int) erro
 		response := utils.WriteString(string(data))
 		return c.safeWrite(0x00, response)
 
-	case 0x01: // Ping
+	case Ping: // Ping
 		fmt.Println("Received ping")
 		payload := make([]byte, 8)
 		if _, err := packet.Read(payload); err != nil {
@@ -280,7 +285,7 @@ func (c *ClientConnection) handleStatus(packet *bytes.Buffer, packetID int) erro
 
 func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error {
 	switch packetID {
-	case 0x00: // Login Start
+	case LoginStart: // Login Start
 		var err error
 		c.playerName, err = utils.ReadStringFromBuf(packet)
 		if err != nil {
@@ -294,14 +299,13 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 			return fmt.Errorf("connection closed during login")
 		}
 
-		serverID := ""
 		verifyToken := make([]byte, 4)
 		rand.Read(verifyToken)
 
 		// Отправляем Encryption Request
-		payload := utils.WriteString(serverID)
-		payload = append(payload, utils.WriteVarInt32(int32(len(publicASN1)))...)
-		payload = append(payload, publicASN1...)
+		payload := utils.WriteString(cfg.ServerId)
+		payload = append(payload, utils.WriteVarInt32(int32(len(publicKey)))...)
+		payload = append(payload, publicKey...)
 		payload = append(payload, utils.WriteVarInt32(int32(len(verifyToken)))...)
 		payload = append(payload, verifyToken...)
 
@@ -354,7 +358,7 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 
 		// Проверяем через Mojang
 		fmt.Printf("Verifying player %s with Mojang...\n", c.playerName)
-		profile, err := mojang.VerifyWithMojang(c.playerName, serverID, sharedSecret, publicASN1)
+		profile, err := mojang.VerifyWithMojang(c.playerName, cfg.ServerId, sharedSecret, publicKey)
 		if err != nil {
 			fmt.Printf("Mojang verification failed: %v\n", err)
 			msg := []byte(`{"text":"Authentication failed: ` + err.Error() + `"}`)
@@ -411,14 +415,14 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 	}
 
 	switch packetID {
-	case 0x15: // Keep Alive response
+	case KeepAlive: // Keep Alive response
 		id, err := utils.ReadLong(packet)
 		if err != nil {
 			return fmt.Errorf("reading keep alive response: %w", err)
 		}
 		fmt.Printf("Received keep alive response: %d\n", id)
 
-	case 0x1A: // Chat message
+	case ChatMessage: // Chat message
 		message, err := utils.ReadStringFromBuf(packet)
 		if err != nil {
 			return fmt.Errorf("reading chat message: %w", err)
@@ -431,7 +435,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			c.safeWrite(0x1A, utils.WriteString(response))
 		}
 
-	case 0x1B: // Player position
+	case PlayerPosition: // Player position
 		x, err := utils.ReadDouble(packet)
 		if err != nil {
 			return fmt.Errorf("reading position X: %w", err)
@@ -450,6 +454,10 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		}
 		fmt.Printf("Player position: %.2f, %.2f, %.2f, onGround: %v\n", x, y, z, onGround)
 
+	case TeleportConfirm: // Teleport Confirm (serverbound)
+		id, _ := utils.ReadVarInt(packet)
+		fmt.Println("Teleport confirmed:", id)
+
 	default:
 		fmt.Printf("Unknown play packet: 0x%02X, length: %d\n", packetID, packet.Len())
 	}
@@ -458,7 +466,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 }
 
 func (c *ClientConnection) sendPlayPackets() error {
-	registryNBT := buildRegistryNBT()
+	registryNBT := nbt.BuildRegistryNBT()
 
 	// Проверяем соединение перед каждой отправкой
 	packets := []struct {
@@ -466,10 +474,10 @@ func (c *ClientConnection) sendPlayPackets() error {
 		f    func() error
 	}{
 		{"Join Game", func() error { return c.sendJoinGame(c.playerID, registryNBT) }},
-		//{"Chunk data", c.sendChunk},
-		//{"Light data", c.sendLightData},
+		//{"Chunk Data", c.sendChunkData},
+		//{"Update Light", func() error { return c.sendUpdateLight(0, 0) }},
+		{"Player abilities", c.sendPlayerAbilities},
 		{"Player position", func() error { return c.sendPlayerPosition(0, 64, 0) }},
-		//{"Player abilities", c.sendPlayerAbilities},
 	}
 
 	for _, p := range packets {
@@ -487,8 +495,10 @@ func (c *ClientConnection) sendPlayPackets() error {
 		}
 
 		// Небольшая задержка между пакетами
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
+
+	//time.Sleep(5000 * time.Millisecond)
 
 	fmt.Println("All play packets sent successfully")
 	return nil
@@ -498,96 +508,185 @@ func (c *ClientConnection) sendPlayPackets() error {
 func (c *ClientConnection) sendJoinGame(playerID int32, registryNBT []byte) error {
 	payload := []byte{}
 
-	payload = append(payload, utils.WriteVarInt32(playerID)...)
-	payload = append(payload, 0)   // hardcore
-	payload = append(payload, 1)   // gamemode
-	payload = append(payload, 255) // previous gamemode
+	// 1. Entity ID (int)
+	payload = append(payload, utils.WriteInt(playerID)...)
 
+	// 2. Is hardcore (boolean) - 0 = false, 1 = true
+	payload = append(payload, 0)
+
+	// 3. Gamemode (unsigned byte)
+	// 0: survival, 1: creative, 2: adventure, 3: spectator
+	payload = append(payload, 1) // creative для теста, можно 0 для survival
+
+	// 4. Previous gamemode (byte) - -1 = none
+	payload = append(payload, 255) // -1 as byte
+
+	// 5. Dimension count (VarInt)
 	payload = append(payload, utils.WriteVarInt32(1)...)
+
+	// 6. Dimension names (array of strings)
 	payload = append(payload, utils.WriteString("minecraft:overworld")...)
 
+	// 7. Registry codec (NBT)
 	payload = append(payload, registryNBT...)
 
-	payload = append(payload, utils.WriteString("minecraft:overworld")...)
+	// 8. Current dimension (String)
 	payload = append(payload, utils.WriteString("minecraft:overworld")...)
 
+	// 9. World name (String)
+	payload = append(payload, utils.WriteString("minecraft:overworld")...)
+
+	// 10. Hashed seed (long)
 	payload = append(payload, utils.WriteLong(0)...)
+
+	// 11. Max players (VarInt) - игнорируется клиентом, но обязателен
 	payload = append(payload, utils.WriteVarInt32(20)...)
+
+	// 12. View distance (VarInt) - чанков
 	payload = append(payload, utils.WriteVarInt32(10)...)
+
+	// 13. Simulation distance (VarInt) - чанков
 	payload = append(payload, utils.WriteVarInt32(10)...)
 
-	payload = append(payload, 0) // reduced debug info
-	payload = append(payload, 1) // respawn screen
-	payload = append(payload, 0) // is debug
-	payload = append(payload, 1) // is flat
+	// 14. Reduced debug info (boolean)
+	payload = append(payload, 0)
 
-	payload = append(payload, 0)                         // no death location
-	payload = append(payload, utils.WriteVarInt32(0)...) // portal cooldown
+	// 15. Enable respawn screen (boolean)
+	payload = append(payload, 1)
 
-	return c.safeWrite(0x28, payload)
+	// 16. Is debug (boolean)
+	payload = append(payload, 0)
+
+	// 17. Is flat (boolean)
+	payload = append(payload, 1)
+
+	// 18. Death location (optional) - 0 = no death location
+	payload = append(payload, 0)
+
+	// 19. Portal cooldown (VarInt) - добавлено в 1.20
+	payload = append(payload, utils.WriteVarInt32(0)...)
+
+	return c.safeWrite(SendJoinGamePosition, payload)
 }
 
-func (c *ClientConnection) sendChunk() error {
-	payload := []byte{}
+func (c *ClientConnection) sendChunkAndUpdateLight() error {
+	buf := bytes.NewBuffer(nil)
 
 	chunkX := int32(0)
 	chunkZ := int32(0)
 
-	payload = append(payload, utils.WriteVarInt32(chunkX)...)
-	payload = append(payload, utils.WriteVarInt32(chunkZ)...)
-	payload = append(payload, 1) // Ground-Up Continuous
+	// 1. Chunk position
+	buf.Write(utils.WriteInt(chunkX))
+	buf.Write(utils.WriteInt(chunkZ))
 
-	// Primary Bit Mask (24 sections)
-	primaryBitMask := int32(0)
-	for i := 0; i < 24; i++ {
-		primaryBitMask |= 1 << i
-	}
-	payload = append(payload, utils.WriteVarInt32(primaryBitMask)...)
+	// 2. Heightmaps (NBT compound)
+	heightmaps := nbt.BuildHeightmapsNBT()
+	buf.Write(heightmaps)
 
-	// Heightmaps
-	heightmaps := buildHeightmapsNBT()
-	payload = append(payload, heightmaps...)
+	// 3. Chunk Data
+	chunkData := chunk.BuildEmptyChunkData()
+	utils.WriteVarInt32ToBuffer(buf, int32(len(chunkData)))
+	buf.Write(chunkData)
 
-	// Biomes (1024 ints)
-	for i := 0; i < 1024; i++ {
-		payload = append(payload, utils.WriteVarInt32(0)...)
-	}
+	// 4. Block entities count
+	utils.WriteVarInt32ToBuffer(buf, 0)
 
-	// Chunk data
-	chunkData := buildEmptyChunkData()
-	payload = append(payload, utils.WriteVarInt32(int32(len(chunkData)))...)
-	payload = append(payload, chunkData...)
+	// 5. Light Data (встроенный)
+	buf.WriteByte(1) // trust edges = true
 
-	// Block Entities
-	payload = append(payload, utils.WriteVarInt32(0)...)
+	utils.WriteVarInt32ToBuffer(buf, 0) // sky light mask
+	utils.WriteVarInt32ToBuffer(buf, 0) // block light mask
+	utils.WriteVarInt32ToBuffer(buf, 0) // empty sky mask
+	utils.WriteVarInt32ToBuffer(buf, 0) // empty block mask
 
-	return c.safeWrite(0x22, payload)
+	utils.WriteVarInt32ToBuffer(buf, 0) // sky arrays count
+	utils.WriteVarInt32ToBuffer(buf, 0) // block arrays count
+
+	return c.safeWrite(0x22, buf.Bytes())
 }
 
-func writeEmptyBitSet(buf *bytes.Buffer) {
-	utils.WriteVarInt32ToBuffer(buf, 0) // length = 0 long'ов
+func (c *ClientConnection) sendChunkData() error {
+	buf := bytes.NewBuffer(nil)
+
+	chunkX := int32(0)
+	chunkZ := int32(0)
+
+	// Chunk X/Z — INT
+	buf.Write(utils.WriteInt(chunkX))
+	buf.Write(utils.WriteInt(chunkZ))
+
+	// Heightmaps NBT
+	buf.Write(nbt.BuildHeightmapsNBT())
+
+	// Chunk Data
+	chunkData := chunk.BuildEmptyChunkData()
+	utils.WriteVarInt32ToBuffer(buf, int32(len(chunkData)))
+	buf.Write(chunkData)
+
+	// Block entities count
+	utils.WriteVarInt32ToBuffer(buf, 0)
+
+	return c.safeWrite(0x22, buf.Bytes())
 }
 
-func (c *ClientConnection) sendLightData() error {
-	payload := bytes.NewBuffer(nil)
+func (c *ClientConnection) sendUpdateLight(chunkX, chunkZ int32) error {
+	buf := bytes.NewBuffer(nil)
 
-	utils.WriteVarInt32ToBuffer(payload, 0) // chunkX
-	utils.WriteVarInt32ToBuffer(payload, 0) // chunkZ
-	payload.WriteByte(1)                    // trust edges
+	// Chunk X/Z — VarInt (как в твоей таблице)
+	utils.WriteVarInt32ToBuffer(buf, chunkX)
+	utils.WriteVarInt32ToBuffer(buf, chunkZ)
 
-	writeEmptyBitSet(payload) // sky mask
-	writeEmptyBitSet(payload) // block mask
-	writeEmptyBitSet(payload) // empty sky mask
-	writeEmptyBitSet(payload) // empty block mask
+	// В 1.20.1 world sections = 24 (min_y=-64, height=384 => 384/16 = 24)
+	// BitSet содержит bits for (sections + 2) => 26 бит.
+	sections := 24
+	bits := sections + 2 // 26
 
-	utils.WriteVarInt32ToBuffer(payload, 0) // sky arrays count
-	utils.WriteVarInt32ToBuffer(payload, 0) // block arrays count
+	// mask with lowest `bits` set to 1
+	emptyAll := uint64(0)
+	if bits == 64 {
+		emptyAll = ^uint64(0)
+	} else {
+		emptyAll = (uint64(1) << uint(bits)) - 1
+	}
 
-	return c.safeWrite(0x24, payload.Bytes())
+	// Sky Light Mask (BitSet) — 0
+	writeBitSet(buf, []uint64{0})
+
+	// Block Light Mask (BitSet) — 0
+	writeBitSet(buf, []uint64{0})
+
+	// Empty Sky Light Mask — all ones for 26 bits
+	writeBitSet(buf, []uint64{emptyAll})
+
+	// Empty Block Light Mask — all ones for 26 bits
+	writeBitSet(buf, []uint64{emptyAll})
+
+	// Sky Light array count — 0 (совпадает с количеством битов в SkyLightMask)
+	utils.WriteVarInt32ToBuffer(buf, 0)
+
+	// Block Light array count — 0
+	utils.WriteVarInt32ToBuffer(buf, 0)
+
+	// Update Light packet id в 1.20.1: 0x27 (как у тебя)
+	return c.safeWrite(0x27, buf.Bytes())
+}
+
+// BitSet в протоколе: VarInt (кол-во long'ов) + long'и (8 байт каждый)
+// Long в протоколе — big-endian (твоя utils.WriteLong как раз big-endian).
+func writeBitSet(buf *bytes.Buffer, longs []uint64) {
+	utils.WriteVarInt32ToBuffer(buf, int32(len(longs)))
+	for _, v := range longs {
+		buf.Write(utils.WriteLong(int64(v)))
+	}
 }
 
 func (c *ClientConnection) sendPlayerPosition(x, y, z float64) error {
 	payload := []byte{}
+
+	//The packet sends X, Y, Z coordinates (doubles),
+	//yaw/pitch (floats),
+	//teleport ID (varint),
+	//and a flag boolean for relative movement.
 
 	payload = append(payload, utils.WriteDouble(x)...)
 	payload = append(payload, utils.WriteDouble(y)...)
@@ -599,132 +698,21 @@ func (c *ClientConnection) sendPlayerPosition(x, y, z float64) error {
 	payload = append(payload, utils.WriteVarInt32(1)...) // teleport id
 	payload = append(payload, 0)                         // dismount
 
-	return c.safeWrite(0x38, payload)
+	return c.safeWrite(SendPlayerPosition, payload)
 }
 
 func (c *ClientConnection) sendPlayerAbilities() error {
+	flags := byte(0x02 | 0x04) // allow flying + flying
+
 	payload := []byte{}
-	payload = append(payload, 0x02|0x04)                 // flags: allow flying + flying
-	payload = append(payload, utils.WriteFloat(0.05)...) // flying speed
-	payload = append(payload, utils.WriteFloat(0.1)...)  // walking speed
+	payload = append(payload, flags)
+	payload = append(payload, utils.WriteFloat(0.05)...)
+	payload = append(payload, utils.WriteFloat(0.1)...)
+
+	fmt.Printf("Sending player abilities - flags: 0x%02X (allow flying: %v, flying: %v)\n",
+		flags,
+		flags&0x02 != 0,
+		flags&0x04 != 0)
+
 	return c.safeWrite(0x32, payload)
-}
-
-// Вспомогательные функции
-func buildRegistryNBT() []byte {
-	w := nbt.New()
-	w.WriteRootCompound()
-
-	// Dimension Type Registry
-	w.StartCompound("minecraft:dimension_type")
-	w.String("type", "minecraft:dimension_type")
-	w.StartList("value", nbt.TagCompound, 1)
-	w.StartCompound("")
-	w.String("name", "minecraft:overworld")
-	w.Int("id", 0)
-	w.StartCompound("element")
-	w.Bool("piglin_safe", false)
-	w.Bool("natural", true)
-	w.Float("ambient_light", 0.0)
-	w.String("infiniburn", "#minecraft:infiniburn_overworld")
-	w.Bool("respawn_anchor_works", false)
-	w.Bool("has_skylight", true)
-	w.Bool("bed_works", true)
-	w.String("effects", "minecraft:overworld")
-	w.Bool("has_raids", true)
-	w.Int("min_y", -64)
-	w.Int("height", 384)
-	w.Int("logical_height", 384)
-	w.Float("coordinate_scale", 1.0)
-	w.Bool("ultrawarm", false)
-	w.Bool("has_ceiling", false)
-	w.EndCompound() // element
-	w.EndCompound() // dimension entry
-	w.EndList()     // value list
-	w.EndCompound() // dimension_type registry
-
-	// Biome Registry
-	w.StartCompound("minecraft:worldgen/biome")
-	w.String("type", "minecraft:worldgen/biome")
-	w.StartList("value", nbt.TagCompound, 1)
-	w.StartCompound("")
-	w.String("name", "minecraft:plains")
-	w.Int("id", 0)
-	w.StartCompound("element")
-	w.String("precipitation", "rain")
-	w.Float("temperature", 0.8)
-	w.Float("downfall", 0.4)
-	w.StartCompound("effects")
-	w.Int("sky_color", 7907327)
-	w.Int("water_color", 4159204)
-	w.Int("water_fog_color", 329011)
-	w.Int("fog_color", 12638463)
-	w.EndCompound() // effects
-	w.EndCompound() // element
-	w.EndCompound() // biome entry
-	w.EndList()     // value list
-	w.EndCompound() // biome registry
-
-	// Chat Type Registry
-	w.StartCompound("minecraft:chat_type")
-	w.String("type", "minecraft:chat_type")
-	w.StartList("value", nbt.TagCompound, 1)
-
-	w.StartCompound("")
-	w.String("name", "minecraft:chat")
-	w.Int("id", 0)
-
-	w.StartCompound("element")
-	w.StartCompound("chat")
-	w.String("translation_key", "chat.type.text")
-	w.StartList("parameters", nbt.TagString, 2)
-	w.String("", "sender")
-	w.String("", "content")
-	w.EndList()     // parameters
-	w.EndCompound() // chat
-	w.EndCompound() // element
-
-	w.EndCompound() // entry
-	w.EndList()     // list
-	w.EndCompound() // chat_type registry
-
-	w.EndCompound() // root
-	return w.Bytes()
-}
-
-func buildHeightmapsNBT() []byte {
-	w := nbt.New()
-	w.WriteRootCompound()
-	heightmap := make([]int64, 36)
-	w.LongArray("MOTION_BLOCKING", heightmap)
-	w.EndCompound()
-	return w.Bytes()
-}
-
-func buildEmptyChunkData() []byte {
-	data := []byte{}
-	for sectionY := 0; sectionY < 24; sectionY++ {
-		data = append(data, utils.WriteUInt16(0)...)
-		data = append(data, utils.WriteVarInt32(0)...) // Palette size
-		data = append(data, utils.WriteVarInt32(0)...) // Single value (air)
-		data = append(data, utils.WriteVarInt32(0)...) // Data array length
-		data = append(data, utils.WriteVarInt32(0)...) // Biome palette size
-		data = append(data, utils.WriteVarInt32(0)...) // Single biome value
-		data = append(data, utils.WriteVarInt32(0)...) // Biome data length
-	}
-	return data
-}
-
-func generateRSA() ([]byte, *rsa.PrivateKey, error) {
-	// Генерируем RSA ключи
-	priv, err := rsa.GenerateKey(rand.Reader, 1024)
-	if err != nil {
-		return nil, nil, fmt.Errorf("generating RSA key: %w", err)
-	}
-
-	pubASN1, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
-	if err != nil {
-		return nil, nil, fmt.Errorf("marshaling public key: %w", err)
-	}
-	return pubASN1, priv, nil
 }

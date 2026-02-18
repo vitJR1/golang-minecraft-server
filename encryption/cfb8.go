@@ -22,21 +22,23 @@ func NewCFB8(block cipher.Block, iv []byte, decrypt bool) cipher.Stream {
 }
 
 func (c *cfb8) XORKeyStream(dst, src []byte) {
+	if len(dst) < len(src) {
+		panic("cfb8: dst too small")
+	}
+
+	encrypted := make([]byte, c.block.BlockSize())
+
 	for i := 0; i < len(src); i++ {
-		// encrypt IV
-		encrypted := make([]byte, len(c.iv))
 		c.block.Encrypt(encrypted, c.iv)
 
-		b := src[i] ^ encrypted[0]
-		dst[i] = b
+		out := src[i] ^ encrypted[0]
+		dst[i] = out
 
-		// shift IV
 		copy(c.iv, c.iv[1:])
-
 		if c.decrypt {
-			c.iv[len(c.iv)-1] = src[i]
+			c.iv[len(c.iv)-1] = src[i] // ciphertext byte
 		} else {
-			c.iv[len(c.iv)-1] = b
+			c.iv[len(c.iv)-1] = out // ciphertext byte
 		}
 	}
 }

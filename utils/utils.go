@@ -10,6 +10,9 @@ import (
 	"net"
 )
 
+const SegmentBits = 0x7F
+const ContinueBit = 0x80
+
 // ReadPacket читает полный пакет из соединения (длина + данные)
 func ReadPacket(conn net.Conn) (*bytes.Buffer, error) {
 	length, err := ReadVarIntFromReader(conn)
@@ -34,7 +37,7 @@ func ReadPacket2(conn net.Conn) (packetID int, data []byte, err error) {
 	// читаем длину пакета (VarInt)
 	length, err := ReadVarIntFromReader(conn)
 	if err != nil {
-		return 0, nil, fmt.Errorf("failed to read packet length: %w", err)
+		return 0, nil, fmt.Errorf("failed to read packet length 2: %w", err)
 	}
 
 	if length < 0 {
@@ -61,48 +64,52 @@ func ReadPacket2(conn net.Conn) (packetID int, data []byte, err error) {
 
 // WritePacket отправляет пакет в соединение
 func WritePacket(conn net.Conn, packetID int32, payload []byte) error {
-	fmt.Printf("Sending packet 0x%02X, length: %d\n", packetID, len(payload))
-
 	id := WriteVarInt32(packetID)
 	body := append(id, payload...)
 	length := WriteVarInt32(int32(len(body)))
 
 	fullPacket := append(length, body...)
-	_, err := conn.Write(fullPacket)
 
-	if err != nil {
-		return fmt.Errorf("failed to write packet: %w", err)
+	fmt.Printf("Sending packet 0x%02X, payload=%d, total=%d\n", packetID, len(payload), len(fullPacket))
+
+	// writeAll
+	written := 0
+	for written < len(fullPacket) {
+		n, err := conn.Write(fullPacket[written:])
+		if err != nil {
+			return fmt.Errorf("failed to write packet: %w", err)
+		}
+		if n == 0 {
+			return fmt.Errorf("failed to write packet: wrote 0 bytes")
+		}
+		written += n
 	}
-
 	return nil
 }
 
 // ReadVarIntFromReader читает VarInt из io.Reader
-func ReadVarIntFromReader(r io.Reader) (int, error) {
-	var value int
+func ReadVarIntFromReader(r io.Reader) (int32, error) {
+	var result uint32
 	var shift uint
-	var b byte
-	buf := make([]byte, 1)
+	var b [1]byte
 
 	for {
-		if _, err := r.Read(buf); err != nil {
+		if _, err := io.ReadFull(r, b[:]); err != nil {
 			return 0, fmt.Errorf("failed to read VarInt byte: %w", err)
 		}
+		byteVal := b[0]
+		result |= uint32(byteVal&SegmentBits) << shift
 
-		b = buf[0]
-		value |= int(b&0x7F) << shift
-		shift += 7
-
-		if b&0x80 == 0 {
+		if byteVal&ContinueBit == 0 {
 			break
 		}
-
+		shift += 7
 		if shift > 35 {
 			return 0, errors.New("VarInt is too long")
 		}
 	}
 
-	return value, nil
+	return int32(result), nil
 }
 
 // ReadVarInt читает VarInt из bytes.Buffer
@@ -120,10 +127,10 @@ func ReadVarInt(buf *bytes.Buffer) (int, error) {
 			return 0, err
 		}
 
-		value |= int(b&0x7F) << shift
+		value |= int(b&SegmentBits) << shift
 		shift += 7
 
-		if b&0x80 == 0 {
+		if b&ContinueBit == 0 {
 			break
 		}
 
@@ -133,6 +140,31 @@ func ReadVarInt(buf *bytes.Buffer) (int, error) {
 	}
 
 	return value, nil
+}
+
+func ReadVarInt32(buf *bytes.Buffer) (int32, error) {
+	var result uint32
+	var shift uint
+
+	for {
+		if buf.Len() == 0 {
+			return 0, errors.New("unexpected end of buffer while reading VarInt")
+		}
+		b, err := buf.ReadByte()
+		if err != nil {
+			return 0, err
+		}
+		result |= uint32(b&SegmentBits) << shift
+
+		if b&ContinueBit == 0 {
+			break
+		}
+		shift += 7
+		if shift > 35 {
+			return 0, errors.New("VarInt is too long")
+		}
+	}
+	return int32(result), nil
 }
 
 // ReadVarIntFromBytes читает VarInt из среза байт
@@ -146,10 +178,10 @@ func ReadVarIntFromBytes(data []byte) (value int, bytesRead int, err error) {
 		}
 
 		b := data[numRead]
-		result |= int(b&0x7F) << (7 * numRead)
+		result |= int(b&SegmentBits) << (7 * numRead)
 		numRead++
 
-		if (b & 0x80) == 0 {
+		if (b & ContinueBit) == 0 {
 			break
 		}
 
@@ -167,10 +199,10 @@ func WriteVarInt32(value int32) []byte {
 	u := uint32(value)
 
 	for {
-		b := byte(u & 0x7F)
+		b := byte(u & SegmentBits)
 		u >>= 7
 		if u != 0 {
-			b |= 0x80
+			b |= ContinueBit
 		}
 		buf = append(buf, b)
 		if u == 0 {
@@ -187,10 +219,10 @@ func WriteVarInt64(value int64) []byte {
 	u := uint64(value)
 
 	for {
-		b := byte(u & 0x7F)
+		b := byte(u & SegmentBits)
 		u >>= 7
 		if u != 0 {
-			b |= 0x80
+			b |= ContinueBit
 		}
 		buf = append(buf, b)
 		if u == 0 {
@@ -475,10 +507,10 @@ func ReadByteFromBuf(buf *bytes.Buffer) (byte, error) {
 func WriteVarInt32ToBuffer(buf *bytes.Buffer, value int32) {
 	u := uint32(value)
 	for {
-		b := byte(u & 0x7F)
+		b := byte(u & SegmentBits)
 		u >>= 7
 		if u != 0 {
-			b |= 0x80
+			b |= ContinueBit
 		}
 		buf.WriteByte(b)
 		if u == 0 {
@@ -490,10 +522,10 @@ func WriteVarInt32ToBuffer(buf *bytes.Buffer, value int32) {
 func WriteVarInt64ToBuffer(buf *bytes.Buffer, value int64) {
 	u := uint64(value)
 	for {
-		b := byte(u & 0x7F)
+		b := byte(u & SegmentBits)
 		u >>= 7
 		if u != 0 {
-			b |= 0x80
+			b |= ContinueBit
 		}
 		buf.WriteByte(b)
 		if u == 0 {
