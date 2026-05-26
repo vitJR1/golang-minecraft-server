@@ -3,6 +3,6 @@
     "playerName": "Player1",
     "Reason": "Cheating",
     "BannedAt": "2024-06-01 12:00:00",
-    "ExpiresAt": "2024-06-01 12:00:00"
+    "ExpiresAt": "2099-01-01 00:00:00"
   }
 ]

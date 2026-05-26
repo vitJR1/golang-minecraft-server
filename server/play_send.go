@@ -11,12 +11,14 @@ import (
 func (c *ClientConnection) sendLoginPlay() error {
 	var buf bytes.Buffer
 
+	p := c.player
+
 	// Entity ID
-	buf.Write(protocol.WriteInt(c.playerID))
+	buf.Write(protocol.WriteInt(p.EntityID))
 	// Is hardcore
 	buf.WriteByte(0)
 	// Gamemode (0=Survival, 1=Creative, 2=Adventure, 3=Spectator)
-	buf.WriteByte(1)
+	buf.WriteByte(byte(p.Gamemode))
 	// Previous gamemode (-1 = none)
 	buf.WriteByte(0xFF)
 

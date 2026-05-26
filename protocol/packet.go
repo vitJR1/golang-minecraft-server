@@ -8,61 +8,79 @@ import (
 	"net"
 )
 
+// CompressionDisabled is the sentinel value for the compressionThreshold
+// argument: while a connection hasn't received Set Compression yet, packets
+// use the simpler uncompressed framing.
+const CompressionDisabled = -1
+
 // DebugPackets enables per-packet stderr logging from WritePacket. Leave
 // false in production — chunk streaming alone spams thousands of lines/s.
 var DebugPackets = false
 
-// ReadPacket reads one length-prefixed packet and returns the body buffer
-// (the packet ID is still the first VarInt inside it).
-func ReadPacket(conn net.Conn) (*bytes.Buffer, error) {
-	length, err := ReadVarIntFromReader(conn)
+// ReadPacket reads one framed packet and returns the body buffer (the packet
+// ID is the first VarInt inside). If compressionThreshold >= 0, the body is
+// in the compressed format (data-length VarInt prefix; payloads at or above
+// the threshold were zlib-compressed by the peer).
+func ReadPacket(conn net.Conn, compressionThreshold int) (*bytes.Buffer, error) {
+	body, err := readFramedBody(conn)
 	if err != nil {
-		return nil, fmt.Errorf("packet length: %w", err)
+		return nil, err
 	}
-	if length < 0 {
-		return nil, errors.New("negative packet length")
+	if compressionThreshold < 0 {
+		return bytes.NewBuffer(body), nil
 	}
-	data := make([]byte, length)
-	if _, err := io.ReadFull(conn, data); err != nil {
-		return nil, fmt.Errorf("packet data: %w", err)
-	}
-	return bytes.NewBuffer(data), nil
+	return decodeCompressedBody(body)
 }
 
-// ReadPacketSplit reads a packet and returns its ID and the remaining payload
-// bytes. Used when a caller wants the ID surfaced without re-parsing.
-func ReadPacketSplit(conn net.Conn) (packetID int, payload []byte, err error) {
-	length, err := ReadVarIntFromReader(conn)
+// ReadPacketSplit reads a packet and returns its ID and remaining payload.
+func ReadPacketSplit(conn net.Conn, compressionThreshold int) (packetID int, payload []byte, err error) {
+	body, err := readFramedBody(conn)
 	if err != nil {
-		return 0, nil, fmt.Errorf("packet length: %w", err)
+		return 0, nil, err
 	}
-	if length < 0 {
-		return 0, nil, errors.New("negative packet length")
+	if compressionThreshold >= 0 {
+		buf, err := decodeCompressedBody(body)
+		if err != nil {
+			return 0, nil, err
+		}
+		body = buf.Bytes()
 	}
-	data := make([]byte, length)
-	if _, err := io.ReadFull(conn, data); err != nil {
-		return 0, nil, fmt.Errorf("packet data: %w", err)
-	}
-	id, n, err := ReadVarIntFromBytes(data)
+	id, n, err := ReadVarIntFromBytes(body)
 	if err != nil {
 		return 0, nil, fmt.Errorf("packet ID: %w", err)
 	}
 	if n == 0 {
 		return 0, nil, errors.New("no bytes read for packet ID")
 	}
-	return id, data[n:], nil
+	return id, body[n:], nil
 }
 
-// WritePacket frames and writes a single packet. Format on the wire is
-// VarInt(length) + VarInt(packetID) + payload.
-func WritePacket(conn net.Conn, packetID int32, payload []byte) error {
-	id := WriteVarInt32(packetID)
-	body := append(id, payload...)
+// WritePacket frames and writes a single packet. If compressionThreshold >= 0,
+// payloads at or above the threshold are zlib-compressed and a data-length
+// VarInt is inserted; smaller payloads pass through with a data-length of 0.
+func WritePacket(conn net.Conn, packetID int32, payload []byte, compressionThreshold int) error {
+	uncompressed := append(WriteVarInt32(packetID), payload...)
+
+	var body []byte
+	if compressionThreshold < 0 {
+		body = uncompressed
+	} else if len(uncompressed) < compressionThreshold {
+		// Below threshold: data length = 0 signals "inline, uncompressed".
+		body = append(WriteVarInt32(0), uncompressed...)
+	} else {
+		compressed, err := CompressPayload(uncompressed)
+		if err != nil {
+			return fmt.Errorf("compress: %w", err)
+		}
+		body = append(WriteVarInt32(int32(len(uncompressed))), compressed...)
+	}
+
 	length := WriteVarInt32(int32(len(body)))
 	full := append(length, body...)
 
 	if DebugPackets {
-		fmt.Printf("Sending packet 0x%02X, payload=%d, total=%d\n", packetID, len(payload), len(full))
+		fmt.Printf("Sending packet 0x%02X, payload=%d, total=%d, compressed=%v\n",
+			packetID, len(payload), len(full), compressionThreshold >= 0)
 	}
 
 	written := 0
@@ -77,4 +95,43 @@ func WritePacket(conn net.Conn, packetID int32, payload []byte) error {
 		written += n
 	}
 	return nil
+}
+
+// readFramedBody reads a VarInt-prefixed packet body off the wire. Used by
+// both compressed and uncompressed paths.
+func readFramedBody(conn net.Conn) ([]byte, error) {
+	length, err := ReadVarIntFromReader(conn)
+	if err != nil {
+		return nil, fmt.Errorf("packet length: %w", err)
+	}
+	if length < 0 {
+		return nil, errors.New("negative packet length")
+	}
+	body := make([]byte, length)
+	if _, err := io.ReadFull(conn, body); err != nil {
+		return nil, fmt.Errorf("packet data: %w", err)
+	}
+	return body, nil
+}
+
+// decodeCompressedBody interprets a compressed-format packet body: a
+// data-length VarInt followed by either raw bytes (length == 0) or
+// zlib-compressed bytes (length == uncompressed size).
+func decodeCompressedBody(body []byte) (*bytes.Buffer, error) {
+	dataLen, n, err := ReadVarIntFromBytes(body)
+	if err != nil {
+		return nil, fmt.Errorf("data length: %w", err)
+	}
+	rest := body[n:]
+	if dataLen == 0 {
+		return bytes.NewBuffer(rest), nil
+	}
+	if dataLen < 0 {
+		return nil, errors.New("negative compressed data length")
+	}
+	decoded, err := DecompressPayload(rest, dataLen)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.NewBuffer(decoded), nil
 }

@@ -10,6 +10,7 @@ import (
 	"minecraft-server/cfg"
 	"minecraft-server/encryption"
 	"minecraft-server/mojang"
+	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"time"
 )
@@ -52,6 +53,7 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 	}
 
 	c.state = StatePlay
+	c.server.Players.Add(c)
 
 	if err := c.sendPlayPackets(); err != nil {
 		if c.isClosed() {
@@ -64,19 +66,49 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 	return nil
 }
 
+// CompressionThreshold matches the vanilla server default. Packets at or
+// above this size go through zlib; smaller packets pass uncompressed.
+const CompressionThreshold = 256
+
+// enableCompression sends Set Compression (Cb 0x03) over the still-
+// uncompressed wire, then flips the connection's threshold so every
+// subsequent packet in both directions uses compressed framing.
+//
+// Synchronization: safeWrite holds c.writeMu while it sends Set Compression;
+// we also acquire writeMu when updating c.compressionThreshold so the
+// happens-before edge propagates to keepAlive's reads of the same field.
+// readLoop runs in the same goroutine as handleLogin, so no extra
+// coordination is needed for the read path.
+func (c *ClientConnection) enableCompression() error {
+	if err := c.safeWrite(CbLoginSetCompr, protocol.WriteVarInt32(CompressionThreshold)); err != nil {
+		return fmt.Errorf("sending set compression: %w", err)
+	}
+	c.writeMu.Lock()
+	c.compressionThreshold = CompressionThreshold
+	c.writeMu.Unlock()
+	return nil
+}
+
 // runOfflineLogin skips Mojang verification: derives a v3 UUID from the
 // player's name and immediately sends LoginSuccess in plaintext.
 func (c *ClientConnection) runOfflineLogin() error {
-	uuid := protocol.OfflineUUID(c.playerName)
-	fmt.Println("Player uuid:", uuid)
+	uuidStr := protocol.OfflineUUID(c.playerName)
+	fmt.Println("Player uuid:", uuidStr)
 
-	uuidBytes, err := protocol.WriteUUID(uuid)
+	uuidBytes, err := protocol.WriteUUID(uuidStr)
 	if err != nil {
 		return fmt.Errorf("writing UUID: %w", err)
 	}
+	var uuid [16]byte
+	copy(uuid[:], uuidBytes)
+	c.player = player.New(c.server.nextEntityID.Add(1), c.playerName, uuid)
+
+	if err := c.enableCompression(); err != nil {
+		return err
+	}
 
 	payload := make([]byte, 0, 32+len(c.playerName))
-	payload = append(payload, uuidBytes...)
+	payload = append(payload, uuid[:]...)
 	payload = append(payload, protocol.WriteString(c.playerName)...)
 	payload = append(payload, protocol.WriteVarInt32(0)...) // properties count = 0
 
@@ -124,9 +156,16 @@ func (c *ClientConnection) runOnlineLogin() error {
 	if err != nil {
 		return fmt.Errorf("writing UUID: %w", err)
 	}
+	var uuid [16]byte
+	copy(uuid[:], uuidBytes)
+	c.player = player.New(c.server.nextEntityID.Add(1), profile.Name, uuid)
+
+	if err := c.enableCompression(); err != nil {
+		return err
+	}
 
 	payload := make([]byte, 0, 32+len(profile.Name))
-	payload = append(payload, uuidBytes...)
+	payload = append(payload, uuid[:]...)
 	payload = append(payload, protocol.WriteString(profile.Name)...)
 	payload = append(payload, protocol.WriteVarInt32(0)...) // properties count = 0
 	if err := c.safeWrite(CbLoginSuccess, payload); err != nil {
@@ -155,7 +194,9 @@ func (c *ClientConnection) sendEncryptionRequest(verifyToken []byte) error {
 // plaintext connection, RSA-decrypts the shared secret + verify token, and
 // confirms the verify token round-trips. Returns the AES key on success.
 func (c *ClientConnection) recvAndVerifyEncryptionResponse(verifyToken []byte) ([]byte, error) {
-	id, data, err := protocol.ReadPacketSplit(c.conn)
+	// Encryption Response arrives before Set Compression, so this read is
+	// always uncompressed regardless of the connection's current threshold.
+	id, data, err := protocol.ReadPacketSplit(c.conn, protocol.CompressionDisabled)
 	if err != nil {
 		if c.isClosed() {
 			return nil, nil
