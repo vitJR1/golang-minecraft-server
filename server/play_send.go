@@ -3,7 +3,7 @@ package server
 import (
 	"bytes"
 	"minecraft-server/chunk"
-	"minecraft-server/utils"
+	"minecraft-server/protocol"
 )
 
 // sendLoginPlay writes the clientbound Login (Play) packet (0x28) for
@@ -12,7 +12,7 @@ func (c *ClientConnection) sendLoginPlay() error {
 	var buf bytes.Buffer
 
 	// Entity ID
-	buf.Write(utils.WriteInt(c.playerID))
+	buf.Write(protocol.WriteInt(c.playerID))
 	// Is hardcore
 	buf.WriteByte(0)
 	// Gamemode (0=Survival, 1=Creative, 2=Adventure, 3=Spectator)
@@ -21,23 +21,23 @@ func (c *ClientConnection) sendLoginPlay() error {
 	buf.WriteByte(0xFF)
 
 	// Dimension count + names
-	utils.WriteVarInt32ToBuffer(&buf, 1)
-	buf.Write(utils.WriteString("minecraft:overworld"))
+	protocol.WriteVarInt32ToBuffer(&buf, 1)
+	buf.Write(protocol.WriteString("minecraft:overworld"))
 
 	// Registry codec (NBT, already-encoded bytes — no length prefix)
 	buf.Write(RegistryCodec())
 
 	// Current dimension type + name
-	buf.Write(utils.WriteString("minecraft:overworld"))
-	buf.Write(utils.WriteString("minecraft:overworld"))
+	buf.Write(protocol.WriteString("minecraft:overworld"))
+	buf.Write(protocol.WriteString("minecraft:overworld"))
 
 	// Hashed seed
-	buf.Write(utils.WriteLong(0))
+	buf.Write(protocol.WriteLong(0))
 	// Max players (ignored by vanilla client, still required)
-	utils.WriteVarInt32ToBuffer(&buf, 20)
+	protocol.WriteVarInt32ToBuffer(&buf, 20)
 	// View distance + simulation distance (chunks)
-	utils.WriteVarInt32ToBuffer(&buf, 10)
-	utils.WriteVarInt32ToBuffer(&buf, 10)
+	protocol.WriteVarInt32ToBuffer(&buf, 10)
+	protocol.WriteVarInt32ToBuffer(&buf, 10)
 	// Reduced debug info
 	buf.WriteByte(0)
 	// Enable respawn screen
@@ -49,7 +49,7 @@ func (c *ClientConnection) sendLoginPlay() error {
 	// Has death location (no)
 	buf.WriteByte(0)
 	// Portal cooldown (1.20+)
-	utils.WriteVarInt32ToBuffer(&buf, 0)
+	protocol.WriteVarInt32ToBuffer(&buf, 0)
 
 	return c.safeWrite(CbPlayLogin, buf.Bytes())
 }
@@ -58,13 +58,13 @@ func (c *ClientConnection) sendLoginPlay() error {
 // teleportID echoes back in the next Confirm Teleportation packet.
 func (c *ClientConnection) sendSyncPlayerPosition(x, y, z float64, teleportID int32) error {
 	var buf bytes.Buffer
-	buf.Write(utils.WriteDouble(x))
-	buf.Write(utils.WriteDouble(y))
-	buf.Write(utils.WriteDouble(z))
-	buf.Write(utils.WriteFloat(0)) // yaw
-	buf.Write(utils.WriteFloat(0)) // pitch
-	buf.WriteByte(0)               // flags (all absolute)
-	utils.WriteVarInt32ToBuffer(&buf, teleportID)
+	buf.Write(protocol.WriteDouble(x))
+	buf.Write(protocol.WriteDouble(y))
+	buf.Write(protocol.WriteDouble(z))
+	buf.Write(protocol.WriteFloat(0)) // yaw
+	buf.Write(protocol.WriteFloat(0)) // pitch
+	buf.WriteByte(0)                  // flags (all absolute)
+	protocol.WriteVarInt32ToBuffer(&buf, teleportID)
 	return c.safeWrite(CbPlaySyncPos, buf.Bytes())
 }
 
@@ -75,29 +75,29 @@ func (c *ClientConnection) sendSyncPlayerPosition(x, y, z float64, teleportID in
 func (c *ClientConnection) sendChunkData(chunkX, chunkZ int32) error {
 	var buf bytes.Buffer
 
-	buf.Write(utils.WriteInt(chunkX))
-	buf.Write(utils.WriteInt(chunkZ))
+	buf.Write(protocol.WriteInt(chunkX))
+	buf.Write(protocol.WriteInt(chunkZ))
 
 	// Heightmaps NBT (root Compound, no length prefix).
 	buf.Write(chunk.BuildEmptyHeightmaps())
 
 	// Chunk data (paletted sections) with VarInt size prefix.
 	data := chunk.BuildEmptyChunkData()
-	utils.WriteVarInt32ToBuffer(&buf, int32(len(data)))
+	protocol.WriteVarInt32ToBuffer(&buf, int32(len(data)))
 	buf.Write(data)
 
 	// Block entities count
-	utils.WriteVarInt32ToBuffer(&buf, 0)
+	protocol.WriteVarInt32ToBuffer(&buf, 0)
 
 	// Light masks — empty (no sections have transmitted light arrays).
 	// BitSet on the wire: VarInt(long count) followed by long(s). We send a
 	// zero-length BitSet for each mask, which the client treats as all-zero.
 	for i := 0; i < 4; i++ {
-		utils.WriteVarInt32ToBuffer(&buf, 0)
+		protocol.WriteVarInt32ToBuffer(&buf, 0)
 	}
 	// Sky light array count + Block light array count
-	utils.WriteVarInt32ToBuffer(&buf, 0)
-	utils.WriteVarInt32ToBuffer(&buf, 0)
+	protocol.WriteVarInt32ToBuffer(&buf, 0)
+	protocol.WriteVarInt32ToBuffer(&buf, 0)
 
 	return c.safeWrite(CbPlayChunkData, buf.Bytes())
 }

@@ -3,7 +3,7 @@ package server
 import (
 	"bytes"
 	"fmt"
-	"minecraft-server/utils"
+	"minecraft-server/protocol"
 )
 
 func (c *ClientConnection) handleHandshake(packet *bytes.Buffer, packetID int) error {
@@ -12,25 +12,25 @@ func (c *ClientConnection) handleHandshake(packet *bytes.Buffer, packetID int) e
 	}
 
 	// protocol version
-	_, err := utils.ReadVarInt(packet)
+	_, err := protocol.ReadVarInt(packet)
 	if err != nil {
 		return fmt.Errorf("reading protocol version: %w", err)
 	}
 
 	// server address
-	_, err = utils.ReadStringFromBuf(packet)
+	_, err = protocol.ReadStringFromBuf(packet)
 	if err != nil {
 		return fmt.Errorf("reading server address: %w", err)
 	}
 
 	// port
-	_, err = utils.ReadUShortFromBuf(packet)
+	_, err = protocol.ReadUShortFromBuf(packet)
 	if err != nil {
 		return fmt.Errorf("reading port: %w", err)
 	}
 
 	// next state
-	nextState, err := utils.ReadVarInt(packet)
+	nextState, err := protocol.ReadVarInt(packet)
 	if err != nil {
 		return fmt.Errorf("reading next state: %w", err)
 	}

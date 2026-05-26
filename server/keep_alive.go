@@ -2,7 +2,7 @@ package server
 
 import (
 	"fmt"
-	"minecraft-server/utils"
+	"minecraft-server/protocol"
 	"time"
 )
 
@@ -20,7 +20,7 @@ func (c *ClientConnection) keepAlive() {
 			}
 
 			keepAliveID := time.Now().UnixNano()
-			payload := utils.WriteLong(keepAliveID)
+			payload := protocol.WriteLong(keepAliveID)
 
 			err := c.safeWrite(CbPlayKeepAlive, payload)
 			if err != nil {
