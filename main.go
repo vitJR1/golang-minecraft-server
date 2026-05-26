@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"minecraft-server/connection"
+	"minecraft-server/server"
 	"net"
 )
 
@@ -16,8 +16,9 @@ func main() {
 	for {
 		conn, err := lis.Accept()
 		if err != nil {
+			fmt.Printf("accept error: %v\n", err)
 			continue
 		}
-		go connection.HandleConn(conn)
+		go server.HandleConn(conn)
 	}
 }

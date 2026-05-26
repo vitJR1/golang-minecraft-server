@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"crypto/md5"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"math"
 	"net"
+	"strings"
 )
 
 const (
@@ -65,6 +67,11 @@ func ReadPacket2(conn net.Conn) (packetID int, data []byte, err error) {
 	return packetID, packetData[bytesRead:], nil
 }
 
+// DebugPackets enables per-packet stderr logging from WritePacket.
+// Set true while debugging the protocol; leave false in production — chunk
+// streaming alone will spam thousands of lines per second.
+var DebugPackets = false
+
 // WritePacket отправляет пакет в соединение
 func WritePacket(conn net.Conn, packetID int32, payload []byte) error {
 	id := WriteVarInt32(packetID)
@@ -73,7 +80,9 @@ func WritePacket(conn net.Conn, packetID int32, payload []byte) error {
 
 	fullPacket := append(length, body...)
 
-	fmt.Printf("Sending packet 0x%02X, payload=%d, total=%d\n", packetID, len(payload), len(fullPacket))
+	if DebugPackets {
+		fmt.Printf("Sending packet 0x%02X, payload=%d, total=%d\n", packetID, len(payload), len(fullPacket))
+	}
 
 	// writeAll
 	written := 0
@@ -221,7 +230,37 @@ func WriteString(s string) []byte {
 	out := make([]byte, 0, len(length)+len(data))
 	out = append(out, length...)
 	out = append(out, data...)
+	if len(out) > 32767 {
+		panic(fmt.Sprintf("string too long: %d bytes", len(out)))
+	}
 	return out
+}
+
+var ErrInvalidUUID = errors.New("invalid UUID")
+
+// WriteUUID converts UUID string like "123e4567-e89b-12d3-a456-426614174000"
+// into 16 raw bytes.
+func WriteUUID(s string) ([]byte, error) {
+	s = strings.ToLower(strings.TrimSpace(s))
+
+	// Fast path: canonical form with hyphens (36 chars)
+	if len(s) == 36 {
+		if s[8] != '-' || s[13] != '-' || s[18] != '-' || s[23] != '-' {
+			return nil, ErrInvalidUUID
+		}
+		// remove hyphens
+		s = s[0:8] + s[9:13] + s[14:18] + s[19:23] + s[24:36]
+	} else if len(s) != 32 {
+		// Also allow 32 hex chars without hyphens
+		return nil, ErrInvalidUUID
+	}
+
+	// Now must be 32 hex chars
+	raw, err := hex.DecodeString(s)
+	if err != nil || len(raw) != 16 {
+		return nil, ErrInvalidUUID
+	}
+	return raw, nil
 }
 
 // ReadByteArrayFromBuf читает массив байт с префиксом VarInt из bytes.Buffer
@@ -283,6 +322,18 @@ func WriteDouble(value float64) []byte {
 	bits := math.Float64bits(value)
 	binary.BigEndian.PutUint64(buf, bits)
 	return buf
+}
+
+// ReadFloat читает float32 из bytes.Buffer (big endian)
+func ReadFloat(buf *bytes.Buffer) (float32, error) {
+	if buf.Len() < 4 {
+		return 0, fmt.Errorf("insufficient data for float: need 4, have %d", buf.Len())
+	}
+	var bits uint32
+	if err := binary.Read(buf, binary.BigEndian, &bits); err != nil {
+		return 0, fmt.Errorf("failed to read float: %w", err)
+	}
+	return math.Float32frombits(bits), nil
 }
 
 // WriteFloat записывает float32 как 4 байта (big endian)
@@ -359,4 +410,18 @@ func OfflineUUID(name string) string {
 		b[8], b[9],
 		b[10], b[11], b[12], b[13], b[14], b[15],
 	)
+}
+
+func FormatUUID(s string) (string, error) {
+	s = strings.ToLower(strings.TrimSpace(s))
+
+	if len(s) != 32 {
+		return "", errors.New("invalid UUID length")
+	}
+
+	return s[0:8] + "-" +
+		s[8:12] + "-" +
+		s[12:16] + "-" +
+		s[16:20] + "-" +
+		s[20:32], nil
 }

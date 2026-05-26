@@ -7,44 +7,17 @@ import (
 	"fmt"
 )
 
-const serverID = "qcjn223_1232ty_my_goland_server_id" // Minecraft server ID (can be empty for offline mode)
-
-type EncryptionRequest struct {
-	ServerID  string
-	PublicKey []byte
-	Nonce     []byte
-	privKey   *rsa.PrivateKey
-}
-
-func generateRSA() ([]byte, *rsa.PrivateKey, error) {
-	// Генерируем RSA ключи
+// NewEncryptionRequest generates a fresh 1024-bit RSA keypair and returns the
+// DER-encoded public key (PKIX) plus the private key. The public key is what
+// gets sent in the Encryption Request packet.
+func NewEncryptionRequest() (publicKey []byte, privateKey *rsa.PrivateKey, err error) {
 	priv, err := rsa.GenerateKey(rand.Reader, 1024)
 	if err != nil {
 		return nil, nil, fmt.Errorf("generating RSA key: %w", err)
 	}
-
 	pubASN1, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
 	if err != nil {
 		return nil, nil, fmt.Errorf("marshaling public key: %w", err)
 	}
 	return pubASN1, priv, nil
-}
-
-func NewEncryptionRequest() (*EncryptionRequest, *rsa.PrivateKey, error) {
-	pubKey, privKey, err := generateRSA()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// Генерируем случайный nonce (16 байт)
-	nonce := make([]byte, 16)
-	if _, err := rand.Read(nonce); err != nil {
-		return nil, nil, fmt.Errorf("generating nonce: %w", err)
-	}
-
-	return &EncryptionRequest{
-		ServerID:  serverID,
-		PublicKey: pubKey,
-		Nonce:     nonce,
-	}, privKey, nil
 }
