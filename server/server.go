@@ -46,6 +46,18 @@ func New() *Server {
 	}
 }
 
+// SetBlock updates the world and broadcasts a Block Update packet to every
+// connected player. The change is visible immediately to clients already in
+// game; new joiners pick it up via sendCurrentWorldState on login.
+func (s *Server) SetBlock(p world.Position, b world.Block) {
+	s.World.SetBlock(p, b)
+
+	var buf bytes.Buffer
+	buf.Write(protocol.WritePosition(p.X, p.Y, p.Z))
+	protocol.WriteVarInt32ToBuffer(&buf, b.StateID)
+	s.Players.Broadcast(CbPlayBlockUpdate, buf.Bytes(), -1)
+}
+
 // HandleConn drives a single client connection through its state machine.
 // Call in a goroutine per accepted net.Conn.
 func (s *Server) HandleConn(conn net.Conn) {
@@ -168,6 +180,7 @@ func (c *ClientConnection) sendPlayPackets() error {
 		{"Sync Player Position", func() error {
 			return c.sendSyncPlayerPosition(p.X, p.Y, p.Z, 1)
 		}},
+		{"World State", c.sendCurrentWorldState},
 	}
 	for _, pkt := range packets {
 		if c.isClosed() {

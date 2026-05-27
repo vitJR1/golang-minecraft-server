@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"minecraft-server/ban"
 	"minecraft-server/server"
+	"minecraft-server/world"
 	"net"
 )
 
@@ -13,6 +14,9 @@ func main() {
 	}
 
 	srv := server.New()
+	// Smoke-test seed: stone block at the position the user reported their
+	// player falling through.
+	srv.World.SetBlock(world.Position{X: 0, Y: 68, Z: 0}, world.Stone)
 
 	lis, err := net.Listen("tcp", ":25565")
 	if err != nil {

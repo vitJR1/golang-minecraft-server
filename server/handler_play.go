@@ -27,7 +27,8 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		fmt.Printf("[CHAT] %s: %s\n", c.playerName, message)
 		if !c.isClosed() {
 			response := fmt.Sprintf("{\"text\":\"You said: %s\"}", message)
-			_ = c.safeWrite(CbPlaySystemChat, protocol.WriteString(response))
+			payload := append(protocol.WriteString(response), 0) // Overlay = false
+			_ = c.safeWrite(CbPlaySystemChat, payload)
 		}
 
 	case SbPlaySetPos:

@@ -51,6 +51,7 @@ const (
 
 // Clientbound, state = play.
 const (
+	CbPlayBlockUpdate = 0x0A
 	CbPlayChunkData   = 0x24
 	CbPlayKeepAlive   = 0x23
 	CbPlayLogin       = 0x28

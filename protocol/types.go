@@ -233,6 +233,20 @@ func WriteInt(value int32) []byte {
 	return buf
 }
 
+// WritePosition encodes a block position into 8 bytes using the Minecraft
+// protocol's packed Position format: x (26 bits) | z (26 bits) | y (12 bits)
+// laid out as a single big-endian Long.
+//
+//	bits 63..38: x (signed, two's complement to 26 bits)
+//	bits 37..12: z (signed, two's complement to 26 bits)
+//	bits 11..0 : y (signed, two's complement to 12 bits, range -2048..2047)
+func WritePosition(x, y, z int) []byte {
+	encoded := ((int64(x) & 0x3FFFFFF) << 38) |
+		((int64(z) & 0x3FFFFFF) << 12) |
+		(int64(y) & 0xFFF)
+	return WriteLong(encoded)
+}
+
 func ReadUShortFromBuf(buf *bytes.Buffer) (uint16, error) {
 	if buf.Len() < 2 {
 		return 0, fmt.Errorf("insufficient data for ushort: need 2, have %d", buf.Len())

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"minecraft-server/chunk"
 	"minecraft-server/protocol"
+	"minecraft-server/world"
 )
 
 // sendLoginPlay writes the clientbound Login (Play) packet (0x28) for
@@ -68,6 +69,31 @@ func (c *ClientConnection) sendSyncPlayerPosition(x, y, z float64, teleportID in
 	buf.WriteByte(0)                  // flags (all absolute)
 	protocol.WriteVarInt32ToBuffer(&buf, teleportID)
 	return c.safeWrite(CbPlaySyncPos, buf.Bytes())
+}
+
+// sendBlockUpdate writes Block Update (0x09): a single block change at the
+// given position to the given block state.
+func (c *ClientConnection) sendBlockUpdate(p world.Position, b world.Block) error {
+	var buf bytes.Buffer
+	buf.Write(protocol.WritePosition(p.X, p.Y, p.Z))
+	protocol.WriteVarInt32ToBuffer(&buf, b.StateID)
+	return c.safeWrite(CbPlayBlockUpdate, buf.Bytes())
+}
+
+// sendCurrentWorldState replays every non-Air block in the world to this
+// client as Block Update packets. Used at login until we have a real chunk
+// streamer that bakes blocks into chunk-data palettes.
+func (c *ClientConnection) sendCurrentWorldState() error {
+	var firstErr error
+	c.server.World.Range(func(p world.Position, b world.Block) {
+		if firstErr != nil {
+			return
+		}
+		if err := c.sendBlockUpdate(p, b); err != nil {
+			firstErr = err
+		}
+	})
+	return firstErr
 }
 
 // sendChunkData writes the Chunk Data and Update Light packet (0x24) for an
