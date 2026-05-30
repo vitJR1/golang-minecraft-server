@@ -14,9 +14,9 @@ func main() {
 	}
 
 	srv := server.New()
-	// Smoke-test seed: stone block at the position the user reported their
-	// player falling through.
-	srv.World.SetBlock(world.Position{X: 0, Y: 68, Z: 0}, world.Stone)
+	// Smoke-test seed: stone block in the hub at the position the user
+	// reported their player falling through.
+	srv.Hub.World.SetBlock(world.Position{X: 0, Y: 68, Z: 0}, world.Stone)
 
 	lis, err := net.Listen("tcp", ":25565")
 	if err != nil {

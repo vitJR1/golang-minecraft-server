@@ -28,8 +28,12 @@ func (c *ClientConnection) cleanup() {
 	case <-time.After(time.Second):
 	}
 
-	// Announce departure + Remove under the same lock as join.
-	c.server.leaveAndAnnounce(c)
+	// Announce departure + Remove under the same lock as join, but only if
+	// the player ever made it into an instance (early disconnects during
+	// handshake/login leave c.instance nil).
+	if c.instance != nil {
+		c.instance.LeaveAndAnnounce(c)
+	}
 
 	c.conn.Close()
 	close(c.done)

@@ -53,6 +53,9 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 	}
 
 	c.state = StatePlay
+	// Default every new player into the hub instance. Cross-instance
+	// teleport (planned) is what moves them elsewhere later.
+	c.instance = c.server.Hub
 
 	if err := c.sendPlayPackets(); err != nil {
 		if c.isClosed() {
@@ -62,11 +65,11 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 		return fmt.Errorf("sending play packets: %w", err)
 	}
 
-	// Register + announce atomically. Doing both under joinMu means another
-	// player joining concurrently can't observe c half-registered (in the
-	// PlayerList but not yet visible to everyone), which would otherwise
-	// produce duplicate or out-of-order Spawn packets.
-	c.server.joinAndAnnounce(c)
+	// Register + announce atomically. Doing both under the instance's
+	// joinMu means another player joining concurrently can't observe c
+	// half-registered (in the PlayerList but not yet visible to everyone),
+	// which would otherwise produce duplicate or out-of-order Spawn packets.
+	c.instance.JoinAndAnnounce(c)
 
 	fmt.Printf("Player %s fully initialized and in game!\n", c.playerName)
 	return nil

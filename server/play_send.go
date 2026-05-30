@@ -92,7 +92,7 @@ func (c *ClientConnection) sendBlockUpdate(p world.Position, b world.Block) erro
 // streamer that bakes blocks into chunk-data palettes.
 func (c *ClientConnection) sendCurrentWorldState() error {
 	var firstErr error
-	c.server.World.Range(func(p world.Position, b world.Block) {
+	c.instance.World.Range(func(p world.Position, b world.Block) {
 		if firstErr != nil {
 			return
 		}

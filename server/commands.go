@@ -100,7 +100,7 @@ func cmdOp(c *ClientConnection, args []string) {
 	target := args[0]
 	c.server.Ops.Add(target)
 	_ = c.sendSystemMessage("Granted op to " + target)
-	if conn, ok := c.server.Players.ByName(target); ok {
+	if conn, _, ok := c.server.FindPlayer(target); ok {
 		_ = conn.sendSystemMessage("You are now an operator")
 	}
 }
@@ -113,7 +113,7 @@ func cmdDeop(c *ClientConnection, args []string) {
 	target := args[0]
 	c.server.Ops.Remove(target)
 	_ = c.sendSystemMessage("Revoked op from " + target)
-	if conn, ok := c.server.Players.ByName(target); ok {
+	if conn, _, ok := c.server.FindPlayer(target); ok {
 		_ = conn.sendSystemMessage("You are no longer an operator")
 	}
 }
@@ -132,7 +132,7 @@ func cmdGamemode(c *ClientConnection, args []string) {
 	}
 	target := c
 	if len(args) == 2 {
-		conn, ok := c.server.Players.ByName(args[1])
+		conn, _, ok := c.server.FindPlayer(args[1])
 		if !ok {
 			_ = c.sendSystemMessage("Player not found: " + args[1])
 			return
@@ -166,10 +166,15 @@ func parseGamemode(s string) (player.Gamemode, bool) {
 func cmdTp(c *ClientConnection, args []string) {
 	switch len(args) {
 	case 1:
-		// /tp <player> — teleport sender to target
-		target, ok := c.server.Players.ByName(args[0])
+		// /tp <player> — teleport sender to target. Only works inside the
+		// same instance for now — cross-instance teleport needs more wiring.
+		target, inst, ok := c.server.FindPlayer(args[0])
 		if !ok {
 			_ = c.sendSystemMessage("Player not found: " + args[0])
+			return
+		}
+		if inst != c.instance {
+			_ = c.sendSystemMessage("Player is in another instance")
 			return
 		}
 		s := target.player.Snapshot()

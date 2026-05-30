@@ -76,89 +76,25 @@ func removeEntitiesPayload(ids []int32) []byte {
 	return buf.Bytes()
 }
 
-// announceJoin makes a newly logged-in player visible to everyone, and
-// makes everyone else visible to the newcomer. Must run AFTER c is in
-// Server.Players (so the newcomer's tab-list bootstrap includes self).
-//
-// Protocol ordering matters: Player Info Update must precede Spawn Player,
-// otherwise the client rejects the spawn for an unknown UUID.
-// joinAndAnnounce atomically registers a newly-logged-in player and sends
-// the visibility packets. Holding s.joinMu while running both Add and the
-// announce eliminates the race where one player's announceJoin snapshot
-// could include another player who hasn't been announced yet.
-func (s *Server) joinAndAnnounce(c *ClientConnection) {
-	s.joinMu.Lock()
-	defer s.joinMu.Unlock()
-
-	s.Players.Add(c)
-
-	others := s.Players.snapshot()
-
-	// 1. Newcomer gets the full tab list (everyone, including self).
-	if payload := playerInfoAddPayload(others); payload != nil {
-		_ = c.safeWrite(CbPlayPlayerInfoUpdate, payload)
-	}
-
-	// 2. Newcomer spawns the visible entity for every other player.
-	for _, other := range others {
-		if other == c {
-			continue
-		}
-		_ = c.safeWrite(CbPlaySpawnPlayer, spawnPlayerPayload(other.player))
-	}
-
-	// 3. Everyone else adds newcomer to their tab list + spawns the entity.
-	addNewcomer := playerInfoAddPayload([]*ClientConnection{c})
-	spawnNewcomer := spawnPlayerPayload(c.player)
-	s.Players.Broadcast(CbPlayPlayerInfoUpdate, addNewcomer, c.player.EntityID)
-	s.Players.Broadcast(CbPlaySpawnPlayer, spawnNewcomer, c.player.EntityID)
-}
-
-// leaveAndAnnounce removes a departing player from everyone else's view and
-// unregisters from PlayerList — under the same joinMu the join path uses,
-// so concurrent join/leave traffic stays consistent. Safe to call when
-// c.player is nil (early disconnect before login completed): no-ops.
-func (s *Server) leaveAndAnnounce(c *ClientConnection) {
-	if c.player == nil {
-		return
-	}
-	s.joinMu.Lock()
-	defer s.joinMu.Unlock()
-
-	// Broadcast first (player still in list so except-filter works), then
-	// remove. Mirror the join order in reverse: despawn, then tab-list.
-	s.Players.Broadcast(
-		CbPlayRemoveEntities,
-		removeEntitiesPayload([]int32{c.player.EntityID}),
-		c.player.EntityID,
-	)
-	s.Players.Broadcast(
-		CbPlayPlayerInfoRemove,
-		playerInfoRemovePayload([][16]byte{c.player.UUID}),
-		c.player.EntityID,
-	)
-	s.Players.Remove(c.player.EntityID)
-}
-
-// broadcastEntityTeleport notifies every other player about this player's
-// current position. Called from handlePlay position handlers — once
-// c.player has been updated via MoveTo/MoveAndLook/LookAt.
+// broadcastEntityTeleport notifies every other player IN THE SAME INSTANCE
+// about this player's current position. Called from handlePlay position
+// handlers — once c.player has been updated via MoveTo/MoveAndLook/LookAt.
 func (c *ClientConnection) broadcastEntityTeleport() {
-	c.server.Players.Broadcast(
+	c.instance.Players.Broadcast(
 		CbPlayTeleportEntity,
 		teleportEntityPayload(c.player),
 		c.player.EntityID,
 	)
 }
 
-// broadcastEntityAnimation tells every other player to play an animation
-// on this player's entity. anim is the vanilla animation enum:
-// 0=swing main, 2=leave bed, 3=swing off-hand, 4=crit, 5=magic crit.
+// broadcastEntityAnimation tells every other player in this instance to
+// play an animation on this player's entity. anim is the vanilla
+// animation enum: 0=swing main, 2=leave bed, 3=swing off-hand, 4=crit, 5=magic crit.
 func (c *ClientConnection) broadcastEntityAnimation(anim byte) {
 	var buf bytes.Buffer
 	protocol.WriteVarInt32ToBuffer(&buf, c.player.EntityID)
 	buf.WriteByte(anim)
-	c.server.Players.Broadcast(CbPlayEntityAnimation, buf.Bytes(), c.player.EntityID)
+	c.instance.Players.Broadcast(CbPlayEntityAnimation, buf.Bytes(), c.player.EntityID)
 }
 
 // teleportEntityPayload sends an absolute-coordinate entity position. Used

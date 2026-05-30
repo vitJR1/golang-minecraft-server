@@ -3,7 +3,6 @@ package server
 import (
 	"bytes"
 	"crypto/rsa"
-	"encoding/json"
 	"fmt"
 	"io"
 	"minecraft-server/cfg"
@@ -44,68 +43,67 @@ type outboundMsg struct {
 	swapConn net.Conn
 }
 
-// Server holds process-wide shared state — the world, the entity-ID
-// allocator, the player list, the op set. One Server instance handles all
-// incoming connections via HandleConn.
+// Server holds process-wide shared state across all instances: the op
+// allocator, the op set, the entity-ID counter, and the hub instance.
+// World and PlayerList live on Instance now — per-game scoping is the
+// whole point of the mini-game architecture.
 type Server struct {
-	World        world.World
-	Players      *PlayerList
+	Hub          *Instance
 	Ops          *OpSet
 	nextEntityID atomic.Int32
-	// joinMu serializes registration + visibility announcements so the join
-	// of one player can't observe another player who's mid-join. See
-	// joinAndAnnounce / leaveAndAnnounce.
-	joinMu sync.Mutex
+
+	// instances is the registry of all live instances (including Hub).
+	// Used by FindPlayer for cross-instance lookups. Add/remove via
+	// addInstance/removeInstance (TODO: once we wire matchmaking).
+	mu        sync.RWMutex
+	instances map[string]*Instance
 }
 
-// New constructs a Server with an empty in-memory world, no players, and
-// an op set seeded from cfg.InitialOps.
+// New constructs a Server with an empty Hub instance and an op set seeded
+// from cfg.InitialOps.
 func New() *Server {
-	return &Server{
-		World:   world.NewMemoryWorld(),
-		Players: NewPlayerList(),
-		Ops:     NewOpSet(cfg.InitialOps),
+	s := &Server{
+		Ops:       NewOpSet(cfg.InitialOps),
+		instances: make(map[string]*Instance),
 	}
+	s.Hub = NewInstance("hub", s, world.NewMemoryWorld())
+	s.instances[s.Hub.ID] = s.Hub
+	return s
 }
 
-// SetBlock updates the world and broadcasts a Block Update packet to every
-// connected player. The change is visible immediately to clients already in
-// game; new joiners pick it up via sendCurrentWorldState on login.
-func (s *Server) SetBlock(p world.Position, b world.Block) {
-	s.World.SetBlock(p, b)
-
-	var buf bytes.Buffer
-	buf.Write(protocol.WritePosition(p.X, p.Y, p.Z))
-	protocol.WriteVarInt32ToBuffer(&buf, b.StateID)
-	s.Players.Broadcast(CbPlayBlockUpdate, buf.Bytes(), -1)
-}
-
-// BroadcastChat sends an in-game chat line to every connected player.
-// Format is the standard "<sender> message". An empty sender renders as a
-// server announcement (no angle brackets).
-func (s *Server) BroadcastChat(sender, message string) {
-	var line string
-	if sender == "" {
-		line = message
-	} else {
-		line = fmt.Sprintf("<%s> %s", sender, message)
+// FindPlayer looks up a logged-in player by name across every instance.
+// Returns the connection and the instance it currently lives in.
+func (s *Server) FindPlayer(name string) (*ClientConnection, *Instance, bool) {
+	s.mu.RLock()
+	instances := make([]*Instance, 0, len(s.instances))
+	for _, i := range s.instances {
+		instances = append(instances, i)
 	}
-	payload := buildSystemChatPayload(line)
-	s.Players.Broadcast(CbPlaySystemChat, payload, -1)
+	s.mu.RUnlock()
+	for _, i := range instances {
+		if c, ok := i.Players.ByName(name); ok {
+			return c, i, true
+		}
+	}
+	return nil, nil, false
 }
 
-// SendSystemMessage delivers a SystemChat line to a single player. Used by
+// PlayerCount sums Players across every instance. Cheap enough for /list
+// and tests; not a hot path.
+func (s *Server) PlayerCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	total := 0
+	for _, i := range s.instances {
+		total += i.Players.Count()
+	}
+	return total
+}
+
+// sendSystemMessage delivers a SystemChat line to a single player. Used by
 // command responses and other server → one-player notifications.
 func (c *ClientConnection) sendSystemMessage(text string) error {
 	return c.safeWrite(CbPlaySystemChat, buildSystemChatPayload(text))
-}
-
-// buildSystemChatPayload assembles the System Chat (Cb 0x64) body: a JSON
-// chat component string followed by the "overlay" boolean (false = chat
-// area, true = action bar).
-func buildSystemChatPayload(text string) []byte {
-	encoded, _ := json.Marshal(map[string]string{"text": text})
-	return append(protocol.WriteString(string(encoded)), 0)
 }
 
 // HandleConn drives a single client connection through its state machine.
@@ -162,6 +160,12 @@ type ClientConnection struct {
 	// player is nil until login completes successfully. Reach for it only
 	// after the connection has transitioned to StatePlay.
 	player *player.Player
+
+	// instance is the world/room this player currently lives in. Set when
+	// login completes (defaults to Hub) and never changes until we add
+	// cross-instance teleport. Single writer (handler_login), readers are
+	// the broadcast paths and command handlers.
+	instance *Instance
 
 	closed int32 // atomic flag (use isClosed/cleanup)
 	done   chan struct{}

@@ -279,12 +279,12 @@ func TestPlayerListRegistersAndBroadcasts(t *testing.T) {
 	completeOfflineLogin(t, cli2, "Bob")
 	bobCh := cli2.startDrain()
 
-	waitFor(t, time.Second, func() bool { return s.Players.Count() == 2 },
+	waitFor(t, time.Second, func() bool { return s.PlayerCount() == 2 },
 		"Players.Count == 2")
-	if _, ok := s.Players.ByName("Alice"); !ok {
+	if _, ok := s.Hub.Players.ByName("Alice"); !ok {
 		t.Error("Alice missing from PlayerList")
 	}
-	if _, ok := s.Players.ByName("Bob"); !ok {
+	if _, ok := s.Hub.Players.ByName("Bob"); !ok {
 		t.Error("Bob missing from PlayerList")
 	}
 
@@ -296,7 +296,7 @@ func TestPlayerListRegistersAndBroadcasts(t *testing.T) {
 		CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer)
 
 	chat := append(protocol.WriteString(`{"text":"hello"}`), 0) // overlay = false
-	s.Players.Broadcast(CbPlaySystemChat, chat, -1)
+	s.Hub.Players.Broadcast(CbPlaySystemChat, chat, -1)
 
 	drainExpect(t, aliceCh, "Alice chat", CbPlaySystemChat)
 	drainExpect(t, bobCh, "Bob chat", CbPlaySystemChat)
@@ -338,10 +338,10 @@ func TestPlayerListBroadcastExceptSkipsSender(t *testing.T) {
 	drainExpect(t, bobCh, "Bob pre-chat",
 		CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer)
 
-	alice, _ := s.Players.ByName("Alice")
+	alice, _ := s.Hub.Players.ByName("Alice")
 
 	payload := append(protocol.WriteString(`{"text":"from alice"}`), 0)
-	s.Players.Broadcast(CbPlaySystemChat, payload, alice.player.EntityID)
+	s.Hub.Players.Broadcast(CbPlaySystemChat, payload, alice.player.EntityID)
 
 	drainExpect(t, bobCh, "Bob chat", CbPlaySystemChat)
 
@@ -363,12 +363,12 @@ func TestPlayerListRemovesOnDisconnect(t *testing.T) {
 	// Players.Add now happens inside joinAndAnnounce (after sendPlayPackets'
 	// 40ms of inter-packet sleeps), so the count won't be 1 immediately —
 	// wait until the join settles.
-	waitFor(t, time.Second, func() bool { return s.Players.Count() == 1 },
+	waitFor(t, time.Second, func() bool { return s.PlayerCount() == 1 },
 		"Players.Count == 1")
 
 	_ = cli.conn.Close()
 
-	waitFor(t, time.Second, func() bool { return s.Players.Count() == 0 },
+	waitFor(t, time.Second, func() bool { return s.PlayerCount() == 0 },
 		"PlayerList to drain after client disconnect")
 }
 
@@ -493,14 +493,14 @@ func TestBlockPlaceBroadcastsAndAcks(t *testing.T) {
 		CbPlayAckBlockChange, CbPlayBlockUpdate)
 
 	// World state reflects the placement.
-	if got := s.World.GetBlock(world.Position{X: 0, Y: 64, Z: 0}); got != world.Stone {
+	if got := s.Hub.World.GetBlock(world.Position{X: 0, Y: 64, Z: 0}); got != world.Stone {
 		t.Errorf("world: got %+v, want Stone", got)
 	}
 }
 
 func TestBlockBreakClearsAndAcks(t *testing.T) {
 	s := New()
-	s.World.SetBlock(world.Position{X: 5, Y: 70, Z: 5}, world.Stone)
+	s.Hub.World.SetBlock(world.Position{X: 5, Y: 70, Z: 5}, world.Stone)
 
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Breaker")
@@ -522,7 +522,7 @@ func TestBlockBreakClearsAndAcks(t *testing.T) {
 	drainExpect(t, ch, "Ack + Block Update",
 		CbPlayAckBlockChange, CbPlayBlockUpdate)
 
-	if got := s.World.GetBlock(world.Position{X: 5, Y: 70, Z: 5}); got != world.Air {
+	if got := s.Hub.World.GetBlock(world.Position{X: 5, Y: 70, Z: 5}); got != world.Air {
 		t.Errorf("world: got %+v, want Air after break", got)
 	}
 }

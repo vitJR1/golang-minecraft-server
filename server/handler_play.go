@@ -27,7 +27,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			return fmt.Errorf("reading chat message: %w", err)
 		}
 		fmt.Printf("[CHAT] %s: %s\n", c.playerName, message)
-		c.server.BroadcastChat(c.playerName, message)
+		c.instance.BroadcastChat(c.playerName, message)
 
 	case SbPlayChatCommand:
 		raw, err := protocol.ReadStringFromBuf(packet)
@@ -113,7 +113,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		// Until we have inventory, every right-click places a Stone block on
 		// the face that was clicked.
 		placePos := offsetByFace(world.Position{X: bx, Y: by, Z: bz}, face)
-		c.server.SetBlock(placePos, world.Stone)
+		c.instance.SetBlock(placePos, world.Stone)
 
 	case SbPlayPlayerAction:
 		// action(VarInt) + Position(8) + face(Byte) + sequence(VarInt)
@@ -136,7 +136,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		// 3 = drop item stack, 4 = drop item, 5 = shoot arrow / finish eating,
 		// 6 = swap held items. We treat 0/2 as "break this block".
 		if action == 0 || action == 2 {
-			c.server.SetBlock(world.Position{X: bx, Y: by, Z: bz}, world.Air)
+			c.instance.SetBlock(world.Position{X: bx, Y: by, Z: bz}, world.Air)
 		}
 
 	case SbPlayInteract:
