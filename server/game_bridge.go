@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"log/slog"
 	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/world"
@@ -89,7 +90,7 @@ func (b playerBridge) SetGamemode(g player.Gamemode) {
 // which we haven't wired up. Client will see a generic "Connection lost".
 func (b playerBridge) Kick(reason string) {
 	if reason != "" {
-		fmt.Printf("Kicking %s: %s\n", b.conn.playerName, reason)
+		slog.Info("kicking player", "player", b.conn.playerName, "reason", reason)
 	}
 	go b.conn.cleanup()
 }

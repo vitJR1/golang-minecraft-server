@@ -1,7 +1,7 @@
 package server
 
 import (
-	"fmt"
+	"log/slog"
 	"sync/atomic"
 	"time"
 )
@@ -35,7 +35,8 @@ func (c *ClientConnection) cleanup() {
 		c.instance.LeaveAndAnnounce(c)
 	}
 
+	addr := c.conn.RemoteAddr().String()
 	c.conn.Close()
 	close(c.done)
-	fmt.Printf("Connection from %s closed\n", c.conn.RemoteAddr())
+	slog.Info("connection closed", "addr", addr, "player", c.playerName)
 }

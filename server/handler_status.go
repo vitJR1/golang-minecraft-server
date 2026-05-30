@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"minecraft-server/protocol"
 )
 
 func (c *ClientConnection) handleStatus(packet *bytes.Buffer, packetID int) error {
 	switch packetID {
 	case SbStatusRequest:
-		fmt.Println("Received status request")
+		slog.Debug("status request", "addr", c.conn.RemoteAddr().String())
 		resp := map[string]any{
 			"version": map[string]any{
 				"name":     "1.20.1",
@@ -28,7 +29,7 @@ func (c *ClientConnection) handleStatus(packet *bytes.Buffer, packetID int) erro
 		return c.safeWrite(CbStatusResponse, protocol.WriteString(string(data)))
 
 	case SbStatusPing:
-		fmt.Println("Received ping")
+		slog.Debug("status ping", "addr", c.conn.RemoteAddr().String())
 		payload := make([]byte, 8)
 		if _, err := packet.Read(payload); err != nil {
 			return fmt.Errorf("reading ping payload: %w", err)

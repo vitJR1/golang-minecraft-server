@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"fmt"
+	"log/slog"
 	"minecraft-server/protocol"
 )
 
@@ -38,10 +39,10 @@ func (c *ClientConnection) handleHandshake(packet *bytes.Buffer, packetID int) e
 	switch nextState {
 	case 1:
 		c.state = StateStatus
-		fmt.Println("Switched to status state")
+		slog.Debug("state → status", "addr", c.conn.RemoteAddr().String())
 	case 2:
 		c.state = StateLogin
-		fmt.Println("Switched to login state")
+		slog.Debug("state → login", "addr", c.conn.RemoteAddr().String())
 	default:
 		return fmt.Errorf("invalid handshake nextState: %d", nextState)
 	}

@@ -1,35 +1,67 @@
 package main
 
 import (
-	"fmt"
+	"log/slog"
 	"minecraft-server/ban"
+	"minecraft-server/logger"
+	"minecraft-server/schem"
 	"minecraft-server/server"
-	"minecraft-server/world"
 	"net"
+	"os"
 )
 
 func main() {
+	logger.Init()
+
 	if err := ban.Load("banlist.json"); err != nil {
-		fmt.Printf("warning: failed to load banlist.json: %v\n", err)
+		slog.Warn("failed to load banlist", "path", "banlist.json", "err", err)
 	}
 
 	srv := server.New()
-	// Smoke-test seed: stone block in the hub at the position the user
-	// reported their player falling through.
-	srv.Hub.World.SetBlock(world.Position{X: 0, Y: 68, Z: 0}, world.Stone)
+	loadHubSpawn(srv)
 
-	lis, err := net.Listen("tcp", ":25565")
+	const addr = ":25565"
+	lis, err := net.Listen("tcp", addr)
 	if err != nil {
-		panic(err)
+		slog.Error("listen failed", "addr", addr, "err", err)
+		os.Exit(1)
 	}
-	fmt.Println("Listening on :25565 (Minecraft test server)")
+	slog.Info("listening", "addr", addr, "version", "1.20.1", "protocol", 763)
 
 	for {
 		conn, err := lis.Accept()
 		if err != nil {
-			fmt.Printf("accept error: %v\n", err)
+			slog.Error("accept failed", "err", err)
 			continue
 		}
 		go srv.HandleConn(conn)
 	}
+}
+
+// loadHubSpawn drops the schematic at schem/templates/spawn.schem onto
+// the hub's world. Runs before the listener accepts any connection, so
+// directly mutating Hub.World is safe (no concurrent readers).
+//
+// The schematic is centred horizontally around (0, _, 0) — its corner
+// lands at (-width/2, baseY, -length/2) — so players spawning at the
+// default (0, 80, 0) fall down onto/into the build instead of beside it.
+func loadHubSpawn(srv *server.Server) {
+	const (
+		path  = "schem/templates/spawn.schem"
+		baseY = 64 // bottom of the schematic in world coords
+	)
+	sch, err := schem.LoadFile(path)
+	if err != nil {
+		slog.Warn("skipping spawn load", "path", path, "err", err)
+		return
+	}
+	originX := -int(sch.Width) / 2
+	originZ := -int(sch.Length) / 2
+	tmpl := sch.ToTemplateAt(originX, baseY, originZ)
+	srv.Hub.World = tmpl.Instantiate()
+	slog.Info("loaded spawn schematic",
+		"path", path,
+		"width", sch.Width, "height", sch.Height, "length", sch.Length,
+		"blocks", len(sch.Blocks),
+		"origin_x", originX, "origin_y", baseY, "origin_z", originZ)
 }

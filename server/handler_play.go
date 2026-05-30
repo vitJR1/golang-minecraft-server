@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"fmt"
+	"log/slog"
 	"minecraft-server/protocol"
 	"minecraft-server/world"
 	"strings"
@@ -26,7 +27,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		if err != nil {
 			return fmt.Errorf("reading chat message: %w", err)
 		}
-		fmt.Printf("[CHAT] %s: %s\n", c.playerName, message)
+		slog.Info("chat", "player", c.playerName, "msg", message)
 		if hook := c.instance.OnChat; hook != nil {
 			rewrite, allow := hook(c, message)
 			if !allow {
@@ -44,7 +45,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		// Strip the leading slash if the client included it (it usually does
 		// not — the client sends just the name+args).
 		raw = strings.TrimPrefix(raw, "/")
-		fmt.Printf("[CMD] %s: /%s\n", c.playerName, raw)
+		slog.Info("command", "player", c.playerName, "cmd", raw)
 		c.server.RunCommand(c, raw)
 
 	case SbPlaySetPos:
@@ -201,7 +202,10 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		_, _ = protocol.ReadVarInt(packet)
 
 	default:
-		fmt.Printf("Unknown play packet: 0x%02X, length: %d\n", packetID, packet.Len())
+		slog.Debug("unknown play packet",
+			"player", c.playerName,
+			"packet_id", fmt.Sprintf("0x%02X", packetID),
+			"length", packet.Len())
 	}
 	return nil
 }

@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"fmt"
+	"log/slog"
 	"minecraft-server/ban"
 	"minecraft-server/cfg"
 	"minecraft-server/encryption"
@@ -17,7 +18,7 @@ import (
 
 func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error {
 	if packetID != SbLoginStart {
-		fmt.Printf("Unknown login packet: 0x%02X\n", packetID)
+		slog.Warn("unknown login packet", "packet_id", fmt.Sprintf("0x%02X", packetID))
 		return nil
 	}
 
@@ -26,7 +27,7 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 		return fmt.Errorf("reading player name: %w", err)
 	}
 	c.playerName = name
-	fmt.Printf("Player connecting: %s\n", c.playerName)
+	slog.Info("player connecting", "player", c.playerName)
 
 	if c.isClosed() {
 		return fmt.Errorf("server closed during login")
@@ -59,7 +60,8 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 
 	if err := c.sendPlayPackets(); err != nil {
 		if c.isClosed() {
-			fmt.Printf("Client disconnected during play packets: %v\n", err)
+			slog.Info("client disconnected during play packets",
+				"player", c.playerName, "err", err)
 			return nil
 		}
 		return fmt.Errorf("sending play packets: %w", err)
@@ -71,7 +73,7 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 	// which would otherwise produce duplicate or out-of-order Spawn packets.
 	c.instance.JoinAndAnnounce(c)
 
-	fmt.Printf("Player %s fully initialized and in game!\n", c.playerName)
+	slog.Info("player joined", "player", c.playerName, "instance", c.instance.ID)
 	return nil
 }
 
@@ -115,7 +117,7 @@ func (c *ClientConnection) enableCompression() error {
 // player's name and immediately sends LoginSuccess in plaintext.
 func (c *ClientConnection) runOfflineLogin() error {
 	uuidStr := protocol.OfflineUUID(c.playerName)
-	fmt.Println("Player uuid:", uuidStr)
+	slog.Debug("offline uuid resolved", "player", c.playerName, "uuid", uuidStr)
 
 	uuidBytes, err := protocol.WriteUUID(uuidStr)
 	if err != nil {
@@ -144,7 +146,7 @@ func (c *ClientConnection) runOfflineLogin() error {
 // Request → Encryption Response → RSA decrypt → Mojang verify → enable AES
 // CFB8 → LoginSuccess.
 func (c *ClientConnection) runOnlineLogin() error {
-	fmt.Printf("Online mode: will verify %s with Mojang\n", c.playerName)
+	slog.Info("online-mode login: verifying with Mojang", "player", c.playerName)
 
 	verifyToken := make([]byte, 4)
 	_, _ = rand.Read(verifyToken)
@@ -159,12 +161,12 @@ func (c *ClientConnection) runOnlineLogin() error {
 
 	profile, err := mojang.VerifyWithMojang(c.playerName, cfg.ServerId, sharedSecret, publicKey)
 	if err != nil {
-		fmt.Printf("Mojang verification failed: %v\n", err)
+		slog.Warn("mojang verification failed", "player", c.playerName, "err", err)
 		msg := []byte(`{"text":"Authentication failed: ` + err.Error() + `"}`)
 		_ = c.safeWrite(CbLoginDisconnect, protocol.WriteString(string(msg)))
 		return fmt.Errorf("mojang verification: %w", err)
 	}
-	fmt.Printf("Authentication successful: %s (%s)\n", profile.Name, profile.ID)
+	slog.Info("mojang verified", "player", profile.Name, "uuid", profile.ID)
 
 	if err := c.enableEncryption(sharedSecret); err != nil {
 		return err
@@ -193,7 +195,7 @@ func (c *ClientConnection) runOnlineLogin() error {
 	if err := c.safeWrite(CbLoginSuccess, payload); err != nil {
 		return fmt.Errorf("sending login success: %w", err)
 	}
-	fmt.Println("Sent login success")
+	slog.Debug("login success sent", "player", profile.Name)
 	return nil
 }
 
@@ -280,6 +282,6 @@ func (c *ClientConnection) enableEncryption(sharedSecret []byte) error {
 	default:
 		return fmt.Errorf("send queue full")
 	}
-	fmt.Println("Encrypted connection established")
+	slog.Debug("encrypted connection established", "player", c.playerName)
 	return nil
 }

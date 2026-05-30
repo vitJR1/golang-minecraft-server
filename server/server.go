@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"fmt"
 	"io"
+	"log/slog"
 	"minecraft-server/cfg"
 	"minecraft-server/player"
 	"minecraft-server/protocol"
@@ -265,8 +266,8 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 	// 5. Reset the player's position to spawn.
 	c.player.MoveTo(x, y, z, false)
 
-	// 6. Stream the new chunk + world state.
-	if err := c.sendChunkData(0, 0); err != nil {
+	// 6. Stream the new chunks + world state.
+	if err := c.sendInitialChunks(); err != nil {
 		return fmt.Errorf("chunk data: %w", err)
 	}
 	if err := c.sendSyncPlayerPosition(x, y, z, 1); err != nil {
@@ -299,7 +300,7 @@ func (s *Server) HandleConn(conn net.Conn) {
 		done:                 make(chan struct{}),
 		writerDone:           make(chan struct{}),
 	}
-	fmt.Printf("New connection from %s\n", conn.RemoteAddr())
+	slog.Info("new connection", "addr", conn.RemoteAddr().String())
 	defer client.cleanup()
 
 	go client.writerLoop()
@@ -375,7 +376,8 @@ func (c *ClientConnection) readLoop() {
 		c.conn.SetReadDeadline(time.Time{})
 
 		if err := c.processPacket(packet); err != nil {
-			fmt.Printf("Error processing packet: %v\n", err)
+			slog.Error("process packet failed",
+				"player", c.playerName, "state", c.state.String(), "err", err)
 			// Play-state errors aren't necessarily fatal (one malformed packet
 			// shouldn't kick the player). For pre-play states, bail.
 			if c.state != StatePlay {
@@ -458,7 +460,7 @@ func (c *ClientConnection) handleWriteError(err error) {
 	if c.isClosed() {
 		return
 	}
-	fmt.Printf("Client %s write error: %v\n", c.playerName, err)
+	slog.Error("client write failed", "player", c.playerName, "err", err)
 	go c.cleanup()
 }
 
@@ -468,14 +470,14 @@ func (c *ClientConnection) handleReadError(err error) {
 	}
 	switch {
 	case err == io.EOF:
-		fmt.Printf("Client %s gracefully disconnected\n", c.playerName)
+		slog.Info("client disconnected", "player", c.playerName)
 	default:
 		if opErr, ok := err.(*net.OpError); ok {
 			if opErr.Err.Error() == "use of closed network connection" {
 				return
 			}
 		}
-		fmt.Printf("Client %s read error: %v\n", c.playerName, err)
+		slog.Warn("client read failed", "player", c.playerName, "err", err)
 	}
 	c.cleanup()
 }
@@ -509,7 +511,7 @@ func (c *ClientConnection) sendPlayPackets() error {
 		f    func() error
 	}{
 		{"Login (Play)", c.sendLoginPlay},
-		{"Chunk Data", func() error { return c.sendChunkData(0, 0) }},
+		{"Chunk Data", c.sendInitialChunks},
 		{"Sync Player Position", func() error {
 			return c.sendSyncPlayerPosition(spawn.X, spawn.Y, spawn.Z, 1)
 		}},

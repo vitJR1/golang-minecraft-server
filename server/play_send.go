@@ -128,6 +128,28 @@ func (c *ClientConnection) sendCurrentWorldState() error {
 	return firstErr
 }
 
+// HubChunkRadius controls how many empty chunks are streamed around the
+// spawn point. The square covers chunks [-R .. R-1] on both axes — so
+// R=2 sends 4×4 = 16 chunks total, enough for the 1×1-chunk schematic
+// at the origin plus a ring of loaded terrain around it (no void edges
+// in the client's view).
+const HubChunkRadius int32 = 2
+
+// sendInitialChunks streams a 2R × 2R square of empty chunks centred on
+// world (0, 0). Used at login and after cross-instance teleport so the
+// client has loaded terrain to render before sendCurrentWorldState
+// replays the actual blocks via Block Update packets.
+func (c *ClientConnection) sendInitialChunks() error {
+	for cx := -HubChunkRadius; cx < HubChunkRadius; cx++ {
+		for cz := -HubChunkRadius; cz < HubChunkRadius; cz++ {
+			if err := c.sendChunkData(cx, cz); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // sendChunkData writes the Chunk Data and Update Light packet (0x24) for an
 // empty chunk. All sections are air, all light masks are empty (the client
 // fills in default full-bright light for missing data, which is acceptable

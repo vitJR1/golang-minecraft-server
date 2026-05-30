@@ -1,7 +1,7 @@
 package server
 
 import (
-	"fmt"
+	"log/slog"
 	"minecraft-server/protocol"
 	"time"
 )
@@ -24,7 +24,7 @@ func (c *ClientConnection) keepAlive() {
 
 			err := c.safeWrite(CbPlayKeepAlive, payload)
 			if err != nil {
-				fmt.Printf("Keep-alive error: %v\n", err)
+				slog.Warn("keep-alive write failed", "player", c.playerName, "err", err)
 				return
 			}
 		}

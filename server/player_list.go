@@ -1,7 +1,7 @@
 package server
 
 import (
-	"fmt"
+	"log/slog"
 	"sync"
 )
 
@@ -108,7 +108,8 @@ func (pl *PlayerList) Broadcast(packetID int32, payload []byte, exceptEntityID i
 			continue
 		}
 		if err := c.safeWrite(packetID, payload); err != nil {
-			fmt.Printf("broadcast to %s: %v\n", c.player.Name, err)
+			slog.Warn("broadcast failed",
+				"player", c.player.Name, "packet_id", packetID, "err", err)
 		}
 	}
 }

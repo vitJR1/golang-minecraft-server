@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"minecraft-server/protocol"
 	"minecraft-server/world"
 	"sync"
@@ -148,8 +149,8 @@ func (i *Instance) runTick() {
 func safeTick(i *Instance, h TickHandler, tick uint64) {
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Printf("instance %s tick handler panic at tick %d: %v\n",
-				i.ID, tick, r)
+			slog.Error("tick handler panic",
+				"instance", i.ID, "tick", tick, "panic", fmt.Sprint(r))
 		}
 	}()
 	h(tick)
@@ -230,7 +231,8 @@ func (i *Instance) LeaveAndAnnounce(c *ClientConnection) {
 func safeHook(i *Instance, name string, fn func()) {
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Printf("instance %s %s hook panic: %v\n", i.ID, name, r)
+			slog.Error("hook panic",
+				"instance", i.ID, "hook", name, "panic", fmt.Sprint(r))
 		}
 	}()
 	fn()
