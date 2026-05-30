@@ -97,6 +97,19 @@ func (c *ClientConnection) broadcastEntityAnimation(anim byte) {
 	c.instance.Players.Broadcast(CbPlayEntityAnimation, buf.Bytes(), c.player.EntityID)
 }
 
+// broadcastHeadRotation syncs head yaw separately from body yaw. Vanilla
+// tracks them independently: Teleport Entity / Update Entity Rotation only
+// updates the body. Without this, other clients see the player's head
+// stuck at its initial direction even as the body rotates (the "facing
+// away from you" bug).
+func (c *ClientConnection) broadcastHeadRotation() {
+	s := c.player.Snapshot()
+	var buf bytes.Buffer
+	protocol.WriteVarInt32ToBuffer(&buf, s.EntityID)
+	buf.WriteByte(protocol.AngleToByte(s.Yaw))
+	c.instance.Players.Broadcast(CbPlayHeadRotation, buf.Bytes(), s.EntityID)
+}
+
 // teleportEntityPayload sends an absolute-coordinate entity position. Used
 // for all player movement updates for now — simpler than computing relative
 // short deltas and stays correct for any move size.

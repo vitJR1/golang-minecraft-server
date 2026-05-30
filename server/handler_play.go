@@ -27,6 +27,13 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			return fmt.Errorf("reading chat message: %w", err)
 		}
 		fmt.Printf("[CHAT] %s: %s\n", c.playerName, message)
+		if hook := c.instance.OnChat; hook != nil {
+			rewrite, allow := hook(c, message)
+			if !allow {
+				break
+			}
+			message = rewrite
+		}
 		c.instance.BroadcastChat(c.playerName, message)
 
 	case SbPlayChatCommand:
@@ -59,6 +66,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		}
 		c.player.MoveAndLook(x, y, z, yaw, pitch, onGround)
 		c.broadcastEntityTeleport()
+		c.broadcastHeadRotation()
 
 	case SbPlaySetRot:
 		yaw, pitch, onGround, err := readYawPitchOnGround(packet)
@@ -67,6 +75,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		}
 		c.player.LookAt(yaw, pitch, onGround)
 		c.broadcastEntityTeleport()
+		c.broadcastHeadRotation()
 
 	case SbPlayTeleportConfirm:
 		_, _ = protocol.ReadVarInt(packet) // teleport id, no-op
@@ -74,6 +83,23 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 	case SbPlayClientInfo:
 		// Sent right after LoginSuccess (locale, view distance, chat mode,
 		// displayed skin parts, main hand). No-op for now.
+
+	case SbPlayPluginMessage:
+		// Custom-channel data, e.g. vanilla client sends "minecraft:brand"
+		// = "vanilla" right after login. We don't act on any of these yet.
+		// Read the channel just so logs aren't noisy, then drop.
+		_, _ = protocol.ReadStringFromBuf(packet)
+
+	case SbPlayCommandSuggestReq:
+		// Silent no-op. We previously tried to parse as (VarInt txID +
+		// String text) but real 1.20.1 clients send bytes that don't fit
+		// that layout — first non-txID byte parsed as a VarInt string
+		// length comes out as ~114 with only ~11 bytes available. Without
+		// a confirmed format we'd just spam the log with parse errors,
+		// and a wrong reply would risk crashing the client. Tab complete
+		// remains unimplemented until we capture a real vanilla packet
+		// for diff. Server.Suggestions + sendCommandSuggestionsResponse
+		// are kept ready for when the format is verified.
 
 	case SbPlaySwingArm:
 		hand, err := protocol.ReadVarInt(packet)
@@ -113,6 +139,14 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		// Until we have inventory, every right-click places a Stone block on
 		// the face that was clicked.
 		placePos := offsetByFace(world.Position{X: bx, Y: by, Z: bz}, face)
+		if hook := c.instance.OnBlockPlace; hook != nil {
+			if !hook(c, placePos, world.Stone) {
+				// Veto: replay the existing block back to the client to
+				// roll back its placement prediction.
+				_ = c.sendBlockUpdate(placePos, c.instance.World.GetBlock(placePos))
+				break
+			}
+		}
 		c.instance.SetBlock(placePos, world.Stone)
 
 	case SbPlayPlayerAction:
@@ -136,7 +170,14 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		// 3 = drop item stack, 4 = drop item, 5 = shoot arrow / finish eating,
 		// 6 = swap held items. We treat 0/2 as "break this block".
 		if action == 0 || action == 2 {
-			c.instance.SetBlock(world.Position{X: bx, Y: by, Z: bz}, world.Air)
+			pos := world.Position{X: bx, Y: by, Z: bz}
+			if hook := c.instance.OnBlockBreak; hook != nil {
+				if !hook(c, pos) {
+					_ = c.sendBlockUpdate(pos, c.instance.World.GetBlock(pos))
+					break
+				}
+			}
+			c.instance.SetBlock(pos, world.Air)
 		}
 
 	case SbPlayInteract:
@@ -146,6 +187,18 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		target, _ := protocol.ReadVarInt(packet)
 		atype, _ := protocol.ReadVarInt(packet)
 		_, _ = target, atype
+
+	case SbPlayPlayerAbilities:
+		// 1-byte flags. Bit 0x02 = flying (creative double-tap-space).
+		// No server-side enforcement yet — accept whatever the client says.
+		_, _ = packet.ReadByte()
+
+	case SbPlayPlayerCommand:
+		// entity_id (VarInt) + action (VarInt: sneak/sprint/etc.) +
+		// jump_boost (VarInt). No-op until games care about stamina.
+		_, _ = protocol.ReadVarInt(packet)
+		_, _ = protocol.ReadVarInt(packet)
+		_, _ = protocol.ReadVarInt(packet)
 
 	default:
 		fmt.Printf("Unknown play packet: 0x%02X, length: %d\n", packetID, packet.Len())

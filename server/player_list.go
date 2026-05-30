@@ -61,6 +61,19 @@ func (pl *PlayerList) Count() int {
 	return len(pl.by)
 }
 
+// UUIDs returns a snapshot of every player's UUID currently in the list.
+// Used by Server.MovePlayer to tell a departing client which tab-list
+// entries to clear before the new instance announces its set.
+func (pl *PlayerList) UUIDs() [][16]byte {
+	pl.mu.RLock()
+	defer pl.mu.RUnlock()
+	out := make([][16]byte, 0, len(pl.by))
+	for _, c := range pl.by {
+		out = append(out, c.player.UUID)
+	}
+	return out
+}
+
 // snapshot returns a copy of the current connection set so callers can
 // iterate without holding the mutex.
 func (pl *PlayerList) snapshot() []*ClientConnection {

@@ -6,6 +6,7 @@ import (
 	"minecraft-server/protocol"
 	"minecraft-server/world"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -606,6 +607,473 @@ func TestNonOpDeniedCommand(t *testing.T) {
 	if s.Ops.Has("Notch") {
 		t.Error("Non-op shouldn't be able to /op")
 	}
+}
+
+func TestOnBlockPlaceVetoRollsBack(t *testing.T) {
+	s := New()
+	var hookCalls atomic.Int64
+	s.Hub.OnBlockPlace = func(c *ClientConnection, pos world.Position, b world.Block) bool {
+		hookCalls.Add(1)
+		return false
+	}
+
+	cli := pipeClientOn(t, s)
+	completeOfflineLogin(t, cli, "Placer")
+	ch := cli.startDrain()
+	drainExpect(t, ch, "Placer solo", CbPlayPlayerInfoUpdate)
+
+	var p bytes.Buffer
+	protocol.WriteVarInt32ToBuffer(&p, 0)
+	p.Write(protocol.WritePosition(0, 63, 0))
+	protocol.WriteVarInt32ToBuffer(&p, 1) // face +Y
+	p.Write(protocol.WriteFloat(0.5))
+	p.Write(protocol.WriteFloat(1.0))
+	p.Write(protocol.WriteFloat(0.5))
+	p.WriteByte(0)
+	protocol.WriteVarInt32ToBuffer(&p, 7)
+	cli.write(t, SbPlayUseItemOnBlock, p.Bytes())
+
+	// Ack first, then the corrective Block Update with the prior block.
+	drainExpect(t, ch, "Placer ack + rollback", CbPlayAckBlockChange, CbPlayBlockUpdate)
+
+	if hookCalls.Load() != 1 {
+		t.Errorf("hook calls: got %d, want 1", hookCalls.Load())
+	}
+	if got := s.Hub.World.GetBlock(world.Position{X: 0, Y: 64, Z: 0}); got != world.Air {
+		t.Errorf("world should be unchanged: got %+v, want Air", got)
+	}
+}
+
+func TestOnBlockBreakVetoRollsBack(t *testing.T) {
+	s := New()
+	s.Hub.World.SetBlock(world.Position{X: 5, Y: 70, Z: 5}, world.Stone)
+	var hookCalls atomic.Int64
+	s.Hub.OnBlockBreak = func(c *ClientConnection, pos world.Position) bool {
+		hookCalls.Add(1)
+		return false
+	}
+
+	cli := pipeClientOn(t, s)
+	completeOfflineLogin(t, cli, "Breaker")
+	ch := cli.startDrain()
+	drainExpect(t, ch, "Breaker bootstrap", CbPlayBlockUpdate, CbPlayPlayerInfoUpdate)
+
+	var p bytes.Buffer
+	protocol.WriteVarInt32ToBuffer(&p, 0)
+	p.Write(protocol.WritePosition(5, 70, 5))
+	p.WriteByte(1)
+	protocol.WriteVarInt32ToBuffer(&p, 9)
+	cli.write(t, SbPlayPlayerAction, p.Bytes())
+
+	drainExpect(t, ch, "Breaker ack + rollback", CbPlayAckBlockChange, CbPlayBlockUpdate)
+
+	if hookCalls.Load() != 1 {
+		t.Errorf("hook calls: got %d, want 1", hookCalls.Load())
+	}
+	if got := s.Hub.World.GetBlock(world.Position{X: 5, Y: 70, Z: 5}); got != world.Stone {
+		t.Errorf("world should still have Stone: got %+v", got)
+	}
+}
+
+func TestOnChatRewrite(t *testing.T) {
+	s := New()
+	s.Hub.OnChat = func(c *ClientConnection, msg string) (string, bool) {
+		return "[censored]", true
+	}
+
+	cli := pipeClientOn(t, s)
+	completeOfflineLogin(t, cli, "Speaker")
+	// Drain own PlayerInfoUpdate from announceJoin so the next read picks
+	// up the chat broadcast. No startDrain here — we need cli.read to
+	// inspect the actual payload, and the drainer goroutine would race.
+	if id, _ := cli.read(t); id != CbPlayPlayerInfoUpdate {
+		t.Fatalf("expected own PlayerInfoUpdate, got 0x%02X", id)
+	}
+
+	cli.write(t, SbPlayChatMessage, protocol.WriteString("naughty text"))
+
+	id, payload := cli.read(t)
+	if id != CbPlaySystemChat {
+		t.Fatalf("expected SystemChat (0x%02X), got 0x%02X", CbPlaySystemChat, id)
+	}
+	jsonStr, err := protocol.ReadStringFromBuf(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains([]byte(jsonStr), []byte("censored")) {
+		t.Errorf("chat should be rewritten: %q", jsonStr)
+	}
+	if bytes.Contains([]byte(jsonStr), []byte("naughty")) {
+		t.Errorf("original text leaked: %q", jsonStr)
+	}
+}
+
+func TestOnChatVeto(t *testing.T) {
+	s := New()
+	s.Hub.OnChat = func(c *ClientConnection, msg string) (string, bool) {
+		return "", false
+	}
+
+	cli := pipeClientOn(t, s)
+	completeOfflineLogin(t, cli, "Silent")
+	ch := cli.startDrain()
+	drainExpect(t, ch, "Silent solo", CbPlayPlayerInfoUpdate)
+
+	cli.write(t, SbPlayChatMessage, protocol.WriteString("anything"))
+
+	select {
+	case id := <-ch:
+		t.Errorf("vetoed chat still emitted packet 0x%02X", id)
+	case <-time.After(150 * time.Millisecond):
+		// expected
+	}
+}
+
+func TestOnPlayerJoinHook(t *testing.T) {
+	s := New()
+	var joined atomic.Int64
+	var joinedName atomic.Value
+	s.Hub.OnPlayerJoin = func(c *ClientConnection) {
+		joined.Add(1)
+		joinedName.Store(c.player.Name)
+	}
+
+	cli := pipeClientOn(t, s)
+	completeOfflineLogin(t, cli, "Newbie")
+	_ = cli.startDrain()
+	waitFor(t, time.Second, func() bool { return joined.Load() == 1 },
+		"OnPlayerJoin to fire")
+
+	if got, _ := joinedName.Load().(string); got != "Newbie" {
+		t.Errorf("OnPlayerJoin saw name %q, want Newbie", got)
+	}
+}
+
+func TestOnPlayerLeaveHook(t *testing.T) {
+	s := New()
+	var left atomic.Int64
+	s.Hub.OnPlayerLeave = func(c *ClientConnection) {
+		left.Add(1)
+	}
+
+	cli := pipeClientOn(t, s)
+	completeOfflineLogin(t, cli, "Quitter")
+	_ = cli.startDrain()
+	waitFor(t, time.Second, func() bool { return s.PlayerCount() == 1 },
+		"player in list")
+
+	_ = cli.conn.Close()
+	waitFor(t, time.Second, func() bool { return left.Load() == 1 },
+		"OnPlayerLeave to fire")
+}
+
+func TestMovePlayerSwitchesInstances(t *testing.T) {
+	s := New()
+	arena := NewInstance("arena", s, world.NewMemoryWorld())
+	s.AddInstance(arena)
+	t.Cleanup(arena.Stop)
+
+	// Alice in arena is op so she can run /instance.
+	s.Ops.Add("Mover")
+
+	cli := pipeClientOn(t, s)
+	completeOfflineLogin(t, cli, "Mover")
+	ch := cli.startDrain()
+	drainExpect(t, ch, "Mover solo in hub", CbPlayPlayerInfoUpdate)
+
+	// Trigger the move.
+	cli.write(t, SbPlayChatCommand, protocol.WriteString("instance join arena"))
+
+	// Wire-level sequence for the move.
+	drainExpect(t, ch, "move sequence",
+		CbPlayPlayerInfoRemove, // clear hub tab list
+		CbPlayRespawn,          // tell client to wipe world + entities
+		CbPlayChunkData,        // arena's chunk
+		CbPlaySyncPos,          // arena spawn point
+		CbPlayPlayerInfoUpdate, // arena tab list (just Mover)
+		CbPlaySystemChat,       // "Moved to arena"
+	)
+
+	// Server-side: player is now in arena.
+	conn, inst, ok := s.FindPlayer("Mover")
+	if !ok {
+		t.Fatal("Mover not found after move")
+	}
+	if inst != arena {
+		t.Errorf("expected Mover in arena, got %s", inst.ID)
+	}
+	if conn.instance != arena {
+		t.Errorf("conn.instance: got %s, want arena", conn.instance.ID)
+	}
+	if s.Hub.Players.Count() != 0 {
+		t.Errorf("hub should be empty: count = %d", s.Hub.Players.Count())
+	}
+	if arena.Players.Count() != 1 {
+		t.Errorf("arena should have 1 player: count = %d", arena.Players.Count())
+	}
+}
+
+func TestMovePlayerNotifiesStayers(t *testing.T) {
+	s := New()
+	arena := NewInstance("arena", s, world.NewMemoryWorld())
+	s.AddInstance(arena)
+	t.Cleanup(arena.Stop)
+	s.Ops.Add("Leaver")
+
+	// Stayer joins hub, gets a drainer set up before Leaver joins.
+	stayer := pipeClientOn(t, s)
+	completeOfflineLogin(t, stayer, "Stayer")
+	stayerCh := stayer.startDrain()
+	drainExpect(t, stayerCh, "Stayer solo bootstrap", CbPlayPlayerInfoUpdate)
+
+	// Leaver joins hub.
+	leaver := pipeClientOn(t, s)
+	completeOfflineLogin(t, leaver, "Leaver")
+	leaverCh := leaver.startDrain()
+
+	// Both clients see each other appear.
+	drainExpect(t, stayerCh, "Stayer sees Leaver join",
+		CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer)
+	drainExpect(t, leaverCh, "Leaver bootstrap",
+		CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer)
+
+	// Leaver moves out — Stayer should see despawn first.
+	leaver.write(t, SbPlayChatCommand, protocol.WriteString("instance join arena"))
+
+	// Stayer receives RemoveEntities + PI Remove for Leaver (in that order,
+	// per LeaveAndAnnounce).
+	drainExpect(t, stayerCh, "Stayer sees Leaver leave",
+		CbPlayRemoveEntities, CbPlayPlayerInfoRemove)
+
+	// Leaver sees the full move sequence.
+	drainExpect(t, leaverCh, "Leaver move",
+		CbPlayPlayerInfoRemove,
+		CbPlayRespawn,
+		CbPlayChunkData,
+		CbPlaySyncPos,
+		CbPlayPlayerInfoUpdate,
+		CbPlaySystemChat,
+	)
+}
+
+func TestMoveToSameInstanceIsNoOp(t *testing.T) {
+	s := New()
+	s.Ops.Add("Player")
+
+	cli := pipeClientOn(t, s)
+	completeOfflineLogin(t, cli, "Player")
+	ch := cli.startDrain()
+	drainExpect(t, ch, "solo bootstrap", CbPlayPlayerInfoUpdate)
+
+	// /instance hub while already in hub — should reply but not move.
+	cli.write(t, SbPlayChatCommand, protocol.WriteString("instance join hub"))
+	drainExpect(t, ch, "already-there reply", CbPlaySystemChat)
+}
+
+func TestInstanceCreateAndJoin(t *testing.T) {
+	s := New()
+	s.Ops.Add("Builder")
+
+	cli := pipeClientOn(t, s)
+	completeOfflineLogin(t, cli, "Builder")
+	ch := cli.startDrain()
+	drainExpect(t, ch, "Builder solo", CbPlayPlayerInfoUpdate)
+
+	// Create
+	cli.write(t, SbPlayChatCommand, protocol.WriteString("instance create arena"))
+	drainExpect(t, ch, "create reply", CbPlaySystemChat)
+
+	if s.GetInstance("arena") == nil {
+		t.Fatal("arena not registered after /instance create")
+	}
+	t.Cleanup(func() { _ = s.RemoveInstance("arena") })
+
+	// Now join it.
+	cli.write(t, SbPlayChatCommand, protocol.WriteString("instance join arena"))
+	drainExpect(t, ch, "join sequence",
+		CbPlayPlayerInfoRemove,
+		CbPlayRespawn,
+		CbPlayChunkData,
+		CbPlaySyncPos,
+		CbPlayPlayerInfoUpdate,
+		CbPlaySystemChat,
+	)
+
+	conn, inst, ok := s.FindPlayer("Builder")
+	if !ok || inst.ID != "arena" {
+		t.Fatalf("Builder should be in arena, got ok=%v inst=%v", ok, inst)
+	}
+	_ = conn
+}
+
+func TestInstanceCreateDuplicateRejected(t *testing.T) {
+	s := New()
+	s.Ops.Add("Op")
+	NewInstance("existing", s, world.NewMemoryWorld())
+	s.AddInstance(s.GetInstance("hub")) // no-op, just sanity
+	arena := NewInstance("arena", s, world.NewMemoryWorld())
+	s.AddInstance(arena)
+	t.Cleanup(arena.Stop)
+
+	cli := pipeClientOn(t, s)
+	completeOfflineLogin(t, cli, "Op")
+	ch := cli.startDrain()
+	drainExpect(t, ch, "Op solo", CbPlayPlayerInfoUpdate)
+
+	cli.write(t, SbPlayChatCommand, protocol.WriteString("instance create arena"))
+	drainExpect(t, ch, "duplicate reply", CbPlaySystemChat)
+
+	// Still exactly one arena (hub + arena = 2 total).
+	if got := len(s.InstanceIDs()); got != 2 {
+		t.Errorf("instance count: got %d, want 2", got)
+	}
+}
+
+func TestInstanceDeleteEmpty(t *testing.T) {
+	s := New()
+	s.Ops.Add("Deleter")
+	arena := NewInstance("arena", s, world.NewMemoryWorld())
+	s.AddInstance(arena)
+
+	cli := pipeClientOn(t, s)
+	completeOfflineLogin(t, cli, "Deleter")
+	ch := cli.startDrain()
+	drainExpect(t, ch, "Deleter solo", CbPlayPlayerInfoUpdate)
+
+	cli.write(t, SbPlayChatCommand, protocol.WriteString("instance delete arena"))
+	drainExpect(t, ch, "delete reply", CbPlaySystemChat)
+
+	if s.GetInstance("arena") != nil {
+		t.Error("arena should be gone after /instance delete")
+	}
+}
+
+func TestInstanceDeleteHubRejected(t *testing.T) {
+	s := New()
+	s.Ops.Add("BadActor")
+
+	cli := pipeClientOn(t, s)
+	completeOfflineLogin(t, cli, "BadActor")
+	ch := cli.startDrain()
+	drainExpect(t, ch, "BadActor solo", CbPlayPlayerInfoUpdate)
+
+	cli.write(t, SbPlayChatCommand, protocol.WriteString("instance delete hub"))
+	drainExpect(t, ch, "reject reply", CbPlaySystemChat)
+
+	if s.GetInstance("hub") == nil {
+		t.Error("hub should still exist")
+	}
+}
+
+func TestInstanceDeleteSelfMovesToHub(t *testing.T) {
+	s := New()
+	s.Ops.Add("Solo")
+	arena := NewInstance("arena", s, world.NewMemoryWorld())
+	s.AddInstance(arena)
+
+	cli := pipeClientOn(t, s)
+	completeOfflineLogin(t, cli, "Solo")
+	ch := cli.startDrain()
+	drainExpect(t, ch, "Solo bootstrap", CbPlayPlayerInfoUpdate)
+
+	// Move to arena.
+	cli.write(t, SbPlayChatCommand, protocol.WriteString("instance join arena"))
+	drainExpect(t, ch, "join arena",
+		CbPlayPlayerInfoRemove, CbPlayRespawn,
+		CbPlayChunkData, CbPlaySyncPos,
+		CbPlayPlayerInfoUpdate, CbPlaySystemChat)
+
+	// Delete arena while inside it: server should evac caller to hub, then delete.
+	cli.write(t, SbPlayChatCommand, protocol.WriteString("instance delete arena"))
+	drainExpect(t, ch, "evac + delete",
+		CbPlayPlayerInfoRemove, CbPlayRespawn,
+		CbPlayChunkData, CbPlaySyncPos,
+		CbPlayPlayerInfoUpdate, // hub tab list bootstrap
+		CbPlaySystemChat,       // "Deleted instance arena"
+	)
+
+	if s.GetInstance("arena") != nil {
+		t.Error("arena should be gone")
+	}
+	_, inst, ok := s.FindPlayer("Solo")
+	if !ok || inst.ID != "hub" {
+		t.Errorf("Solo should be in hub, got ok=%v inst=%v", ok, inst)
+	}
+}
+
+func TestInstanceCreateFromTemplate(t *testing.T) {
+	s := New()
+	s.Ops.Add("Builder")
+
+	tmpl := world.NewTemplate()
+	tmpl.SetBlock(world.Position{X: 0, Y: 64, Z: 0}, world.Stone)
+	tmpl.SetBlock(world.Position{X: 1, Y: 64, Z: 0}, world.Stone)
+	tmpl.AddSpawnPoint(world.SpawnPoint{Position: world.Position{X: 0, Y: 65, Z: 0}})
+	s.RegisterTemplate("platform", tmpl)
+
+	cli := pipeClientOn(t, s)
+	completeOfflineLogin(t, cli, "Builder")
+	ch := cli.startDrain()
+	drainExpect(t, ch, "Builder solo", CbPlayPlayerInfoUpdate)
+
+	cli.write(t, SbPlayChatCommand, protocol.WriteString("instance create lab platform"))
+	drainExpect(t, ch, "create reply", CbPlaySystemChat)
+
+	inst := s.GetInstance("lab")
+	if inst == nil {
+		t.Fatal("lab not created")
+	}
+	t.Cleanup(func() { _ = s.RemoveInstance("lab") })
+
+	// Template blocks should now be in the new instance's world.
+	if got := inst.World.GetBlock(world.Position{X: 0, Y: 64, Z: 0}); got != world.Stone {
+		t.Errorf("template block (0,64,0): got %+v, want Stone", got)
+	}
+	if got := inst.World.GetBlock(world.Position{X: 1, Y: 64, Z: 0}); got != world.Stone {
+		t.Errorf("template block (1,64,0): got %+v, want Stone", got)
+	}
+	// Mutating the instance must not affect the template (independence
+	// already covered by world tests, but verifying through the create
+	// pipeline catches integration regressions).
+	inst.World.SetBlock(world.Position{X: 0, Y: 64, Z: 0}, world.Air)
+	if got := tmpl.Instantiate().GetBlock(world.Position{X: 0, Y: 64, Z: 0}); got != world.Stone {
+		t.Errorf("template leaked: got %+v, want Stone", got)
+	}
+}
+
+func TestInstanceCreateUnknownTemplateRejected(t *testing.T) {
+	s := New()
+	s.Ops.Add("Op")
+
+	cli := pipeClientOn(t, s)
+	completeOfflineLogin(t, cli, "Op")
+	ch := cli.startDrain()
+	drainExpect(t, ch, "Op solo", CbPlayPlayerInfoUpdate)
+
+	cli.write(t, SbPlayChatCommand, protocol.WriteString("instance create lab nonexistent"))
+	drainExpect(t, ch, "rejected reply", CbPlaySystemChat)
+
+	if s.GetInstance("lab") != nil {
+		t.Error("lab should not exist when template is unknown")
+	}
+}
+
+func TestInstanceList(t *testing.T) {
+	s := New()
+	s.Ops.Add("Lister")
+	a := NewInstance("arena", s, world.NewMemoryWorld())
+	s.AddInstance(a)
+	t.Cleanup(a.Stop)
+
+	cli := pipeClientOn(t, s)
+	completeOfflineLogin(t, cli, "Lister")
+	ch := cli.startDrain()
+	drainExpect(t, ch, "Lister solo", CbPlayPlayerInfoUpdate)
+
+	cli.write(t, SbPlayChatCommand, protocol.WriteString("instance list"))
+	// Header + 2 entries (hub, arena) = 3 system chat messages.
+	drainExpect(t, ch, "list output",
+		CbPlaySystemChat, CbPlaySystemChat, CbPlaySystemChat)
 }
 
 func TestHandshakeInvalidNextState(t *testing.T) {

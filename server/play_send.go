@@ -78,6 +78,31 @@ func (c *ClientConnection) sendAckBlockChange(sequence int32) error {
 	return c.safeWrite(CbPlayAckBlockChange, protocol.WriteVarInt32(sequence))
 }
 
+// sendRespawn drives a dimension swap on the client: clears its world,
+// despawns entities, and switches the player's reference frame. Server
+// follows up with chunks, Sync Position, and (via JoinAndAnnounce) the
+// fresh tab list + Spawn Player packets.
+//
+// We use it for cross-instance teleport even when source and destination
+// are nominally the same dimension type — the client only knows that its
+// world got reset, which is what we need.
+func (c *ClientConnection) sendRespawn() error {
+	gm := c.player.Snapshot().Gamemode
+
+	var buf bytes.Buffer
+	buf.Write(protocol.WriteString("minecraft:overworld")) // dimension type
+	buf.Write(protocol.WriteString("minecraft:overworld")) // dimension name
+	buf.Write(protocol.WriteLong(0))                       // hashed seed
+	buf.WriteByte(byte(gm))                                // current game mode
+	buf.WriteByte(0xFF)                                    // previous game mode = -1 (none)
+	buf.WriteByte(0)                                       // is debug
+	buf.WriteByte(0)                                       // is flat
+	buf.WriteByte(0x03)                                    // copy metadata: keep status + equipment
+	buf.WriteByte(0)                                       // has death location = false
+	protocol.WriteVarInt32ToBuffer(&buf, 0)                // portal cooldown
+	return c.safeWrite(CbPlayRespawn, buf.Bytes())
+}
+
 // sendBlockUpdate writes Block Update (0x09): a single block change at the
 // given position to the given block state.
 func (c *ClientConnection) sendBlockUpdate(p world.Position, b world.Block) error {

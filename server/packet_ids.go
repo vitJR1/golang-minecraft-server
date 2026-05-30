@@ -39,35 +39,45 @@ const (
 
 // Serverbound, state = play.
 const (
-	SbPlayTeleportConfirm = 0x00
-	SbPlayChatCommand     = 0x04
-	SbPlayChatMessage     = 0x05
-	SbPlayClientInfo      = 0x07
-	SbPlayInteract        = 0x10
-	SbPlayKeepAlive       = 0x12
-	SbPlaySetPos          = 0x14
-	SbPlaySetPosRot       = 0x15
-	SbPlaySetRot          = 0x16
-	SbPlayPlayerAction    = 0x1C
-	SbPlaySwingArm        = 0x2F
-	SbPlayUseItemOnBlock  = 0x31
+	SbPlayTeleportConfirm   = 0x00
+	SbPlayChatCommand       = 0x04
+	SbPlayChatMessage       = 0x05
+	SbPlayClientInfo        = 0x07
+	SbPlayCommandSuggestReq = 0x08
+	SbPlayPluginMessage     = 0x0D
+	SbPlayInteract          = 0x10
+	SbPlayKeepAlive         = 0x12
+	SbPlaySetPos            = 0x14
+	SbPlaySetPosRot         = 0x15
+	SbPlaySetRot            = 0x16
+	SbPlayPlayerAbilities   = 0x1C // flags byte: flying / invulnerable / etc.
+	SbPlayPlayerAction      = 0x1D // NOT 0x1C — that's Player Abilities in 1.20.1
+	SbPlayPlayerCommand     = 0x1E // sneak / sprint / jump_boost
+	SbPlaySwingArm          = 0x2F
+	SbPlayUseItemOnBlock    = 0x31
 )
 
 // Clientbound, state = play.
 const (
-	CbPlaySpawnPlayer      = 0x03
-	CbPlayEntityAnimation  = 0x04
-	CbPlayAckBlockChange   = 0x06
-	CbPlayBlockUpdate      = 0x0A
-	CbPlayGameEvent        = 0x20
-	CbPlayKeepAlive        = 0x23
-	CbPlayChunkData        = 0x24
-	CbPlayLogin            = 0x28
-	CbPlayPlayerInfoRemove = 0x35
-	CbPlayPlayerAbil       = 0x36
+	CbPlaySpawnPlayer        = 0x03
+	CbPlayEntityAnimation    = 0x04
+	CbPlayAckBlockChange     = 0x06
+	CbPlayBlockUpdate        = 0x0A
+	CbPlayCommandSuggestResp = 0x11
+	CbPlayGameEvent          = 0x1F // NOT 0x20 (= Open Horse Screen for 1.20.1)
+	CbPlayKeepAlive          = 0x23
+	CbPlayChunkData          = 0x24
+	CbPlayLogin              = 0x28
+	CbPlayPlayerAbil         = 0x34 // best guess; not actively used yet
+	// NOTE 0x35 = Player Chat Message in 1.20.1, NOT Player Info Remove.
+	// Sending PI-Remove bytes to 0x35 crashes the client (Player Chat Message
+	// expects UUID + Index + sig fields).
+	CbPlayPlayerInfoRemove = 0x39
 	CbPlayPlayerInfoUpdate = 0x3A
-	CbPlayRemoveEntities   = 0x3B
 	CbPlaySyncPos          = 0x3C
+	CbPlayRemoveEntities   = 0x3E // NOT 0x3B (= Look At for 1.20.1)
+	CbPlayRespawn          = 0x41
+	CbPlayHeadRotation     = 0x42 // body yaw rides Teleport Entity; head needs its own packet
 	CbPlaySpawnPos         = 0x50
 	CbPlaySystemChat       = 0x64
 	CbPlayTeleportEntity   = 0x68

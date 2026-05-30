@@ -44,19 +44,19 @@ type outboundMsg struct {
 }
 
 // Server holds process-wide shared state across all instances: the op
-// allocator, the op set, the entity-ID counter, and the hub instance.
-// World and PlayerList live on Instance now — per-game scoping is the
-// whole point of the mini-game architecture.
+// allocator, the op set, the entity-ID counter, the hub instance, and the
+// template registry. World and PlayerList live on Instance.
 type Server struct {
 	Hub          *Instance
 	Ops          *OpSet
 	nextEntityID atomic.Int32
 
 	// instances is the registry of all live instances (including Hub).
-	// Used by FindPlayer for cross-instance lookups. Add/remove via
-	// addInstance/removeInstance (TODO: once we wire matchmaking).
+	// templates is the registry of read-only world snapshots that
+	// /instance create can clone from.
 	mu        sync.RWMutex
 	instances map[string]*Instance
+	templates map[string]*world.Template
 }
 
 // New constructs a Server with an empty Hub instance and an op set seeded
@@ -65,10 +65,39 @@ func New() *Server {
 	s := &Server{
 		Ops:       NewOpSet(cfg.InitialOps),
 		instances: make(map[string]*Instance),
+		templates: make(map[string]*world.Template),
 	}
 	s.Hub = NewInstance("hub", s, world.NewMemoryWorld())
 	s.instances[s.Hub.ID] = s.Hub
 	return s
+}
+
+// RegisterTemplate stores a world template under name so /instance create
+// (and game logic later) can clone it. Overwrites any existing entry with
+// the same name.
+func (s *Server) RegisterTemplate(name string, t *world.Template) {
+	s.mu.Lock()
+	s.templates[name] = t
+	s.mu.Unlock()
+}
+
+// GetTemplate returns the template with this name, or nil if none.
+func (s *Server) GetTemplate(name string) *world.Template {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.templates[name]
+}
+
+// TemplateNames returns every registered template's name. Used by
+// /instance create tab completion.
+func (s *Server) TemplateNames() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]string, 0, len(s.templates))
+	for name := range s.templates {
+		out = append(out, name)
+	}
+	return out
 }
 
 // FindPlayer looks up a logged-in player by name across every instance.
@@ -98,6 +127,151 @@ func (s *Server) PlayerCount() int {
 		total += i.Players.Count()
 	}
 	return total
+}
+
+// PlayerNames returns every logged-in player's name across all instances.
+// Used by command tab-completion.
+func (s *Server) PlayerNames() []string {
+	s.mu.RLock()
+	instances := make([]*Instance, 0, len(s.instances))
+	for _, i := range s.instances {
+		instances = append(instances, i)
+	}
+	s.mu.RUnlock()
+	var names []string
+	for _, i := range instances {
+		i.Players.Range(func(c *ClientConnection) {
+			names = append(names, c.player.Name)
+		})
+	}
+	return names
+}
+
+// InstanceIDs returns every registered instance's ID. Used by /instance
+// tab-completion.
+func (s *Server) InstanceIDs() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]string, 0, len(s.instances))
+	for id := range s.instances {
+		out = append(out, id)
+	}
+	return out
+}
+
+// AddInstance registers an instance with the server so commands and
+// MovePlayer can find it by ID. Caller still owns the instance's
+// lifecycle (Stop, world cleanup, etc.).
+func (s *Server) AddInstance(i *Instance) {
+	s.mu.Lock()
+	s.instances[i.ID] = i
+	s.mu.Unlock()
+}
+
+// GetInstance returns the instance with this ID, or nil if none is
+// registered.
+func (s *Server) GetInstance(id string) *Instance {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.instances[id]
+}
+
+// RemoveInstance drops an instance from the registry and stops its tick
+// loop. Hub cannot be removed. Caller must ensure no players are in the
+// instance (or move them out first) — RemoveInstance does NOT evacuate.
+func (s *Server) RemoveInstance(id string) error {
+	if s.Hub != nil && id == s.Hub.ID {
+		return fmt.Errorf("cannot remove the hub instance")
+	}
+	s.mu.Lock()
+	inst, ok := s.instances[id]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("no such instance: %s", id)
+	}
+	if inst.Players.Count() > 0 {
+		s.mu.Unlock()
+		return fmt.Errorf("instance %s still has %d players", id, inst.Players.Count())
+	}
+	delete(s.instances, id)
+	s.mu.Unlock()
+
+	inst.Stop()
+	return nil
+}
+
+// MovePlayer transfers a player from their current instance to target,
+// spawning them at (x, y, z) in the new world.
+//
+// On the wire the client sees:
+//  1. PlayerInfoRemove for every UUID in the old instance — clears the
+//     stale tab list (Respawn doesn't touch it).
+//  2. Respawn — client throws away its world and despawns every entity.
+//  3. ChunkData for the new world.
+//  4. SynchronizePlayerPosition at the spawn.
+//  5. Block Update for every non-Air block in the new world (Replay).
+//  6. PlayerInfoUpdate + SpawnPlayer for each player already in target.
+//
+// In parallel, the old instance broadcasts RemoveEntities + PI Remove for
+// the leaver to the players staying behind, and the new instance
+// broadcasts PI Add + SpawnPlayer for the newcomer.
+//
+// Must be called from the player's own readLoop goroutine (e.g. from a
+// command handler or an event hook). There is currently no synchronization
+// on c.instance, and a concurrent call from another goroutine would race
+// with handler_play's reads.
+func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float64) error {
+	if c.player == nil {
+		return fmt.Errorf("player not logged in")
+	}
+	if target == nil {
+		return fmt.Errorf("target instance is nil")
+	}
+	old := c.instance
+	if old == target {
+		return nil
+	}
+
+	// Capture UUIDs we'll need to clear from the client's tab list AFTER
+	// LeaveAndAnnounce removes c — so include c itself.
+	oldUUIDs := old.Players.UUIDs()
+
+	// 1. Tell old instance the player is gone (broadcasts to others +
+	//    removes c from old.Players).
+	old.LeaveAndAnnounce(c)
+
+	// 2. Wipe c's tab list. Respawn doesn't do this, and the next
+	//    JoinAndAnnounce will rebuild it for the new instance.
+	if len(oldUUIDs) > 0 {
+		_ = c.safeWrite(CbPlayPlayerInfoRemove, playerInfoRemovePayload(oldUUIDs))
+	}
+
+	// 3. Respawn — client clears world data + every entity it knew.
+	if err := c.sendRespawn(); err != nil {
+		return fmt.Errorf("respawn: %w", err)
+	}
+
+	// 4. Switch the authoritative pointer before we stream the new world,
+	//    so sendCurrentWorldState reads the right blocks.
+	c.instance = target
+
+	// 5. Reset the player's position to spawn.
+	c.player.MoveTo(x, y, z, false)
+
+	// 6. Stream the new chunk + world state.
+	if err := c.sendChunkData(0, 0); err != nil {
+		return fmt.Errorf("chunk data: %w", err)
+	}
+	if err := c.sendSyncPlayerPosition(x, y, z, 1); err != nil {
+		return fmt.Errorf("sync pos: %w", err)
+	}
+	if err := c.sendCurrentWorldState(); err != nil {
+		return fmt.Errorf("world state: %w", err)
+	}
+
+	// 7. Register in target + broadcast tab list and Spawn for everyone.
+	target.JoinAndAnnounce(c)
+	return nil
 }
 
 // sendSystemMessage delivers a SystemChat line to a single player. Used by
