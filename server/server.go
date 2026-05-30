@@ -47,9 +47,10 @@ type outboundMsg struct {
 // allocator, the op set, the entity-ID counter, the hub instance, and the
 // template registry. World and PlayerList live on Instance.
 type Server struct {
-	Hub          *Instance
-	Ops          *OpSet
-	nextEntityID atomic.Int32
+	Hub                *Instance
+	Ops                *OpSet
+	nextEntityID       atomic.Int32
+	instanceSerialNext atomic.Uint64
 
 	// instances is the registry of all live instances (including Hub).
 	// templates is the registry of read-only world snapshots that
@@ -57,6 +58,12 @@ type Server struct {
 	mu        sync.RWMutex
 	instances map[string]*Instance
 	templates map[string]*world.Template
+}
+
+// nextInstanceSerial allocates a unique monotonic uint64 used by
+// StartGame to suffix the per-round instance ID.
+func (s *Server) nextInstanceSerial() uint64 {
+	return s.instanceSerialNext.Add(1)
 }
 
 // New constructs a Server with an empty Hub instance and an op set seeded

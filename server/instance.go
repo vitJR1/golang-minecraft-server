@@ -68,6 +68,11 @@ type Instance struct {
 	// return is the (possibly modified) text to broadcast; the second is
 	// false to drop the message entirely.
 	OnChat func(c *ClientConnection, msg string) (rewrite string, allow bool)
+
+	// OnStop fires once when the instance is being torn down (via
+	// Server.RemoveInstance or Instance.Stop). Use for game cleanup;
+	// the tick loop is still running when this fires.
+	OnStop func()
 }
 
 // NewInstance creates an instance and starts its tick loop. Caller
@@ -99,11 +104,14 @@ func (i *Instance) Tick() uint64 {
 	return i.tickCount.Load()
 }
 
-// Stop halts the tick loop. Safe to call multiple times. Does not affect
-// connected players or pending broadcasts — those continue running on
-// their own goroutines.
+// Stop halts the tick loop and fires OnStop (under panic recovery). Safe
+// to call multiple times. Does not affect connected players or pending
+// broadcasts — those continue running on their own goroutines.
 func (i *Instance) Stop() {
 	i.stopOnce.Do(func() {
+		if i.OnStop != nil {
+			safeHook(i, "OnStop", i.OnStop)
+		}
 		close(i.stopTick)
 	})
 }
