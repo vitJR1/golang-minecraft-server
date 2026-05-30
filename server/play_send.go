@@ -12,7 +12,7 @@ import (
 func (c *ClientConnection) sendLoginPlay() error {
 	var buf bytes.Buffer
 
-	p := c.player
+	p := c.player.Snapshot()
 
 	// Entity ID
 	buf.Write(protocol.WriteInt(p.EntityID))
@@ -69,6 +69,13 @@ func (c *ClientConnection) sendSyncPlayerPosition(x, y, z float64, teleportID in
 	buf.WriteByte(0)                  // flags (all absolute)
 	protocol.WriteVarInt32ToBuffer(&buf, teleportID)
 	return c.safeWrite(CbPlaySyncPos, buf.Bytes())
+}
+
+// sendAckBlockChange echoes the client's block-change sequence number back
+// to confirm its prediction. Without this the client visually rolls back
+// the place/break it just performed.
+func (c *ClientConnection) sendAckBlockChange(sequence int32) error {
+	return c.safeWrite(CbPlayAckBlockChange, protocol.WriteVarInt32(sequence))
 }
 
 // sendBlockUpdate writes Block Update (0x09): a single block change at the

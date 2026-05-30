@@ -53,7 +53,6 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 	}
 
 	c.state = StatePlay
-	c.server.Players.Add(c)
 
 	if err := c.sendPlayPackets(); err != nil {
 		if c.isClosed() {
@@ -62,6 +61,13 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 		}
 		return fmt.Errorf("sending play packets: %w", err)
 	}
+
+	// Register + announce atomically. Doing both under joinMu means another
+	// player joining concurrently can't observe c half-registered (in the
+	// PlayerList but not yet visible to everyone), which would otherwise
+	// produce duplicate or out-of-order Spawn packets.
+	c.server.joinAndAnnounce(c)
+
 	fmt.Printf("Player %s fully initialized and in game!\n", c.playerName)
 	return nil
 }
@@ -70,22 +76,35 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 // above this size go through zlib; smaller packets pass uncompressed.
 const CompressionThreshold = 256
 
-// enableCompression sends Set Compression (Cb 0x03) over the still-
-// uncompressed wire, then flips the connection's threshold so every
-// subsequent packet in both directions uses compressed framing.
-//
-// Synchronization: safeWrite holds c.writeMu while it sends Set Compression;
-// we also acquire writeMu when updating c.compressionThreshold so the
-// happens-before edge propagates to keepAlive's reads of the same field.
-// readLoop runs in the same goroutine as handleLogin, so no extra
-// coordination is needed for the read path.
+// enableCompression queues Set Compression (Cb 0x03) and flips the
+// connection's threshold under one critical section. Holding sendMu around
+// both the push and the threshold update means any concurrent safeWrite
+// either: (a) builds + pushes its frame with the old threshold *before*
+// Set Compression goes into the queue, or (b) builds + pushes with the new
+// threshold *after*. The queue is FIFO, so wire order matches build order.
 func (c *ClientConnection) enableCompression() error {
-	if err := c.safeWrite(CbLoginSetCompr, protocol.WriteVarInt32(CompressionThreshold)); err != nil {
-		return fmt.Errorf("sending set compression: %w", err)
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+
+	if c.isClosed() {
+		return fmt.Errorf("connection closed")
 	}
-	c.writeMu.Lock()
+	// Built with the *current* threshold (CompressionDisabled), so this packet
+	// goes on the wire uncompressed — the client decodes it before switching.
+	frame, err := protocol.BuildFrame(
+		CbLoginSetCompr,
+		protocol.WriteVarInt32(CompressionThreshold),
+		c.compressionThreshold,
+	)
+	if err != nil {
+		return fmt.Errorf("build Set Compression: %w", err)
+	}
+	select {
+	case c.outbound <- outboundMsg{frame: frame}:
+	default:
+		return fmt.Errorf("send queue full")
+	}
 	c.compressionThreshold = CompressionThreshold
-	c.writeMu.Unlock()
 	return nil
 }
 
@@ -238,10 +257,26 @@ func (c *ClientConnection) enableEncryption(sharedSecret []byte) error {
 	}
 	enc := encryption.NewCFB8Encrypt(block, sharedSecret)
 	dec := encryption.NewCFB8Decrypt(block, sharedSecret)
+	encrypted := encryption.WrapEncryptedConn(c.conn, enc, dec)
 
-	c.writeMu.Lock()
-	c.conn = encryption.WrapEncryptedConn(c.conn, enc, dec)
-	c.writeMu.Unlock()
+	// Read side runs in this goroutine (readLoop calls down through
+	// handler_login), so swapping c.conn here is safe — the next ReadPacket
+	// call uses the wrapped conn.
+	c.conn = encrypted
+
+	// Write side runs in writerLoop. Sending the swap via the channel
+	// guarantees pending plaintext frames are flushed *before* the cipher
+	// state begins.
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	if c.isClosed() {
+		return fmt.Errorf("connection closed")
+	}
+	select {
+	case c.outbound <- outboundMsg{swapConn: encrypted}:
+	default:
+		return fmt.Errorf("send queue full")
+	}
 	fmt.Println("Encrypted connection established")
 	return nil
 }

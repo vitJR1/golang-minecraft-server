@@ -3,21 +3,35 @@ package server
 import (
 	"fmt"
 	"sync/atomic"
+	"time"
 )
 
 func (c *ClientConnection) cleanup() {
 	if !atomic.CompareAndSwapInt32(&c.closed, 0, 1) {
 		return
 	}
-	// Drop the player from the server-wide list. c.player may be nil if
-	// cleanup ran before login completed (e.g. handshake error); Remove on
-	// an absent entity ID is a no-op even when the player is set but never
-	// got registered, so there's no need to mirror handler_login's exact
-	// sequence here.
-	if c.player != nil {
-		c.server.Players.Remove(c.player.EntityID)
+
+	// Close the outbound channel under sendMu so a concurrent safeWrite
+	// either fails the isClosed check (taking sendMu after us) or already
+	// completed its push (held sendMu before us). Either way no send to
+	// closed channel.
+	c.sendMu.Lock()
+	close(c.outbound)
+	c.sendMu.Unlock()
+
+	// Give the writer a moment to drain pending frames (Pong from status
+	// handlers, Disconnect messages from kicks) before we tear the socket
+	// down. 1s is generous for net.Pipe and TCP localhost; bound it so a
+	// stuck client can't keep cleanup hanging.
+	select {
+	case <-c.writerDone:
+	case <-time.After(time.Second):
 	}
-	close(c.done)
+
+	// Announce departure + Remove under the same lock as join.
+	c.server.leaveAndAnnounce(c)
+
 	c.conn.Close()
+	close(c.done)
 	fmt.Printf("Connection from %s closed\n", c.conn.RemoteAddr())
 }

@@ -43,21 +43,32 @@ const (
 	SbPlayChatCommand     = 0x04
 	SbPlayChatMessage     = 0x05
 	SbPlayClientInfo      = 0x07
+	SbPlayInteract        = 0x10
 	SbPlayKeepAlive       = 0x12
 	SbPlaySetPos          = 0x14
 	SbPlaySetPosRot       = 0x15
 	SbPlaySetRot          = 0x16
+	SbPlayPlayerAction    = 0x1C
+	SbPlaySwingArm        = 0x2F
+	SbPlayUseItemOnBlock  = 0x31
 )
 
 // Clientbound, state = play.
 const (
-	CbPlayBlockUpdate = 0x0A
-	CbPlayChunkData   = 0x24
-	CbPlayKeepAlive   = 0x23
-	CbPlayLogin       = 0x28
-	CbPlaySystemChat  = 0x64
-	CbPlayPlayerAbil  = 0x36
-	CbPlaySyncPos     = 0x3C
-	CbPlaySpawnPos    = 0x50
-	CbPlayUpdateLight = 0x29
+	CbPlaySpawnPlayer      = 0x03
+	CbPlayEntityAnimation  = 0x04
+	CbPlayAckBlockChange   = 0x06
+	CbPlayBlockUpdate      = 0x0A
+	CbPlayGameEvent        = 0x20
+	CbPlayKeepAlive        = 0x23
+	CbPlayChunkData        = 0x24
+	CbPlayLogin            = 0x28
+	CbPlayPlayerInfoRemove = 0x35
+	CbPlayPlayerAbil       = 0x36
+	CbPlayPlayerInfoUpdate = 0x3A
+	CbPlayRemoveEntities   = 0x3B
+	CbPlaySyncPos          = 0x3C
+	CbPlaySpawnPos         = 0x50
+	CbPlaySystemChat       = 0x64
+	CbPlayTeleportEntity   = 0x68
 )

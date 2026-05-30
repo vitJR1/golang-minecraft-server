@@ -55,28 +55,38 @@ func ReadPacketSplit(conn net.Conn, compressionThreshold int) (packetID int, pay
 	return id, body[n:], nil
 }
 
-// WritePacket frames and writes a single packet. If compressionThreshold >= 0,
-// payloads at or above the threshold are zlib-compressed and a data-length
-// VarInt is inserted; smaller payloads pass through with a data-length of 0.
-func WritePacket(conn net.Conn, packetID int32, payload []byte, compressionThreshold int) error {
+// BuildFrame composes a complete packet frame ready to be written to the
+// wire: VarInt(length) + VarInt(packetID) + payload, with optional zlib
+// compression. Same rules as WritePacket; the only difference is this
+// returns bytes instead of touching a conn — useful when a single payload
+// is broadcast to many connections (compress once, write many).
+func BuildFrame(packetID int32, payload []byte, compressionThreshold int) ([]byte, error) {
 	uncompressed := append(WriteVarInt32(packetID), payload...)
 
 	var body []byte
 	if compressionThreshold < 0 {
 		body = uncompressed
 	} else if len(uncompressed) < compressionThreshold {
-		// Below threshold: data length = 0 signals "inline, uncompressed".
 		body = append(WriteVarInt32(0), uncompressed...)
 	} else {
 		compressed, err := CompressPayload(uncompressed)
 		if err != nil {
-			return fmt.Errorf("compress: %w", err)
+			return nil, fmt.Errorf("compress: %w", err)
 		}
 		body = append(WriteVarInt32(int32(len(uncompressed))), compressed...)
 	}
 
 	length := WriteVarInt32(int32(len(body)))
-	full := append(length, body...)
+	return append(length, body...), nil
+}
+
+// WritePacket frames and writes a single packet. Equivalent to BuildFrame +
+// conn.Write with partial-write handling.
+func WritePacket(conn net.Conn, packetID int32, payload []byte, compressionThreshold int) error {
+	full, err := BuildFrame(packetID, payload, compressionThreshold)
+	if err != nil {
+		return err
+	}
 
 	if DebugPackets {
 		fmt.Printf("Sending packet 0x%02X, payload=%d, total=%d, compressed=%v\n",

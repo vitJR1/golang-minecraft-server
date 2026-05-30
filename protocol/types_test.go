@@ -171,6 +171,29 @@ func TestByteArrayNegativeLength(t *testing.T) {
 	}
 }
 
+func TestPositionRoundTrip(t *testing.T) {
+	cases := []struct{ x, y, z int }{
+		{0, 0, 0},
+		{1, 64, -1},
+		{-33554432, -2048, -33554432}, // min for each field
+		{33554431, 2047, 33554431},    // max for each field
+		{12345, -64, 67890},
+		{-100, 320, -200},
+	}
+	for _, c := range cases {
+		encoded := WritePosition(c.x, c.y, c.z)
+		gx, gy, gz, err := ReadPosition(bytes.NewBuffer(encoded))
+		if err != nil {
+			t.Errorf("(%d,%d,%d): %v", c.x, c.y, c.z, err)
+			continue
+		}
+		if gx != c.x || gy != c.y || gz != c.z {
+			t.Errorf("Position round-trip: in (%d,%d,%d), out (%d,%d,%d)",
+				c.x, c.y, c.z, gx, gy, gz)
+		}
+	}
+}
+
 func TestBoolNonZero(t *testing.T) {
 	for _, b := range []byte{0x01, 0x02, 0xff} {
 		got, err := ReadBool(bytes.NewBuffer([]byte{b}))

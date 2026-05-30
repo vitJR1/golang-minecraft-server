@@ -233,6 +233,13 @@ func WriteInt(value int32) []byte {
 	return buf
 }
 
+// AngleToByte converts a float yaw/pitch (degrees) to the Minecraft
+// protocol's single-byte angle: 0..256 spans 0..360°. Used in entity-related
+// packets where full Float precision is wasteful.
+func AngleToByte(degrees float32) byte {
+	return byte(int32(degrees*256.0/360.0) & 0xFF)
+}
+
 // WritePosition encodes a block position into 8 bytes using the Minecraft
 // protocol's packed Position format: x (26 bits) | z (26 bits) | y (12 bits)
 // laid out as a single big-endian Long.
@@ -245,6 +252,23 @@ func WritePosition(x, y, z int) []byte {
 		((int64(z) & 0x3FFFFFF) << 12) |
 		(int64(y) & 0xFFF)
 	return WriteLong(encoded)
+}
+
+// ReadPosition decodes the packed Position format written by WritePosition.
+// Each field is sign-extended from its bit width by shifting it up to bit
+// 63 and then doing an arithmetic right shift.
+func ReadPosition(buf *bytes.Buffer) (x, y, z int, err error) {
+	v, err := ReadLong(buf)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("position: %w", err)
+	}
+	// x: bits 63..38 → top 26 bits, already sign-aligned, arithmetic shift.
+	x = int(v >> 38)
+	// z: bits 37..12 → shift up by 26 so bit 37 lands at 63, then >> 38.
+	z = int((v << 26) >> 38)
+	// y: bits 11..0 → shift up by 52, then >> 52 to sign-extend 12 bits.
+	y = int((v << 52) >> 52)
+	return x, y, z, nil
 }
 
 func ReadUShortFromBuf(buf *bytes.Buffer) (uint16, error) {
