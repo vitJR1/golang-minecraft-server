@@ -3,6 +3,7 @@ package bots
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -78,26 +79,33 @@ func TestShouldCensorTokenizes(t *testing.T) {
 	}
 }
 
-// TestThresholdSwitch covers the mute side of the policy: ≤ CensorMax
-// bad words = censor (rewrite), > CensorMax = mute (drop).
+// TestThresholdSwitch covers the policy boundary defined by CensorMax:
+//   - 1..CensorMax bad words → censor (rewrite)
+//   - CensorMax+1 or more     → mute (drop)
+//
+// Driven by the constant so changes to CensorMax don't break the test.
 func TestThresholdSwitch(t *testing.T) {
 	path := writeJSON(t, `["spam"]`)
 	b := &NosleeperBot{badwords: map[string]struct{}{}}
 	_ = b.LoadBadwords(path)
 
-	// 3 → censor only
-	if b.shouldMute("spam spam spam") {
-		t.Error("3 bad words should NOT trigger mute")
+	// Boundary message: exactly CensorMax bad words → censor only.
+	boundary := strings.Repeat("spam ", CensorMax)
+	if b.shouldMute(boundary) {
+		t.Errorf("%d bad words should NOT trigger mute", CensorMax)
 	}
-	if !b.shouldCensor("spam spam spam") {
-		t.Error("3 bad words should trigger censor")
+	if !b.shouldCensor(boundary) {
+		t.Errorf("%d bad words should trigger censor", CensorMax)
 	}
-	// 4 → mute, not censor
-	if !b.shouldMute("spam spam spam spam") {
-		t.Error("4 bad words SHOULD trigger mute")
+
+	// Over the line: CensorMax+1 bad words → mute, not censor.
+	over := strings.Repeat("spam ", CensorMax+1)
+	if !b.shouldMute(over) {
+		t.Errorf("%d bad words SHOULD trigger mute", CensorMax+1)
 	}
-	if b.shouldCensor("spam spam spam spam") {
-		t.Error("4 bad words should NOT also trigger censor (mute branch wins)")
+	if b.shouldCensor(over) {
+		t.Errorf("%d bad words should NOT also trigger censor (mute wins)",
+			CensorMax+1)
 	}
 }
 

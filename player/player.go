@@ -57,6 +57,8 @@ func New(entityID int32, name string, uuid [16]byte) *Player {
 		Name:     name,
 		UUID:     uuid,
 		y:        80,
+		x:        0.5,
+		z:        0.5,
 		gamemode: Creative,
 	}
 }

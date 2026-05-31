@@ -273,15 +273,18 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 	// 5. Reset the player's position to spawn.
 	c.player.MoveTo(x, y, z, false)
 
-	// 6. Stream the new chunks + world state.
+	// 6. Stream chunks → fill in blocks → THEN dismiss the loading
+	//    overlay via SyncPos. See sendPlayPackets for why the order
+	//    matters (Block Updates must land before SyncPos or the client
+	//    holds "loading terrain" while processing them).
 	if err := c.sendInitialChunks(); err != nil {
 		return fmt.Errorf("chunk data: %w", err)
 	}
-	if err := c.sendSyncPlayerPosition(x, y, z, 1); err != nil {
-		return fmt.Errorf("sync pos: %w", err)
-	}
 	if err := c.sendCurrentWorldState(); err != nil {
 		return fmt.Errorf("world state: %w", err)
+	}
+	if err := c.sendSyncPlayerPosition(x, y, z, 1); err != nil {
+		return fmt.Errorf("sync pos: %w", err)
 	}
 
 	// 7. Register in target + broadcast tab list and Spawn for everyone.
@@ -537,16 +540,29 @@ func (c *ClientConnection) processPacket(packet *bytes.Buffer) error {
 // requires before it will render the world.
 func (c *ClientConnection) sendPlayPackets() error {
 	spawn := c.player.Snapshot()
+	// Order matters here. The 1.20.1 client treats Synchronize Player
+	// Position as the "you can play now" signal — once the client acks
+	// teleport_confirm the loading-terrain overlay is dismissed. So
+	// every chunk + every spawn-area Block Update needs to land BEFORE
+	// SyncPos, otherwise the client sits on the overlay while
+	// processing the trailing block-update spam.
+	//
+	// Sequence on the wire:
+	//   1. Login (Play)
+	//   2. Chunk Data (16 empty chunks around spawn)
+	//   3. World State (Block Updates for the spawn schematic — ~726
+	//      packets; queued via writerLoop so it's one writev syscall)
+	//   4. Sync Player Position
 	packets := []struct {
 		name string
 		f    func() error
 	}{
 		{"Login (Play)", c.sendLoginPlay},
 		{"Chunk Data", c.sendInitialChunks},
+		{"World State", c.sendCurrentWorldState},
 		{"Sync Player Position", func() error {
 			return c.sendSyncPlayerPosition(spawn.X, spawn.Y, spawn.Z, 1)
 		}},
-		{"World State", c.sendCurrentWorldState},
 	}
 	for _, pkt := range packets {
 		if c.isClosed() {

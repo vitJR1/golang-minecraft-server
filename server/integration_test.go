@@ -274,9 +274,16 @@ func completeOfflineLogin(t *testing.T, cli *testClient, name string) {
 	if id, _ := cli.read(t); id != CbLoginSuccess {
 		t.Fatalf("expected LoginSuccess (0x%02X), got 0x%02X", CbLoginSuccess, id)
 	}
-	// Login(Play) + spawnChunkCount ChunkData + SyncPos.
-	for i := 0; i < 2+spawnChunkCount; i++ {
-		cli.read(t)
+	// Drain Login(Play) + chunks + any world-state Block Updates + SyncPos.
+	// Block Update count varies per test (some pre-seed blocks into the hub
+	// world), so we just consume packets until SyncPos arrives — that's the
+	// last packet in the join sequence before announceJoin starts emitting
+	// PlayerInfoUpdate / SpawnPlayer.
+	for {
+		id, _ := cli.read(t)
+		if id == CbPlaySyncPos {
+			return
+		}
 	}
 }
 
@@ -547,11 +554,10 @@ func TestBlockBreakClearsAndAcks(t *testing.T) {
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Breaker")
 	ch := cli.startDrain()
-	// Solo bootstrap PlayerInfo + initial world-state Block Update for the
-	// pre-seeded stone show up before our packets.
-	drainExpect(t, ch, "Breaker bootstrap",
-		CbPlayBlockUpdate,      // world-state replay for the pre-seeded stone
-		CbPlayPlayerInfoUpdate) // own tab list
+	// World-state replay (Block Update for the pre-seeded stone) is now
+	// drained inside completeOfflineLogin since it lands before SyncPos.
+	// Only the join announce remains visible here.
+	drainExpect(t, ch, "Breaker bootstrap", CbPlayPlayerInfoUpdate)
 
 	// Player Action: started digging (action=0) at (5,70,5), face=1, seq=7.
 	var p bytes.Buffer
@@ -697,7 +703,7 @@ func TestOnBlockBreakVetoRollsBack(t *testing.T) {
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Breaker")
 	ch := cli.startDrain()
-	drainExpect(t, ch, "Breaker bootstrap", CbPlayBlockUpdate, CbPlayPlayerInfoUpdate)
+	drainExpect(t, ch, "Breaker bootstrap", CbPlayPlayerInfoUpdate)
 
 	var p bytes.Buffer
 	protocol.WriteVarInt32ToBuffer(&p, 0)
