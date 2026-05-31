@@ -55,6 +55,12 @@ const (
 	SbPlayPlayerCommand     = 0x1E // sneak / sprint / jump_boost
 	SbPlaySwingArm          = 0x2F
 	SbPlayUseItemOnBlock    = 0x31
+	SbPlayUseItem           = 0x32 // right-click in air (e.g. holding blaze rod)
+
+	// Inventory / container interaction. IDs verified against
+	// minecraft-data protocol.json for 1.20 (which 1.20.1 inherits).
+	SbPlayClickContainer = 0x0B
+	SbPlayCloseContainer = 0x0C
 )
 
 // Clientbound, state = play.
@@ -78,7 +84,14 @@ const (
 	CbPlayRemoveEntities   = 0x3E // NOT 0x3B (= Look At for 1.20.1)
 	CbPlayRespawn          = 0x41
 	CbPlayHeadRotation     = 0x42 // body yaw rides Teleport Entity; head needs its own packet
+	CbPlayDisconnect       = 0x1A // server-initiated kick with reason
 	CbPlaySpawnPos         = 0x50
 	CbPlaySystemChat       = 0x64
 	CbPlayTeleportEntity   = 0x68
+
+	// Inventory / container packets. IDs from minecraft-data 1.20
+	// protocol.json (window_items / set_slot / open_window).
+	CbPlaySetContainerContent = 0x12 // window_items
+	CbPlaySetContainerSlot    = 0x14 // set_slot
+	CbPlayOpenScreen          = 0x30 // open_window
 )

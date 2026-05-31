@@ -48,8 +48,13 @@ type outboundMsg struct {
 // allocator, the op set, the entity-ID counter, the hub instance, and the
 // template registry. World and PlayerList live on Instance.
 type Server struct {
-	Hub                *Instance
-	Ops                *OpSet
+	Hub        *Instance
+	Ops        *OpSet
+	Mutes      *MuteSet
+	Matchmaker *Matchmaker
+	// ChatModerator, when non-nil, gets a chance to inspect every chat
+	// line before it broadcasts. See chat_moderation.go for the contract.
+	ChatModerator      ChatModerator
 	nextEntityID       atomic.Int32
 	instanceSerialNext atomic.Uint64
 
@@ -72,11 +77,13 @@ func (s *Server) nextInstanceSerial() uint64 {
 func New() *Server {
 	s := &Server{
 		Ops:       NewOpSet(cfg.InitialOps),
+		Mutes:     NewMuteSet(),
 		instances: make(map[string]*Instance),
 		templates: make(map[string]*world.Template),
 	}
 	s.Hub = NewInstance("hub", s, world.NewMemoryWorld())
 	s.instances[s.Hub.ID] = s.Hub
+	s.Matchmaker = NewMatchmaker(s)
 	return s
 }
 
@@ -282,6 +289,16 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 	return nil
 }
 
+// Name returns the player's chosen username (immutable for the session).
+// Exposed so plugins / bots can read the name without reaching into
+// unexported fields.
+func (c *ClientConnection) Name() string { return c.playerName }
+
+// Instance returns the instance the player is currently in (hub, an
+// arena, a lobby). Nil before login completes. Exposed for bots that
+// need to broadcast into the same chat scope the player is talking in.
+func (c *ClientConnection) Instance() *Instance { return c.instance }
+
 // sendSystemMessage delivers a SystemChat line to a single player. Used by
 // command responses and other server → one-player notifications.
 func (c *ClientConnection) sendSystemMessage(text string) error {
@@ -351,6 +368,20 @@ type ClientConnection struct {
 
 	closed int32 // atomic flag (use isClosed/cleanup)
 	done   chan struct{}
+
+	// keepAlivePendingID is the ID of the in-flight Cb KeepAlive the client
+	// has not yet echoed, or 0 if none. keepAlivePendingSentNanos records
+	// when it went on the wire (UnixNano). Both written by the keepAlive
+	// goroutine and read+CAS'd by the SbPlayKeepAlive handler.
+	keepAlivePendingID        atomic.Int64
+	keepAlivePendingSentNanos atomic.Int64
+
+	// menu holds whichever hub navigation menu (if any) is currently open
+	// on this client (nil = no menu). Written from handler_play +
+	// hub_menu (the player's readLoop goroutine); read from tests and
+	// potentially from future cross-goroutine inspection — atomic so
+	// `-race` stays clean and the test harness doesn't need locks.
+	menu atomic.Pointer[openMenu]
 
 	// writerDone is closed by writerLoop on exit. cleanup waits on it
 	// (with a timeout) so any in-flight frames — particularly the Pong that

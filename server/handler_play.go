@@ -20,12 +20,27 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		if err != nil {
 			return fmt.Errorf("reading keep alive response: %w", err)
 		}
-		_ = id
+		c.onKeepAliveResponse(id)
 
 	case SbPlayChatMessage:
 		message, err := protocol.ReadStringFromBuf(packet)
 		if err != nil {
 			return fmt.Errorf("reading chat message: %w", err)
+		}
+		// Mute check happens before the moderator + per-instance OnChat
+		// hook so games and bots can't accidentally bypass it. The muted
+		// player gets a one-line reminder; nobody else sees anything.
+		if until, muted := c.server.Mutes.MutedUntil(c.playerName); muted {
+			_ = c.sendSystemMessage(fmt.Sprintf("You are muted until %s",
+				until.Format("2006-01-02 15:04:05")))
+			break
+		}
+		// Custom chat bot (e.g. anti-spam / anti-flame). Returns the text
+		// to broadcast and an allow flag; may also install a mute.
+		if rewritten, allow := c.server.applyChatModerator(c, message); !allow {
+			break
+		} else {
+			message = rewritten
 		}
 		slog.Info("chat", "player", c.playerName, "msg", message)
 		if hook := c.instance.OnChat; hook != nil {
@@ -183,11 +198,24 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 
 	case SbPlayInteract:
 		// target_eid(VarInt) + type(VarInt: 0=interact, 1=attack, 2=interact_at)
-		// + (if type==2) 3×Float + hand(VarInt) + sneaking(bool)
-		// Logged for now; PvP and entity interaction land with games.
-		target, _ := protocol.ReadVarInt(packet)
-		atype, _ := protocol.ReadVarInt(packet)
-		_, _ = target, atype
+		// + (if type==2) 3×Float + hand(VarInt) + sneaking(bool).
+		target, err := protocol.ReadVarInt(packet)
+		if err != nil {
+			return fmt.Errorf("interact target: %w", err)
+		}
+		atype, err := protocol.ReadVarInt(packet)
+		if err != nil {
+			return fmt.Errorf("interact type: %w", err)
+		}
+		// Only "attack" (1) is wired up so far. interact / interact_at go
+		// to entity gameplay we haven't built (right-click NPCs, etc.).
+		if atype == 1 {
+			if hook := c.instance.OnPlayerAttack; hook != nil {
+				if victim, ok := c.instance.Players.Get(int32(target)); ok && victim != c {
+					hook(c, victim)
+				}
+			}
+		}
 
 	case SbPlayPlayerAbilities:
 		// 1-byte flags. Bit 0x02 = flying (creative double-tap-space).
@@ -200,6 +228,62 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		_, _ = protocol.ReadVarInt(packet)
 		_, _ = protocol.ReadVarInt(packet)
 		_, _ = protocol.ReadVarInt(packet)
+
+	case SbPlayUseItem:
+		// hand(VarInt) + sequence(VarInt). Fires when the player
+		// right-clicks in empty air. In hub we treat it as "blaze rod
+		// activated" — open the navigator menu. (We don't track held
+		// slot yet, but blaze rod is the only item we give, so it's the
+		// only thing that can trigger this here.)
+		_, _ = protocol.ReadVarInt(packet) // hand
+		_, _ = protocol.ReadVarInt(packet) // sequence
+		if c.instance == c.server.Hub {
+			c.openHubMainMenu()
+		}
+
+	case SbPlayClickContainer:
+		// Window ID(UByte) + State ID(VarInt) + Slot(Short) + Button(Byte)
+		// + Mode(VarInt) + array of changed slots + carried item. We only
+		// use Slot — the rest is parsed-then-dropped because we control
+		// every menu (no real player inventory transfers happen).
+		winID, err := packet.ReadByte()
+		if err != nil {
+			return fmt.Errorf("click container: window id: %w", err)
+		}
+		_, _ = protocol.ReadVarInt(packet) // state id
+		slotU, err := protocol.ReadUShortFromBuf(packet)
+		if err != nil {
+			return fmt.Errorf("click container: slot: %w", err)
+		}
+		// Slot can be -999 (drop outside window) which arrives as 0xFC19;
+		// the int16 cast preserves the bits and gives us back the sign.
+		slot := int16(slotU)
+		// Drain the rest defensively — we don't care, but a future
+		// handler might if it doesn't get drained first.
+		_, _ = packet.ReadByte()           // button
+		_, _ = protocol.ReadVarInt(packet) // mode
+		// Don't bother parsing changed-slots array or carried item;
+		// the buffer is discarded after this handler returns.
+		if m := c.menu.Load(); m != nil && winID == menuWindowID {
+			if entry, ok := m.entries[slot]; ok && m.onClick != nil {
+				m.onClick(c, entry)
+			}
+		}
+
+	case SbPlayCloseContainer:
+		// Window ID(UByte). Clear our menu state if it matches AND re-send
+		// the blaze rod — opening a chest temporarily wipes the client's
+		// view of the player inventory, and even with the mirror trick a
+		// stray ghost-click on a menu icon could leave the cursor holding
+		// air. Re-stamping the hotbar slot is cheap and idempotent.
+		winID, err := packet.ReadByte()
+		if err != nil {
+			return fmt.Errorf("close container: window id: %w", err)
+		}
+		if winID == menuWindowID {
+			c.menu.Store(nil)
+			giveBlazeRod(c)
+		}
 
 	default:
 		slog.Debug("unknown play packet",

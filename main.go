@@ -3,11 +3,16 @@ package main
 import (
 	"log/slog"
 	"minecraft-server/ban"
+	"minecraft-server/bots"
 	"minecraft-server/logger"
 	"minecraft-server/schem"
 	"minecraft-server/server"
 	"net"
 	"os"
+
+	// Each blank import registers a mini-game with game.Register during
+	// its init(). Drop a game by deleting the line.
+	_ "minecraft-server/games/ffa"
 )
 
 func main() {
@@ -18,7 +23,9 @@ func main() {
 	}
 
 	srv := server.New()
+	srv.ChatModerator = bots.NewNosleeperBot(srv)
 	loadHubSpawn(srv)
+	server.SetupHubMenu(srv)
 
 	const addr = ":25565"
 	lis, err := net.Listen("tcp", addr)

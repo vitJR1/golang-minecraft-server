@@ -83,3 +83,52 @@ func IsBanned(playerName string) *Info {
 	}
 	return info
 }
+
+// Add inserts (or overwrites) a ban for playerName, in-memory only. Persist
+// to disk separately via Save if you want the entry to survive a restart.
+func Add(playerName, reason string, expiresAt time.Time) {
+	mu.Lock()
+	bans[playerName] = &Info{
+		PlayerName: playerName,
+		Reason:     reason,
+		BannedAt:   time.Now(),
+		ExpiresAt:  expiresAt,
+	}
+	mu.Unlock()
+}
+
+// Remove deletes the ban entry for playerName (in-memory). No-op if absent.
+func Remove(playerName string) {
+	mu.Lock()
+	delete(bans, playerName)
+	mu.Unlock()
+}
+
+// Save writes the current in-memory ban set back to path in the same
+// "YYYY-MM-DD HH:MM:SS" format Load expects, so reboots keep bans.
+// Atomic via temp-file + rename.
+func Save(path string) error {
+	mu.RLock()
+	out := make([]rawEntry, 0, len(bans))
+	for _, b := range bans {
+		out = append(out, rawEntry{
+			PlayerName: b.PlayerName,
+			Reason:     b.Reason,
+			BannedAt:   b.BannedAt.Format(timeLayout),
+			ExpiresAt:  b.ExpiresAt.Format(timeLayout),
+		})
+	}
+	mu.RUnlock()
+	data, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return fmt.Errorf("write temp: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("rename: %w", err)
+	}
+	return nil
+}

@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"encoding/json"
 	"minecraft-server/chunk"
 	"minecraft-server/protocol"
 	"minecraft-server/world"
@@ -110,6 +111,16 @@ func (c *ClientConnection) sendBlockUpdate(p world.Position, b world.Block) erro
 	buf.Write(protocol.WritePosition(p.X, p.Y, p.Z))
 	protocol.WriteVarInt32ToBuffer(&buf, b.StateID)
 	return c.safeWrite(CbPlayBlockUpdate, buf.Bytes())
+}
+
+// sendPlayDisconnect tells the client we're closing the connection with a
+// human-readable reason that the vanilla client renders on the disconnect
+// screen. The reason string is wrapped in a JSON chat component since the
+// packet carries Chat, not String. Returns the wire error, if any —
+// callers typically follow up with cleanup() regardless.
+func (c *ClientConnection) sendPlayDisconnect(reason string) error {
+	payload, _ := json.Marshal(map[string]string{"text": reason})
+	return c.safeWrite(CbPlayDisconnect, protocol.WriteString(string(payload)))
 }
 
 // sendCurrentWorldState replays every non-Air block in the world to this

@@ -28,6 +28,11 @@ func (c *ClientConnection) cleanup() {
 	case <-time.After(time.Second):
 	}
 
+	// Drop from any matchmaker queue we might be sitting in.
+	if c.server != nil && c.server.Matchmaker != nil {
+		c.server.Matchmaker.Dequeue(c)
+	}
+
 	// Announce departure + Remove under the same lock as join, but only if
 	// the player ever made it into an instance (early disconnects during
 	// handshake/login leave c.instance nil).

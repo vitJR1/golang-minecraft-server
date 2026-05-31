@@ -125,6 +125,9 @@ func (s *Server) AttachLogic(inst *Instance, logic game.Logic) *game.Ctx {
 	inst.OnChat = func(c *ClientConnection, msg string) (string, bool) {
 		return logic.OnChat(ctx, playerBridge{conn: c}, msg)
 	}
+	inst.OnPlayerAttack = func(attacker, target *ClientConnection) bool {
+		return logic.OnPlayerAttack(ctx, playerBridge{conn: attacker}, playerBridge{conn: target})
+	}
 	inst.OnStop = func() {
 		logic.OnInstanceEnd(ctx)
 	}

@@ -88,6 +88,13 @@ type Logic interface {
 	// OnChat may rewrite the outgoing text and/or veto delivery. Return
 	// (msg, true) for unchanged + allow, ("", false) for drop.
 	OnChat(*Ctx, PlayerHandle, string) (string, bool)
+
+	// OnPlayerAttack fires when one player sends an "attack" Interact
+	// targeted at another player in the same instance. The server has no
+	// damage system today — the hook is the only signal the game gets that
+	// a hit happened. Return value is currently informational (no rollback
+	// path); future work may turn false into a veto.
+	OnPlayerAttack(ctx *Ctx, attacker, target PlayerHandle) bool
 }
 
 // Ctx carries the per-instance handles the Logic needs. Constructed by

@@ -58,6 +58,21 @@ func (tc *testClient) write(t *testing.T, id int32, payload []byte) {
 	}
 }
 
+// startDiscardDrain spawns a goroutine that reads every subsequent packet
+// off the pipe and throws it away. Use when a test doesn't care about
+// packet contents but needs to keep the synchronous net.Pipe drained so
+// the server's writerLoop doesn't block (e.g. during MovePlayer flows
+// that emit >64 packets per player).
+func (tc *testClient) startDiscardDrain() {
+	go func() {
+		for {
+			if _, err := protocol.ReadPacket(tc.conn, tc.threshold); err != nil {
+				return
+			}
+		}
+	}()
+}
+
 // startDrain spawns a goroutine that reads every subsequent packet off the
 // pipe and pushes its ID onto the returned channel. Closes the channel when
 // the pipe errors out (e.g. test cleanup). Use after login when later

@@ -70,6 +70,12 @@ type Instance struct {
 	// false to drop the message entirely.
 	OnChat func(c *ClientConnection, msg string) (rewrite string, allow bool)
 
+	// OnPlayerAttack fires when attacker sends SbPlayInteract type=attack
+	// targeting another player in the same instance. The hook is the only
+	// place games get to observe PvP — there is no damage system, so the
+	// return value is informational (reserved for a future veto path).
+	OnPlayerAttack func(attacker, target *ClientConnection) bool
+
 	// OnStop fires once when the instance is being torn down (via
 	// Server.RemoveInstance or Instance.Stop). Use for game cleanup;
 	// the tick loop is still running when this fires.

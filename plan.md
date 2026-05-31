@@ -360,19 +360,17 @@ block states по namespaced ID (важно для нас — наш `world.Bloc
 ## TL;DR порядок действий
 
 1. ✅ Load-test harness + pprof.
-2. Per-connection send queue.
-3. Player race fix.
-4. Instance abstraction.
-5. Tick loop per Instance.
-5.5. Интерактивные пакеты (Swing/Interact/UseItemOn/PlayerAction).
-4. Instance abstraction.
-5. Tick loop per Instance.
-6. Event hooks.
-7. Cross-instance teleport.
-8. World templates + Clone.
-9. `game/` package (Definition, Logic, Registry).
-10. Matchmaker.
-11. KeepAlive timeout.
-12. `slog`.
-13. Референс-игра (FFA arena).
-14. **→ парсинг карт** (см. отдельную секцию).
+2. ✅ Per-connection send queue.
+3. ✅ Player race fix.
+4. ✅ Instance abstraction.
+5. ✅ Tick loop per Instance.
+5.5. ✅ Интерактивные пакеты (Swing/Interact/UseItemOn/PlayerAction).
+6. ✅ Event hooks.
+7. ✅ Cross-instance teleport.
+8. ✅ World templates + Clone.
+9. ✅ `game/` package (Definition, Logic, Registry).
+10. ✅ Matchmaker (`/play <game>` + auto-start at MinPlayers).
+11. ✅ KeepAlive timeout (atomic config, kick после `KeepAliveTimeout`).
+12. ✅ `slog` (LOG_LEVEL/LOG_FORMAT через env).
+13. ✅ Референс-игра (FFA arena, `games/ffa`, OnPlayerAttack hook).
+14. ✅ Парсинг карт (`.schem` v2/v3 → world.Template, property-aware).
