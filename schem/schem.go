@@ -194,11 +194,15 @@ func (s *Schematic) ToTemplateAt(originX, originY, originZ int) *world.Template 
 				if int(paletteID) >= len(s.Palette) {
 					continue // bogus index, skip
 				}
-				name := stripProperties(s.Palette[paletteID])
+				name, props := parsePalette(s.Palette[paletteID])
 				block, ok := world.BlockByName(name)
 				if !ok || block == world.Air {
 					continue
 				}
+				// Property-aware: stairs facing, slab half, log axis etc.
+				// Falls back to block's default StateID when the block
+				// has no variants registered or props is empty.
+				block.StateID = world.ResolveStateID(name, props)
 				t.SetBlock(
 					world.Position{
 						X: originX + x,
@@ -213,8 +217,43 @@ func (s *Schematic) ToTemplateAt(originX, originY, originZ int) *world.Template 
 	return t
 }
 
+// parsePalette splits a Sponge palette entry into its base name and
+// property map. "minecraft:oak_stairs[facing=north,half=bottom]" →
+// ("minecraft:oak_stairs", {"facing":"north","half":"bottom"}).
+// Returns (name, nil) when there are no brackets.
+func parsePalette(s string) (string, map[string]string) {
+	i := strings.Index(s, "[")
+	if i < 0 {
+		return s, nil
+	}
+	name := s[:i]
+	j := strings.LastIndex(s, "]")
+	if j <= i {
+		return name, nil
+	}
+	body := s[i+1 : j]
+	if body == "" {
+		return name, nil
+	}
+	props := make(map[string]string)
+	for _, pair := range strings.Split(body, ",") {
+		eq := strings.Index(pair, "=")
+		if eq <= 0 {
+			continue
+		}
+		props[strings.TrimSpace(pair[:eq])] = strings.TrimSpace(pair[eq+1:])
+	}
+	if len(props) == 0 {
+		return name, nil
+	}
+	return name, props
+}
+
 // stripProperties drops the "[key=val,...]" suffix from a block name.
 // "minecraft:oak_stairs[facing=north,half=bottom]" → "minecraft:oak_stairs"
+//
+// Kept for tests and any caller that wants the base name without
+// allocating a property map.
 func stripProperties(name string) string {
 	if i := strings.Index(name, "["); i >= 0 {
 		return name[:i]

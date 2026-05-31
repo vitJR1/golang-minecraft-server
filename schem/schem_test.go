@@ -219,6 +219,93 @@ func TestVarIntDecoder(t *testing.T) {
 	}
 }
 
+func TestParsePalette(t *testing.T) {
+	cases := []struct {
+		in       string
+		wantName string
+		wantProp map[string]string
+	}{
+		{"minecraft:stone", "minecraft:stone", nil},
+		{"minecraft:oak_stairs[facing=east,half=top]",
+			"minecraft:oak_stairs",
+			map[string]string{"facing": "east", "half": "top"}},
+		{"minecraft:oak_slab[type=top,waterlogged=false]",
+			"minecraft:oak_slab",
+			map[string]string{"type": "top", "waterlogged": "false"}},
+		{"minecraft:oak_log[axis=x]",
+			"minecraft:oak_log",
+			map[string]string{"axis": "x"}},
+		{"minecraft:foo[]", "minecraft:foo", nil}, // empty bracket body
+	}
+	for _, c := range cases {
+		gotName, gotProps := parsePalette(c.in)
+		if gotName != c.wantName {
+			t.Errorf("%q name: got %q, want %q", c.in, gotName, c.wantName)
+		}
+		if len(gotProps) != len(c.wantProp) {
+			t.Errorf("%q props: got %v, want %v", c.in, gotProps, c.wantProp)
+			continue
+		}
+		for k, v := range c.wantProp {
+			if gotProps[k] != v {
+				t.Errorf("%q[%s]: got %q, want %q", c.in, k, gotProps[k], v)
+			}
+		}
+	}
+}
+
+func TestToTemplatePropertyAwareStairs(t *testing.T) {
+	// 2 oak_stairs side by side: one facing east, one facing west.
+	// Verify the StateID actually differs (i.e. props were honored).
+	data := buildSchemNBT(2, 1, 1,
+		map[string]int32{
+			"minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]": 0,
+			"minecraft:oak_stairs[facing=west,half=bottom,shape=straight,waterlogged=false]": 1,
+		},
+		[]int32{0, 1},
+	)
+	s, _ := Parse(data)
+	w := s.ToTemplate().Instantiate()
+
+	east := w.GetBlock(world.Position{X: 0, Y: 0, Z: 0})
+	west := w.GetBlock(world.Position{X: 1, Y: 0, Z: 0})
+	if east.Name != "minecraft:oak_stairs" {
+		t.Fatalf("east block: got %+v", east)
+	}
+	if west.Name != "minecraft:oak_stairs" {
+		t.Fatalf("west block: got %+v", west)
+	}
+	if east.StateID == west.StateID {
+		t.Errorf("expected different StateIDs for east/west stairs, both got %d", east.StateID)
+	}
+	// Spot-check the actual values from the resolver (see world/states_test.go).
+	if east.StateID != 2945 {
+		t.Errorf("east stairs StateID: got %d, want 2945", east.StateID)
+	}
+}
+
+func TestToTemplatePropertyAwareSlab(t *testing.T) {
+	// Top and bottom oak_slab — should map to different state IDs.
+	data := buildSchemNBT(2, 1, 1,
+		map[string]int32{
+			"minecraft:oak_slab[type=top,waterlogged=false]":    0,
+			"minecraft:oak_slab[type=bottom,waterlogged=false]": 1,
+		},
+		[]int32{0, 1},
+	)
+	s, _ := Parse(data)
+	w := s.ToTemplate().Instantiate()
+	top := w.GetBlock(world.Position{X: 0, Y: 0, Z: 0})
+	bot := w.GetBlock(world.Position{X: 1, Y: 0, Z: 0})
+	if top.StateID == bot.StateID {
+		t.Errorf("expected different StateIDs for top/bottom slab, both got %d", top.StateID)
+	}
+	if top.StateID != 11022 || bot.StateID != 11024 {
+		t.Errorf("slab StateIDs: top=%d (want 11022) bot=%d (want 11024)",
+			top.StateID, bot.StateID)
+	}
+}
+
 func TestVarIntDecoderRejectsTruncated(t *testing.T) {
 	// Continuation bit set on the last byte → incomplete VarInt.
 	data := []byte{0x80}
