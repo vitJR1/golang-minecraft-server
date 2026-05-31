@@ -273,10 +273,20 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 	// 5. Reset the player's position to spawn.
 	c.player.MoveTo(x, y, z, false)
 
-	// 6. Stream chunks → fill in blocks → THEN dismiss the loading
-	//    overlay via SyncPos. See sendPlayPackets for why the order
-	//    matters (Block Updates must land before SyncPos or the client
-	//    holds "loading terrain" while processing them).
+	// 6. Stream the spawn-position triplet (compass + view center +
+	//    start-waiting-for-chunks), THEN chunks → blocks → SyncPos.
+	//    See sendPlayPackets for the rationale; same sequence applies
+	//    on cross-instance teleport since Respawn just reset the
+	//    client's world.
+	if err := c.sendSetDefaultSpawnPosition(int(x), int(y), int(z), 0); err != nil {
+		return fmt.Errorf("set spawn position: %w", err)
+	}
+	if err := c.sendSetCenterChunk(0, 0); err != nil {
+		return fmt.Errorf("set center chunk: %w", err)
+	}
+	if err := c.sendStartWaitingForChunks(); err != nil {
+		return fmt.Errorf("start waiting for chunks: %w", err)
+	}
 	if err := c.sendInitialChunks(); err != nil {
 		return fmt.Errorf("chunk data: %w", err)
 	}
@@ -540,24 +550,35 @@ func (c *ClientConnection) processPacket(packet *bytes.Buffer) error {
 // requires before it will render the world.
 func (c *ClientConnection) sendPlayPackets() error {
 	spawn := c.player.Snapshot()
-	// Order matters here. The 1.20.1 client treats Synchronize Player
-	// Position as the "you can play now" signal — once the client acks
-	// teleport_confirm the loading-terrain overlay is dismissed. So
-	// every chunk + every spawn-area Block Update needs to land BEFORE
-	// SyncPos, otherwise the client sits on the overlay while
-	// processing the trailing block-update spam.
+	// Order matters here. Vanilla 1.20.1 holds the "loading terrain"
+	// overlay until it has BOTH:
+	//   - a known spawn position (Set Default Spawn Position, 0x50),
+	//   - a known view-center chunk (Set Center Chunk, 0x4E), and
+	//   - the explicit "start waiting for chunks" Game Event (id=13).
+	// Without all three the client doesn't know the chunks we send are
+	// the level data it should buffer, so it sits on the overlay forever
+	// even after a perfectly valid SyncPos lands.
 	//
-	// Sequence on the wire:
+	// Wire sequence:
 	//   1. Login (Play)
-	//   2. Chunk Data (16 empty chunks around spawn)
-	//   3. World State (Block Updates for the spawn schematic — ~726
-	//      packets; queued via writerLoop so it's one writev syscall)
-	//   4. Sync Player Position
+	//   2. Set Default Spawn Position    ← compass + respawn target
+	//   3. Set Center Chunk              ← "you live at (0,0)"
+	//   4. Game Event 13                 ← "begin waiting for chunks"
+	//   5. Chunk Data (16 empty chunks)
+	//   6. World State (Block Updates for the spawn schematic)
+	//   7. Synchronize Player Position   ← dismisses the overlay
 	packets := []struct {
 		name string
 		f    func() error
 	}{
 		{"Login (Play)", c.sendLoginPlay},
+		{"Set Default Spawn Position", func() error {
+			return c.sendSetDefaultSpawnPosition(int(spawn.X), int(spawn.Y), int(spawn.Z), 0)
+		}},
+		{"Set Center Chunk", func() error {
+			return c.sendSetCenterChunk(0, 0)
+		}},
+		{"Start Waiting For Chunks", c.sendStartWaitingForChunks},
 		{"Chunk Data", c.sendInitialChunks},
 		{"World State", c.sendCurrentWorldState},
 		{"Sync Player Position", func() error {

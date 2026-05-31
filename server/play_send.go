@@ -113,6 +113,42 @@ func (c *ClientConnection) sendBlockUpdate(p world.Position, b world.Block) erro
 	return c.safeWrite(CbPlayBlockUpdate, buf.Bytes())
 }
 
+// sendSetCenterChunk (Cb 0x4E "update_view_position") tells the client
+// which chunk the player is centred on. Without it the 1.20.1 vanilla
+// client can't decide which chunks fall inside its view distance and
+// keeps the "loading terrain" overlay open even after we've sent
+// chunks.
+func (c *ClientConnection) sendSetCenterChunk(chunkX, chunkZ int32) error {
+	var buf bytes.Buffer
+	protocol.WriteVarInt32ToBuffer(&buf, chunkX)
+	protocol.WriteVarInt32ToBuffer(&buf, chunkZ)
+	return c.safeWrite(CbPlaySetCenterChunk, buf.Bytes())
+}
+
+// sendSetDefaultSpawnPosition (Cb 0x50) seeds the world-spawn point used
+// by the compass and as the respawn fallback. Vanilla expects this
+// during the login sequence; without it the loading screen hangs.
+// Angle is the yaw of the compass needle at the spawn (radians? float
+// per protocol, vanilla uses 0).
+func (c *ClientConnection) sendSetDefaultSpawnPosition(x, y, z int, angle float32) error {
+	var buf bytes.Buffer
+	buf.Write(protocol.WritePosition(x, y, z))
+	buf.Write(protocol.WriteFloat(angle))
+	return c.safeWrite(CbPlaySpawnPos, buf.Bytes())
+}
+
+// sendStartWaitingForChunks fires Game Event id 13 — added in 1.20.1
+// specifically as the explicit "begin waiting for level chunks" signal.
+// Sent right after Login(Play) so the client knows that the chunks
+// arriving next are the level data it should buffer before unlocking the
+// loading-terrain overlay.
+func (c *ClientConnection) sendStartWaitingForChunks() error {
+	payload := make([]byte, 0, 5)
+	payload = append(payload, 13) // event id: start waiting for chunks
+	payload = append(payload, protocol.WriteFloat(0)...)
+	return c.safeWrite(CbPlayGameEvent, payload)
+}
+
 // sendPlayDisconnect tells the client we're closing the connection with a
 // human-readable reason that the vanilla client renders on the disconnect
 // screen. The reason string is wrapped in a JSON chat component since the

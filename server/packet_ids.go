@@ -85,6 +85,7 @@ const (
 	CbPlayRespawn          = 0x41
 	CbPlayHeadRotation     = 0x42 // body yaw rides Teleport Entity; head needs its own packet
 	CbPlayDisconnect       = 0x1A // server-initiated kick with reason
+	CbPlaySetCenterChunk   = 0x4E // "update_view_position" — center chunk for the client
 	CbPlaySpawnPos         = 0x50
 	CbPlaySystemChat       = 0x64
 	CbPlayTeleportEntity   = 0x68

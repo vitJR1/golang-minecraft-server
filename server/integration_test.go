@@ -213,27 +213,24 @@ func TestOfflineLoginFlow(t *testing.T) {
 		t.Errorf("LoginSuccess properties count: got %d, want 0", propsCount)
 	}
 
-	// Play packets in order: Login(Play), then 16 ChunkData (4×4 around
-	// origin per HubChunkRadius), then SyncPos.
-	expected := []struct {
+	// Play packets in order:
+	//   Login(Play), SpawnPos, SetCenterChunk, GameEvent (start_waiting),
+	//   16 × ChunkData, SyncPos.
+	type expect struct {
 		name   string
 		id     int
 		minLen int // payload byte floor — Login(Play) carries the ~70KB registry codec
-	}{
+	}
+	expected := []expect{
 		{"Login(Play)", CbPlayLogin, 1000},
+		{"SpawnPos", CbPlaySpawnPos, 8},             // packed Position + Float angle
+		{"SetCenterChunk", CbPlaySetCenterChunk, 2}, // two VarInts
+		{"GameEvent(13)", CbPlayGameEvent, 5},       // 1 byte id + 4 byte float
 	}
 	for i := 0; i < spawnChunkCount; i++ {
-		expected = append(expected, struct {
-			name   string
-			id     int
-			minLen int
-		}{"ChunkData", CbPlayChunkData, 100})
+		expected = append(expected, expect{"ChunkData", CbPlayChunkData, 100})
 	}
-	expected = append(expected, struct {
-		name   string
-		id     int
-		minLen int
-	}{"SyncPos", CbPlaySyncPos, 30})
+	expected = append(expected, expect{"SyncPos", CbPlaySyncPos, 30})
 	for _, want := range expected {
 		got, body := cli.read(t)
 		if got != want.id {
@@ -300,6 +297,14 @@ func loginChunks() []int {
 		out[i] = CbPlayChunkData
 	}
 	return out
+}
+
+// joinPrelude is the post-Respawn triplet the server emits before
+// streaming chunks: Set Default Spawn Position, Set Center Chunk, and
+// the "start waiting for chunks" Game Event. Splice it into drainExpect
+// lists between Respawn and loginChunks().
+func joinPrelude() []int {
+	return []int{CbPlaySpawnPos, CbPlaySetCenterChunk, CbPlayGameEvent}
 }
 
 // waitFor polls until cond returns true or the deadline passes. Useful for
@@ -833,8 +838,10 @@ func TestMovePlayerSwitchesInstances(t *testing.T) {
 
 	// Wire-level sequence for the move.
 	drainExpect(t, ch, "move pre-chunks",
-		CbPlayPlayerInfoRemove, // clear hub tab list
-		CbPlayRespawn,          // tell client to wipe world + entities
+		append([]int{
+			CbPlayPlayerInfoRemove, // clear hub tab list
+			CbPlayRespawn,          // tell client to wipe world + entities
+		}, joinPrelude()...)...,
 	)
 	drainExpect(t, ch, "move chunks", loginChunks()...)
 	drainExpect(t, ch, "move post-chunks",
@@ -896,8 +903,10 @@ func TestMovePlayerNotifiesStayers(t *testing.T) {
 
 	// Leaver sees the full move sequence.
 	drainExpect(t, leaverCh, "Leaver move pre-chunks",
-		CbPlayPlayerInfoRemove,
-		CbPlayRespawn,
+		append([]int{
+			CbPlayPlayerInfoRemove,
+			CbPlayRespawn,
+		}, joinPrelude()...)...,
 	)
 	drainExpect(t, leaverCh, "Leaver move chunks", loginChunks()...)
 	drainExpect(t, leaverCh, "Leaver move post-chunks",
@@ -942,8 +951,10 @@ func TestInstanceCreateAndJoin(t *testing.T) {
 	// Now join it.
 	cli.write(t, SbPlayChatCommand, protocol.WriteString("instance join arena"))
 	drainExpect(t, ch, "join pre-chunks",
-		CbPlayPlayerInfoRemove,
-		CbPlayRespawn,
+		append([]int{
+			CbPlayPlayerInfoRemove,
+			CbPlayRespawn,
+		}, joinPrelude()...)...,
 	)
 	drainExpect(t, ch, "join chunks", loginChunks()...)
 	drainExpect(t, ch, "join post-chunks",
@@ -1031,14 +1042,16 @@ func TestInstanceDeleteSelfMovesToHub(t *testing.T) {
 
 	// Move to arena.
 	cli.write(t, SbPlayChatCommand, protocol.WriteString("instance join arena"))
-	drainExpect(t, ch, "join arena pre-chunks", CbPlayPlayerInfoRemove, CbPlayRespawn)
+	drainExpect(t, ch, "join arena pre-chunks",
+		append([]int{CbPlayPlayerInfoRemove, CbPlayRespawn}, joinPrelude()...)...)
 	drainExpect(t, ch, "join arena chunks", loginChunks()...)
 	drainExpect(t, ch, "join arena post-chunks",
 		CbPlaySyncPos, CbPlayPlayerInfoUpdate, CbPlaySystemChat)
 
 	// Delete arena while inside it: server should evac caller to hub, then delete.
 	cli.write(t, SbPlayChatCommand, protocol.WriteString("instance delete arena"))
-	drainExpect(t, ch, "evac + delete pre-chunks", CbPlayPlayerInfoRemove, CbPlayRespawn)
+	drainExpect(t, ch, "evac + delete pre-chunks",
+		append([]int{CbPlayPlayerInfoRemove, CbPlayRespawn}, joinPrelude()...)...)
 	drainExpect(t, ch, "evac + delete chunks", loginChunks()...)
 	drainExpect(t, ch, "evac + delete post-chunks",
 		CbPlaySyncPos,

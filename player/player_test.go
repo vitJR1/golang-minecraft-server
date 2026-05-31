@@ -20,11 +20,14 @@ func TestNewSetsIdentityAndDefaults(t *testing.T) {
 	}
 
 	snap := p.Snapshot()
-	if snap.Y != 80 {
-		t.Errorf("default spawn Y: got %v, want 80", snap.Y)
+	if snap.Y != 67 {
+		t.Errorf("default spawn Y: got %v, want 67", snap.Y)
 	}
-	if snap.X != 0 || snap.Z != 0 {
-		t.Errorf("default spawn X/Z: got (%v, %v), want (0, 0)", snap.X, snap.Z)
+	// Default spawn is the centre of the (0,0,0) block column so the
+	// client renders the player standing in the middle of the cell
+	// instead of clipped to a corner.
+	if snap.X != 0.5 || snap.Z != 0.5 {
+		t.Errorf("default spawn X/Z: got (%v, %v), want (0.5, 0.5)", snap.X, snap.Z)
 	}
 	if snap.Gamemode != Creative {
 		t.Errorf("default gamemode: got %v, want Creative", snap.Gamemode)
