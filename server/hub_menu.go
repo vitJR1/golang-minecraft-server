@@ -3,10 +3,10 @@ package server
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"minecraft-server/protocol"
 	"minecraft-server/world"
+	"strings"
 )
 
 // Hub navigation menu.
@@ -33,13 +33,17 @@ const (
 	itemRedBed       = 938 // BedWars icon
 	itemFeather      = 811 // SkyWars icon
 	itemCompass      = 888 // arena icon (all 6 per game)
+	itemEnderPearl   = 952 // "Arena selector" — handed out in lobbies
 )
 
-// hubBlazeRodSlot is the inventory slot we place the blaze rod into.
-// Vanilla container layout: 36..44 are the hotbar, slot 36 is the
-// first/leftmost cell. The client auto-selects hotbar 0 (= slot 36) on
-// join so it's already in hand.
-const hubBlazeRodSlot int16 = 36
+// Hotbar slots in the player-inventory container layout. 36..44 are the
+// 9 hotbar cells, 36 being the leftmost. Hub gives the blaze rod into
+// slot 0; lobbies additionally drop an ender pearl into slot 1 so the
+// player can swap to it (1 key) to open the arena picker.
+const (
+	hotbarSlot0 int16 = 36 // navigator (blaze rod)
+	hotbarSlot1 int16 = 37 // arena selector (ender pearl, lobby only)
+)
 
 // chest window types (minecraft.wiki "Open Screen" inventory types):
 //
@@ -69,12 +73,34 @@ type menuEntry struct {
 	key    string // stable identifier for code paths (e.g. "ffa", "garden")
 }
 
-// Per-game arena names. Six each, matching what the user asked for.
-var (
-	ffaArenas = []string{"The Pit", "Coliseum", "Sandbox", "Backalley", "Rooftop", "Tomb"}
-	bwArenas  = []string{"Garden", "Aquarium", "Volcano", "Junkyard", "Stronghold", "Lighthouse"}
-	swArenas  = []string{"Cumulus", "Stratos", "Nebula", "Vesper", "Aurora", "Eclipse"}
-)
+// hubMenuTargets maps a menu icon's `key` to the lobby instance ID the
+// click teleports the player into. Mirror LobbyFFA / LobbyBedWars /
+// LobbySkyWars from lobbies.go.
+var hubMenuTargets = map[string]string{
+	"ffa": LobbyFFA,
+	"bw":  LobbyBedWars,
+	"sw":  LobbySkyWars,
+}
+
+// lobbyArenas maps each lobby instance ID to the list of arena names
+// shown in that lobby's ender-pearl menu. Membership in this map also
+// doubles as "is this instance a game lobby" — see arenasForLobby.
+//
+// Names are placeholders; future matchmaker dispatch will look them up
+// in the game's Definition.
+var lobbyArenas = map[string][]string{
+	LobbyFFA:     {"The Pit", "Coliseum", "Sandbox", "Backalley", "Rooftop", "Tomb"},
+	LobbyBedWars: {"Garden", "Aquarium", "Volcano", "Junkyard", "Stronghold", "Lighthouse"},
+	LobbySkyWars: {"Cumulus", "Stratos", "Nebula", "Vesper", "Aurora", "Eclipse"},
+}
+
+// arenasForLobby returns (arenas, true) if instanceID is a game lobby,
+// else (nil, false). The boolean is also the predicate "should this
+// instance hand out an ender-pearl arena selector".
+func arenasForLobby(instanceID string) ([]string, bool) {
+	arenas, ok := lobbyArenas[instanceID]
+	return arenas, ok
+}
 
 // SetupHubMenu wires the hub instance: gives the blaze rod on join and
 // installs the protection vetos (no block break/place, no PvP). The hub
@@ -113,18 +139,33 @@ func SetupHubMenu(s *Server) {
 	}
 }
 
-// giveBlazeRod puts a blaze rod into the player's hotbar via Set Container
-// Slot with window=0 (player inventory). State ID 0 is acceptable for a
-// first write — subsequent State ID enforcement only kicks in after the
-// server sends Set Container Content.
+// giveBlazeRod puts the "Navigator" blaze rod into the player's hotbar
+// slot 0. Used by hub + lobby OnPlayerJoin so it's always available.
+// State ID 0 is fine for a first write — vanilla's State ID checks
+// only kick in after the server sends Set Container Content.
 func giveBlazeRod(c *ClientConnection) {
+	giveHotbarItem(c, hotbarSlot0, itemBlazeRod, "Navigator")
+}
+
+// giveArenaSelector puts an "Arena selector" ender pearl into hotbar
+// slot 1. Lobbies call this so the player can press `2` and right-click
+// to open the per-game arena picker.
+func giveArenaSelector(c *ClientConnection) {
+	giveHotbarItem(c, hotbarSlot1, itemEnderPearl, "Arena selector")
+}
+
+// giveHotbarItem is the underlying wire push used by giveBlazeRod /
+// giveArenaSelector. Pushes a single Set Container Slot at window 0
+// (player inventory).
+func giveHotbarItem(c *ClientConnection, slot int16, itemID int32, name string) {
 	var buf bytes.Buffer
-	buf.WriteByte(0)                                // window id 0 = player inventory
-	protocol.WriteVarInt32ToBuffer(&buf, 0)         // state id
-	buf.Write(protocol.WriteShort(hubBlazeRodSlot)) // slot
-	buf.Write(protocol.WriteSlotWithName(itemBlazeRod, 1, "Navigator"))
+	buf.WriteByte(0)                        // window id 0 = player inventory
+	protocol.WriteVarInt32ToBuffer(&buf, 0) // state id
+	buf.Write(protocol.WriteShort(slot))
+	buf.Write(protocol.WriteSlotWithName(itemID, 1, name))
 	if err := c.safeWrite(CbPlaySetContainerSlot, buf.Bytes()); err != nil {
-		slog.Warn("give blaze rod failed", "player", c.playerName, "err", err)
+		slog.Warn("give hotbar item failed",
+			"player", c.playerName, "item", name, "err", err)
 	}
 }
 
@@ -146,43 +187,60 @@ func (c *ClientConnection) openHubMainMenu() {
 	_ = c.sendChestContents(entries)
 }
 
-// openHubArenaMenu opens the 6-arena sub-menu for the selected game.
-func (c *ClientConnection) openHubArenaMenu(gameKey string, arenas []string, title string) {
+// openArenaMenu opens the per-lobby chest GUI listing arenas to pick.
+// Called by SbPlayUseItem when the player right-clicks the ender pearl
+// (slot 1) while standing in a game lobby.
+func (c *ClientConnection) openArenaMenu(lobbyID string, arenas []string) {
 	entries := make(map[int16]menuEntry, len(arenas))
 	for i, name := range arenas {
 		entries[int16(i)] = menuEntry{
-			slot: int16(i), itemID: itemCompass, name: name, key: gameKey,
+			slot: int16(i), itemID: itemCompass, name: name, key: lobbyID,
 		}
 	}
 	c.menu.Store(&openMenu{
-		kind:    gameKey,
+		kind:    lobbyID + "-arenas",
 		entries: entries,
-		onClick: hubArenaOnClick,
+		onClick: arenaOnClick,
 	})
-	_ = c.sendOpenScreen(title)
+	_ = c.sendOpenScreen(strings.ToUpper(lobbyID[:1]) + lobbyID[1:] + " arenas")
 	_ = c.sendChestContents(entries)
 }
 
-// hubMainOnClick: clicking a game icon opens the matching arena list.
-func hubMainOnClick(c *ClientConnection, e menuEntry) {
-	switch e.key {
-	case "ffa":
-		c.openHubArenaMenu("ffa", ffaArenas, "FFA arenas")
-	case "bw":
-		c.openHubArenaMenu("bw", bwArenas, "BedWars arenas")
-	case "sw":
-		c.openHubArenaMenu("sw", swArenas, "SkyWars arenas")
-	}
+// arenaOnClick: arena slot click — logs + system-chat the choice and
+// closes the server-side menu. Future hook: matchmaker.Queue or
+// teleport into the arena instance itself.
+func arenaOnClick(c *ClientConnection, e menuEntry) {
+	slog.Info("arena picked",
+		"player", c.playerName, "lobby", e.key, "arena", e.name)
+	_ = c.sendSystemMessage("You picked " + e.key + " — " + e.name)
+	c.menu.Store(nil)
 }
 
-// hubArenaOnClick: clicking an arena logs the selection + tells the player.
-// Real matchmaker dispatch lands in a follow-up; for now this is the proof
-// that the menu round-trip works.
-func hubArenaOnClick(c *ClientConnection, e menuEntry) {
-	slog.Info("hub menu: arena picked",
-		"player", c.playerName, "game", e.key, "arena", e.name)
-	_ = c.sendSystemMessage(fmt.Sprintf("You picked %s — %s", e.key, e.name))
+// hubMainOnClick: clicking a game icon (FFA / BedWars / SkyWars)
+// teleports the player into the matching lobby instance. The chest GUI
+// is dismissed implicitly by the Respawn that MovePlayer sends; we
+// only have to clear the server-side menu state.
+func hubMainOnClick(c *ClientConnection, e menuEntry) {
+	lobbyID, ok := hubMenuTargets[e.key]
+	if !ok {
+		return
+	}
+	target := c.server.GetInstance(lobbyID)
+	if target == nil {
+		_ = c.sendSystemMessage("Lobby unavailable: " + lobbyID)
+		slog.Warn("hub menu: lobby not registered",
+			"player", c.playerName, "lobby", lobbyID)
+		return
+	}
 	c.menu.Store(nil)
+	if err := c.server.MovePlayer(c, target, 0.5, 67, 0.5); err != nil {
+		_ = c.sendSystemMessage("Couldn't enter lobby: " + err.Error())
+		slog.Warn("hub menu: move failed",
+			"player", c.playerName, "lobby", lobbyID, "err", err)
+		return
+	}
+	slog.Info("hub menu: entered lobby",
+		"player", c.playerName, "lobby", lobbyID)
 }
 
 // sendOpenScreen tells the client to open a single-row chest GUI under
@@ -210,23 +268,32 @@ const (
 	chestSlots       = 9
 	chestTotalSlots  = chestSlots + 36
 	chestHotbarSlot0 = int16(chestSlots + 27) // = 36
+	chestHotbarSlot1 = int16(chestSlots + 28) // = 37
 )
 
 // sendChestContents fills the open chest's 9 visible slots from entries,
-// then mirrors the player's inventory in slots 9..44 so the client keeps
-// rendering the blaze rod (and any future items) instead of treating the
-// player inventory as empty.
+// then mirrors the player's hotbar in slots 36..44 so the client keeps
+// rendering the navigator (and the arena selector in lobbies) instead
+// of treating the player inventory as empty.
 func (c *ClientConnection) sendChestContents(entries map[int16]menuEntry) error {
 	var buf bytes.Buffer
 	buf.WriteByte(menuWindowID)
 	protocol.WriteVarInt32ToBuffer(&buf, 0) // state id
 	protocol.WriteVarInt32ToBuffer(&buf, int32(chestTotalSlots))
 
+	// Are we in a game lobby? If yes, include the ender pearl in the
+	// mirror so a chest-open-then-close cycle doesn't wipe it.
+	includePearl := false
+	if c.instance != nil {
+		_, includePearl = arenasForLobby(c.instance.ID)
+	}
+
 	for s := int16(0); s < int16(chestTotalSlots); s++ {
 		switch {
 		case s == chestHotbarSlot0:
-			// Player inventory mirror: blaze rod at hotbar 0.
 			buf.Write(protocol.WriteSlotWithName(itemBlazeRod, 1, "Navigator"))
+		case s == chestHotbarSlot1 && includePearl:
+			buf.Write(protocol.WriteSlotWithName(itemEnderPearl, 1, "Arena selector"))
 		default:
 			if e, ok := entries[s]; ok {
 				buf.Write(protocol.WriteSlotWithName(e.itemID, 1, e.name))

@@ -56,6 +56,7 @@ const (
 	SbPlaySwingArm          = 0x2F
 	SbPlayUseItemOnBlock    = 0x31
 	SbPlayUseItem           = 0x32 // right-click in air (e.g. holding blaze rod)
+	SbPlaySetHeldItem       = 0x28 // Int16 hotbar slot the player switched to
 
 	// Inventory / container interaction. IDs verified against
 	// minecraft-data protocol.json for 1.20 (which 1.20.1 inherits).
@@ -90,6 +91,7 @@ const (
 	CbPlaySpawnPos         = 0x50
 	CbPlaySystemChat       = 0x64
 	CbPlayTeleportEntity   = 0x68
+	CbPlaySetExperience    = 0x56 // float bar + VarInt level + VarInt total xp
 
 	// Inventory / container packets. IDs from minecraft-data 1.20
 	// protocol.json (window_items / set_slot / open_window).

@@ -29,8 +29,8 @@ func TestNewSetsIdentityAndDefaults(t *testing.T) {
 	if snap.X != 0.5 || snap.Z != 0.5 {
 		t.Errorf("default spawn X/Z: got (%v, %v), want (0.5, 0.5)", snap.X, snap.Z)
 	}
-	if snap.Gamemode != Creative {
-		t.Errorf("default gamemode: got %v, want Creative", snap.Gamemode)
+	if snap.Gamemode != Adventure {
+		t.Errorf("default gamemode: got %v, want Adventure", snap.Gamemode)
 	}
 }
 

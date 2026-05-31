@@ -50,7 +50,7 @@ const parserBrigadierString = 5
 const stringGreedyPhrase = 2
 
 func (c *ClientConnection) sendDeclareCommands() error {
-	cmds := uniqueRegisteredCommands()
+	cmds := commandsVisibleTo(c)
 
 	var buf bytes.Buffer
 
@@ -109,6 +109,27 @@ func uniqueRegisteredCommands() []*Command {
 		}
 		seen[c] = true
 		out = append(out, c)
+	}
+	return out
+}
+
+// commandsVisibleTo returns the subset of registered commands that c is
+// allowed to see — op-only ones are hidden from non-ops so they don't
+// appear in /<TAB> autocomplete or in the brigadier tree the client
+// uses for syntax highlighting. Mirror the gate in RunCommand: if the
+// command needs op and the player isn't op, drop it.
+func commandsVisibleTo(c *ClientConnection) []*Command {
+	all := uniqueRegisteredCommands()
+	if c == nil || c.server == nil {
+		return all
+	}
+	isOp := c.server.Ops.Has(c.playerName)
+	out := make([]*Command, 0, len(all))
+	for _, cmd := range all {
+		if cmd.NeedsOp && !isOp {
+			continue
+		}
+		out = append(out, cmd)
 	}
 	return out
 }

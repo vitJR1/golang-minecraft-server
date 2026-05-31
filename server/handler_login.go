@@ -33,6 +33,21 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 		return fmt.Errorf("server closed during login")
 	}
 
+	// IP ban from the auth plugin's failure tracking. Engages before
+	// anything expensive (Mojang auth, ban-list lookup) so spammers
+	// get bounced fast.
+	if authStore != nil {
+		if until, allowed := authStore.CheckIPAllowed(c.conn.RemoteAddr()); !allowed {
+			slog.Info("auth: IP banned, rejecting",
+				"player", c.playerName, "until", until)
+			msg := []byte(`{"text":"IP banned (auth failures) until ` +
+				until.Format("2006-01-02 15:04:05") + `"}`)
+			_ = c.safeWrite(CbLoginDisconnect, protocol.WriteString(string(msg)))
+			c.cleanup()
+			return nil
+		}
+	}
+
 	if banned := ban.IsBanned(c.playerName); banned != nil {
 		msg := []byte(`{"text":"You are banned from this server.\nReason: ` + banned.Reason +
 			`. Expires: ` + banned.ExpiresAt.Format(time.RFC1123) + `"}`)
@@ -75,9 +90,14 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 	}
 
 	c.state = StatePlay
-	// Default every new player into the hub instance. Cross-instance
-	// teleport (planned) is what moves them elsewhere later.
-	c.instance = c.server.Hub
+	// Default landing: hub. With the auth plugin enabled, players go
+	// to the dedicated auth instance instead — they're moved to hub
+	// once /register or /login succeeds.
+	if authStore != nil && c.server.Auth != nil {
+		c.instance = c.server.Auth
+	} else {
+		c.instance = c.server.Hub
+	}
 
 	if err := c.sendPlayPackets(); err != nil {
 		if c.isClosed() {
@@ -93,6 +113,11 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 	// half-registered (in the PlayerList but not yet visible to everyone),
 	// which would otherwise produce duplicate or out-of-order Spawn packets.
 	c.instance.JoinAndAnnounce(c)
+
+	// Auth gate: in offline mode with the plugin enabled, flip the
+	// connection's `authed` bool to false and tell the player how to
+	// proceed. No-op when authStore == nil.
+	promptAuth(c)
 
 	slog.Info("player joined", "player", c.playerName, "instance", c.instance.ID)
 	return nil

@@ -148,6 +148,15 @@ func (s *Server) RunCommand(c *ClientConnection, raw string) {
 		_ = c.sendSystemMessage("Unknown command: /" + name)
 		return
 	}
+	// Auth gate: while unauthed only the whitelist (register/login/
+	// hub/help) is dispatchable. Keeps un-authed players from running
+	// /play, /tp etc. before they prove who they are.
+	if authStore != nil && !c.authed.Load() {
+		if _, allowed := authBypassCommands[name]; !allowed {
+			_ = c.sendSystemMessage("Please /login or /register first.")
+			return
+		}
+	}
 	if cmd.NeedsOp && !s.Ops.Has(c.playerName) {
 		_ = c.sendSystemMessage("You don't have permission to use /" + name)
 		return
@@ -689,8 +698,9 @@ func cmdHelp(c *ClientConnection, args []string) {
 	_ = c.sendSystemMessage("Available commands:")
 	// Dedup by canonical name (aliases share *Command pointers).
 	seen := map[*Command]bool{}
+	hasOp := c.server.Ops.Has(c.playerName)
 	for _, cmd := range commandRegistry {
-		if seen[cmd] {
+		if seen[cmd] || (!hasOp && cmd.NeedsOp) {
 			continue
 		}
 		seen[cmd] = true

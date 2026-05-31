@@ -48,11 +48,10 @@ type Player struct {
 	gamemode Gamemode
 }
 
-// New constructs a Player at the default spawn (0.5, 67, 0.5) in Creative
-// mode. Y=67 lands the player one block above the hub schematic's top
-// surface (which fills y=64..69 → walkable at y=70 once we adjust; for
-// the current schematic Y=67 stands on top without falling). Spawn point
-// and gamemode will become server-configurable later.
+// New constructs a Player at the default spawn (0.5, 67, 0.5) in
+// Adventure mode. Adventure = no block break/place client-side either,
+// which suits the hub/auth flow (mini-game arenas can switch their
+// players into Survival/Creative themselves).
 func New(entityID int32, name string, uuid [16]byte) *Player {
 	return &Player{
 		EntityID: entityID,
@@ -61,7 +60,7 @@ func New(entityID int32, name string, uuid [16]byte) *Player {
 		y:        67,
 		x:        0.5,
 		z:        0.5,
-		gamemode: Creative,
+		gamemode: Adventure,
 	}
 }
 

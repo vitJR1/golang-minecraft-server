@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"crypto/rsa"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -48,7 +49,12 @@ type outboundMsg struct {
 // allocator, the op set, the entity-ID counter, the hub instance, and the
 // template registry. World and PlayerList live on Instance.
 type Server struct {
-	Hub        *Instance
+	Hub *Instance
+	// Auth is the holding-pen instance where unauthenticated players
+	// land in offline mode. Nil when the auth plugin is disabled — see
+	// EnableAuth. Players move to Hub via MovePlayer once /register or
+	// /login succeeds.
+	Auth       *Instance
 	Ops        *OpSet
 	Mutes      *MuteSet
 	Matchmaker *Matchmaker
@@ -307,6 +313,28 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 // unexported fields.
 func (c *ClientConnection) Name() string { return c.playerName }
 
+// connectionsFromIP returns every currently-connected ClientConnection
+// whose remote address matches ip. Used by /banip to evict matching
+// sessions on the spot. IP is matched via clientIP() so net.Pipe
+// connections share the synthetic "pipe" key.
+func (s *Server) connectionsFromIP(ip string) []*ClientConnection {
+	s.mu.RLock()
+	instances := make([]*Instance, 0, len(s.instances))
+	for _, i := range s.instances {
+		instances = append(instances, i)
+	}
+	s.mu.RUnlock()
+	var out []*ClientConnection
+	for _, i := range instances {
+		i.Players.Range(func(c *ClientConnection) {
+			if clientIP(c.conn.RemoteAddr()) == ip {
+				out = append(out, c)
+			}
+		})
+	}
+	return out
+}
+
 // Instance returns the instance the player is currently in (hub, an
 // arena, a lobby). Nil before login completes. Exposed for bots that
 // need to broadcast into the same chat scope the player is talking in.
@@ -330,6 +358,9 @@ func (s *Server) HandleConn(conn net.Conn) {
 		done:                 make(chan struct{}),
 		writerDone:           make(chan struct{}),
 	}
+	// Default: auth plugin disabled → no gate. EnableAuth flips this to
+	// false in handler_login so the player has to /register or /login.
+	client.authed.Store(true)
 	slog.Info("new connection", "addr", conn.RemoteAddr().String())
 	defer client.cleanup()
 
@@ -395,6 +426,18 @@ type ClientConnection struct {
 	// potentially from future cross-goroutine inspection — atomic so
 	// `-race` stays clean and the test harness doesn't need locks.
 	menu atomic.Pointer[openMenu]
+
+	// authed gates the connection through the offline-mode auth plugin.
+	// True = player has run /register or /login successfully (or auth
+	// is disabled — see auth.go EnableAuth). False = chat + commands
+	// other than the whitelist are blocked.
+	authed atomic.Bool
+
+	// heldSlot is the player's selected hotbar slot (0..8). Updated on
+	// every Sb Set Held Item; default 0 matches the client's own
+	// power-on default. Read by SbPlayUseItem to pick which menu item
+	// the right-click should fire (blaze rod vs ender pearl, etc.).
+	heldSlot atomic.Int32
 
 	// writerDone is closed by writerLoop on exit. cleanup waits on it
 	// (with a timeout) so any in-flight frames — particularly the Pong that
@@ -512,15 +555,19 @@ func (c *ClientConnection) handleReadError(err error) {
 	if c.isClosed() {
 		return
 	}
+	// Normal disconnect: the client closed its socket → our next read
+	// returns EOF (or unexpected EOF mid-frame). protocol.ReadPacket
+	// wraps the underlying error with context like "packet length:
+	// VarInt byte: %w", so plain `err == io.EOF` misses it — use
+	// errors.Is which unwraps.
 	switch {
-	case err == io.EOF:
+	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
 		slog.Info("client disconnected", "player", c.playerName)
+	case errors.Is(err, net.ErrClosed):
+		// We closed the conn ourselves (cleanup, encryption swap, …) —
+		// the leftover read returning ErrClosed isn't worth logging.
+		return
 	default:
-		if opErr, ok := err.(*net.OpError); ok {
-			if opErr.Err.Error() == "use of closed network connection" {
-				return
-			}
-		}
 		slog.Warn("client read failed", "player", c.playerName, "err", err)
 	}
 	c.cleanup()

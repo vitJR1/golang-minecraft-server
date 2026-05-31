@@ -62,65 +62,39 @@ func TestUseItemOpensMainMenu(t *testing.T) {
 	}
 }
 
-// TestClickGameOpensArenaSubmenu: from the main menu, clicking the FFA
-// slot opens the 6-arena submenu and updates server-side menu state.
-func TestClickGameOpensArenaSubmenu(t *testing.T) {
+// TestClickGameTeleportsToLobby: clicking an icon in the main menu
+// (FFA / BedWars / SkyWars) MoveablyMoves the player into the matching
+// lobby instance and clears the server-side menu state.
+func TestClickGameTeleportsToLobby(t *testing.T) {
 	s := New()
+	SetupLobbies(s)
 	SetupHubMenu(s)
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Clicker")
 	cli.startDiscardDrain()
 	conn := findConn(t, s, "Clicker")
 
-	// Manually open the main menu (skip the wire round-trip).
+	// Open the main menu server-side (skip the wire round-trip).
 	conn.openHubMainMenu()
 
-	// Click slot 2 (FFA icon).
-	var p bytes.Buffer
-	p.WriteByte(menuWindowID)             // window id
-	protocol.WriteVarInt32ToBuffer(&p, 0) // state id
-	p.Write(protocol.WriteShort(2))       // slot 2 = FFA
-	p.WriteByte(0)                        // button (left)
-	protocol.WriteVarInt32ToBuffer(&p, 0) // mode (normal click)
-	protocol.WriteVarInt32ToBuffer(&p, 0) // changed slots count = 0
-	p.Write(protocol.WriteEmptySlot())    // carried item
-	cli.write(t, SbPlayClickContainer, p.Bytes())
-
-	waitFor(t, time.Second, func() bool {
-		m := conn.menu.Load()
-		return m != nil && m.kind == "ffa"
-	}, "menu to switch to ffa")
-
-	if got := len(conn.menu.Load().entries); got != 6 {
-		t.Errorf("ffa entries: got %d, want 6", got)
-	}
-}
-
-// TestClickArenaLogsAndClearsMenu: clicking an arena slot in a sub-menu
-// fires hubArenaOnClick which nil's the menu.
-func TestClickArenaLogsAndClearsMenu(t *testing.T) {
-	s := New()
-	SetupHubMenu(s)
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Finalist")
-	cli.startDiscardDrain()
-	conn := findConn(t, s, "Finalist")
-
-	// Manually drop into the FFA arena menu.
-	conn.openHubArenaMenu("ffa", ffaArenas, "FFA arenas")
-
-	// Click slot 0 — first arena ("The Pit").
+	// Click slot 2 = FFA.
 	var p bytes.Buffer
 	p.WriteByte(menuWindowID)
 	protocol.WriteVarInt32ToBuffer(&p, 0)
-	p.Write(protocol.WriteShort(0))
+	p.Write(protocol.WriteShort(2))
 	p.WriteByte(0)
 	protocol.WriteVarInt32ToBuffer(&p, 0)
 	protocol.WriteVarInt32ToBuffer(&p, 0)
 	p.Write(protocol.WriteEmptySlot())
 	cli.write(t, SbPlayClickContainer, p.Bytes())
 
-	waitFor(t, time.Second, func() bool { return conn.menu.Load() == nil }, "menu to clear after arena pick")
+	waitFor(t, 2*time.Second, func() bool {
+		_, inst, ok := s.FindPlayer("Clicker")
+		return ok && inst != nil && inst.ID == LobbyFFA
+	}, "Clicker to be teleported into the FFA lobby")
+	if m := conn.menu.Load(); m != nil {
+		t.Errorf("menu state should be cleared after teleport, got %+v", m)
+	}
 }
 
 // TestCloseContainerClearsMenu: pressing E (or any close) drops the

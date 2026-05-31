@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 
@@ -42,8 +43,14 @@ func main() {
 	srv := server.New()
 	srv.ChatModerator = bots.NewNosleeperBot(srv)
 	server.LoadFavicon(server.DefaultFaviconPath)
+	// Auth plugin install gated by cfg.AuthEnabled (defaulted from
+	// ONLINE_MODE in loadEnv, overridable via AUTH_ENABLED env).
+	if cfg.AuthEnabled {
+		server.EnableAuth(srv, "auth.json")
+	}
 	loadTemplates(srv)
 	mountHubFromTemplate(srv, hubTemplateName)
+	server.SetupLobbies(srv)
 	server.SetupHubMenu(srv)
 
 	addr := ":" + getEnv("PORT", "25565")
@@ -145,9 +152,37 @@ func loadEnv() {
 	case "false", "0", "no", "off":
 		cfg.OnlineMode = false
 	}
+
+	// Auth plugin default: on for offline mode, off for online mode.
+	// AUTH_ENABLED env var explicitly overrides if set — useful for
+	// flipping auth off in offline-mode for testing, or on in online-
+	// mode for defense in depth.
+	cfg.AuthEnabled = !cfg.OnlineMode
+	switch strings.ToLower(os.Getenv("AUTH_ENABLED")) {
+	case "true", "1", "yes", "on":
+		cfg.AuthEnabled = true
+	case "false", "0", "no", "off":
+		cfg.AuthEnabled = false
+	}
 	if v := os.Getenv("MAX_PLAYERS"); v != "" {
 		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
 			cfg.MaxPlayers = n
+		}
+	}
+	// Auth knobs. time.ParseDuration handles "30s", "5m", "1h30m", etc.
+	if v := os.Getenv("AUTH_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(strings.TrimSpace(v)); err == nil && d > 0 {
+			cfg.SetAuthTimeout(d)
+		}
+	}
+	if v := os.Getenv("AUTH_MAX_ATTEMPTS"); v != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
+			cfg.SetAuthMaxAttempts(n)
+		}
+	}
+	if v := os.Getenv("AUTH_BAN_DURATION"); v != "" {
+		if d, err := time.ParseDuration(strings.TrimSpace(v)); err == nil && d > 0 {
+			cfg.SetAuthBanDuration(d)
 		}
 	}
 	if ops := os.Getenv("INITIAL_OPS"); ops != "" {

@@ -27,6 +27,11 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		if err != nil {
 			return fmt.Errorf("reading chat message: %w", err)
 		}
+		// Auth gate: until /login or /register succeeds, chat is silent
+		// for everyone else. Player gets a reminder line.
+		if !gateAuth(c, "Please /login or /register before chatting.") {
+			break
+		}
 		// Mute check happens before the moderator + per-instance OnChat
 		// hook so games and bots can't accidentally bypass it. The muted
 		// player gets a one-line reminder; nobody else sees anything.
@@ -235,16 +240,41 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		_, _ = protocol.ReadVarInt(packet)
 
 	case SbPlayUseItem:
-		// hand(VarInt) + sequence(VarInt). Fires when the player
-		// right-clicks in empty air. In hub we treat it as "blaze rod
-		// activated" — open the navigator menu. (We don't track held
-		// slot yet, but blaze rod is the only item we give, so it's the
-		// only thing that can trigger this here.)
+		// hand(VarInt) + sequence(VarInt). Dispatches by the player's
+		// currently-held hotbar slot (tracked via SbPlaySetHeldItem)
+		// against the items we hand out:
+		//   slot 0 (blaze rod, "Navigator") — opens the hub picker
+		//                                     in hub and in any lobby
+		//   slot 1 (ender pearl, "Arena selector") — opens the
+		//                                            current-lobby's
+		//                                            arena chest
+		// Other slots / instances no-op.
 		_, _ = protocol.ReadVarInt(packet) // hand
 		_, _ = protocol.ReadVarInt(packet) // sequence
-		if c.instance == c.server.Hub {
-			c.openHubMainMenu()
+		switch c.heldSlot.Load() {
+		case 0:
+			if c.instance == c.server.Hub {
+				c.openHubMainMenu()
+				break
+			}
+			if _, ok := arenasForLobby(c.instance.ID); ok {
+				c.openHubMainMenu()
+			}
+		case 1:
+			if arenas, ok := arenasForLobby(c.instance.ID); ok {
+				c.openArenaMenu(c.instance.ID, arenas)
+			}
 		}
+
+	case SbPlaySetHeldItem:
+		// Int16 — the new hotbar slot (0..8). Saved on the connection
+		// for SbPlayUseItem dispatch above.
+		raw, err := protocol.ReadUShortFromBuf(packet)
+		if err != nil {
+			return fmt.Errorf("set held item: %w", err)
+		}
+		slot := int16(raw) // signed cast preserves bits; vanilla sends 0..8
+		c.heldSlot.Store(int32(slot))
 
 	case SbPlayClickContainer:
 		// Window ID(UByte) + State ID(VarInt) + Slot(Short) + Button(Byte)
@@ -288,6 +318,11 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		if winID == menuWindowID {
 			c.menu.Store(nil)
 			giveBlazeRod(c)
+			if c.instance != nil {
+				if _, ok := arenasForLobby(c.instance.ID); ok {
+					giveArenaSelector(c)
+				}
+			}
 		}
 
 	default:

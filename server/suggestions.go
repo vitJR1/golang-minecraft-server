@@ -64,13 +64,18 @@ func (s *Server) Suggestions(c *ClientConnection, text string) (start, length in
 	var candidates []string
 	switch {
 	case argIdx == 0:
-		// Command name slot.
+		// Command name slot. Same op-filter as commandsVisibleTo so
+		// non-ops don't see /ban /op /tp etc. in autocomplete.
+		isOp := s.Ops.Has(c.playerName)
 		seen := map[*Command]bool{}
 		for name, command := range commandRegistry {
 			if seen[command] {
 				continue
 			}
 			seen[command] = true
+			if command.NeedsOp && !isOp {
+				continue
+			}
 			candidates = append(candidates, name)
 		}
 	case takesPlayerName(cmd, argIdx):
@@ -133,6 +138,8 @@ func takesPlayerName(cmd string, argIdx int) bool {
 		return argIdx == 2 // /gamemode <mode> [player]
 	case "ban", "kick", "mute", "unmute":
 		return argIdx == 1 // /<cmd> <player> [args...]
+	case "banip", "unbanip":
+		return argIdx == 1 // /<cmd> <player|ip>; player names suggested
 	}
 	return false
 }

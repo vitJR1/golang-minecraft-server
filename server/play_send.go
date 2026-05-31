@@ -149,6 +149,18 @@ func (c *ClientConnection) sendStartWaitingForChunks() error {
 	return c.safeWrite(CbPlayGameEvent, payload)
 }
 
+// sendExperience updates the XP bar overlay (Cb 0x56). The bar takes a
+// float in [0,1]; level is the big number in the middle; totalXP is the
+// statistic the F3 screen shows. We use it to draw the auth countdown:
+// level = seconds remaining, bar = fraction of total still left.
+func (c *ClientConnection) sendExperience(bar float32, level, totalXP int32) error {
+	var buf bytes.Buffer
+	buf.Write(protocol.WriteFloat(bar))
+	protocol.WriteVarInt32ToBuffer(&buf, level)
+	protocol.WriteVarInt32ToBuffer(&buf, totalXP)
+	return c.safeWrite(CbPlaySetExperience, buf.Bytes())
+}
+
 // sendPlayDisconnect tells the client we're closing the connection with a
 // human-readable reason that the vanilla client renders on the disconnect
 // screen. The reason string is wrapped in a JSON chat component since the
