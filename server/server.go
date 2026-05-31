@@ -346,6 +346,10 @@ func (c *ClientConnection) sendSystemMessage(text string) error {
 	return c.safeWrite(CbPlaySystemChat, buildSystemChatPayload(text))
 }
 
+func (c *ClientConnection) SendChat(sender, text string) error {
+    return c.sendSystemMessage("<" + sender + "> " + text)
+}
+
 // HandleConn drives a single client connection through its state machine.
 // Call in a goroutine per accepted net.Conn.
 func (s *Server) HandleConn(conn net.Conn) {

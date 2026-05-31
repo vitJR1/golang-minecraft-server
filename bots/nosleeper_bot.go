@@ -211,6 +211,7 @@ func (b *NosleeperBot) announceMute(c *server.ClientConnection) {
 		return // pre-login or already torn down — nothing to broadcast to
 	}
 	inst.BroadcastChat(BotName, "выдал mute игроку "+c.Name())
+	c.SendChat(BotName, "Verdammter Idiot, mutterloses Monster, ich werde dich mit einem Stock ficken, du verdienst es nicht einmal, auf diesem Server zu atmen, verdammter Müll! Мут на "+MuteDuration.String()+" за нарушение правил чата.")
 }
 
 // isBadWord normalizes word the same way LoadBadwords does, then asks the
