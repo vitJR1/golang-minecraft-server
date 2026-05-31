@@ -2,11 +2,13 @@ package server
 
 import (
 	"fmt"
+	"io/fs"
 	"minecraft-server/ban"
 	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/world"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -71,11 +73,25 @@ func init() {
 		Run:     cmdInstance,
 	})
 	registerCommand(&Command{
+		Name:    "template",
+		Aliases: []string{"templates"},
+		NeedsOp: true,
+		Help:    "/template list — list .schem files under schem/templates/",
+		Run:     cmdTemplate,
+	})
+	registerCommand(&Command{
 		Name:    "play",
 		Aliases: []string{"queue", "q"},
 		NeedsOp: false,
 		Help:    "/play <game> | /play leave | /play list — matchmaker",
 		Run:     cmdPlay,
+	})
+	registerCommand(&Command{
+		Name:    "hub",
+		Aliases: []string{"lobby"},
+		NeedsOp: false,
+		Help:    "/hub — teleport back to the hub instance",
+		Run:     cmdHub,
 	})
 	registerCommand(&Command{
 		Name:    "ban",
@@ -450,6 +466,107 @@ func cmdPlay(c *ClientConnection, args []string) {
 		_ = c.sendSystemMessage("Queued for " + sub +
 			" (" + strconv.Itoa(c.server.Matchmaker.QueueSize(sub)) + " waiting)")
 	}
+}
+
+// --- /hub ---
+
+// cmdHub is the only fixed-destination teleport command — every player
+// can run it (no NeedsOp) since games need an "escape" back to the
+// lobby. From hub itself it's a polite no-op.
+//
+// Default spawn (0.5, 67, 0.5) mirrors player.New's defaults so the
+// player lands on top of the spawn schematic in the centre column.
+func cmdHub(c *ClientConnection, args []string) {
+	_ = args
+	// Always drop any matchmaker queue — explicitly choosing "/hub" is
+	// the user saying "I don't want a game right now", whether they're
+	// in the hub already or coming back from an arena.
+	c.server.Matchmaker.Dequeue(c)
+
+	if c.instance == c.server.Hub {
+		_ = c.sendSystemMessage("You're already in the hub.")
+		return
+	}
+	if err := c.server.MovePlayer(c, c.server.Hub, 0.5, 67, 0.5); err != nil {
+		_ = c.sendSystemMessage("Hub teleport failed: " + err.Error())
+		return
+	}
+}
+
+// --- /template ---
+
+// templatesRoot is where /template list scans. Kept as a var so tests
+// or future config can point it elsewhere; production stays at the
+// project-relative default that ships with the repo.
+var templatesRoot = "schem/templates"
+
+// cmdTemplate dispatches the /template subcommands. Only `list` exists
+// today — there's room for `/template load <name>` once we wire that
+// into the in-memory template registry.
+func cmdTemplate(c *ClientConnection, args []string) {
+	if len(args) == 0 {
+		_ = c.sendSystemMessage("Usage: /template list")
+		return
+	}
+	switch strings.ToLower(args[0]) {
+	case "list", "ls":
+		cmdTemplateList(c)
+	default:
+		_ = c.sendSystemMessage("Usage: /template list")
+	}
+}
+
+// cmdTemplateList walks templatesRoot recursively for *.schem files and
+// reports their paths (relative to root, sans extension). Empty
+// directory and missing-directory both return a friendly message
+// rather than an error since they're normal states on a fresh checkout.
+func cmdTemplateList(c *ClientConnection) {
+	names, err := scanTemplates(templatesRoot)
+	if err != nil {
+		_ = c.sendSystemMessage("Failed to scan " + templatesRoot + ": " + err.Error())
+		return
+	}
+	if len(names) == 0 {
+		_ = c.sendSystemMessage("No .schem templates under " + templatesRoot + "/")
+		return
+	}
+	_ = c.sendSystemMessage(fmt.Sprintf("Templates (%d) in %s/:", len(names), templatesRoot))
+	for _, n := range names {
+		_ = c.sendSystemMessage("  " + n)
+	}
+}
+
+// scanTemplates returns every *.schem path under root, relative to root
+// and with the .schem extension stripped. Sorted alphabetically. A
+// missing root returns (nil, nil) — equivalent to "no templates".
+func scanTemplates(root string) ([]string, error) {
+	var names []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			// Surface the root-missing case as "no templates", not error.
+			if path == root {
+				return filepath.SkipAll
+			}
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !strings.EqualFold(filepath.Ext(d.Name()), ".schem") {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		names = append(names, strings.TrimSuffix(rel, filepath.Ext(rel)))
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 // --- /ban /unban /kick /mute /unmute ---

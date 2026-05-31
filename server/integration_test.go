@@ -230,7 +230,9 @@ func TestOfflineLoginFlow(t *testing.T) {
 	for i := 0; i < spawnChunkCount; i++ {
 		expected = append(expected, expect{"ChunkData", CbPlayChunkData, 100})
 	}
-	expected = append(expected, expect{"SyncPos", CbPlaySyncPos, 30})
+	expected = append(expected,
+		expect{"SyncPos", CbPlaySyncPos, 30},
+		expect{"DeclareCommands", CbPlayDeclareCommands, 5})
 	for _, want := range expected {
 		got, body := cli.read(t)
 		if got != want.id {
@@ -271,16 +273,20 @@ func completeOfflineLogin(t *testing.T, cli *testClient, name string) {
 	if id, _ := cli.read(t); id != CbLoginSuccess {
 		t.Fatalf("expected LoginSuccess (0x%02X), got 0x%02X", CbLoginSuccess, id)
 	}
-	// Drain Login(Play) + chunks + any world-state Block Updates + SyncPos.
-	// Block Update count varies per test (some pre-seed blocks into the hub
-	// world), so we just consume packets until SyncPos arrives — that's the
-	// last packet in the join sequence before announceJoin starts emitting
-	// PlayerInfoUpdate / SpawnPlayer.
+	// Drain Login(Play) + chunks + any world-state Block Updates + SyncPos
+	// + DeclareCommands. Block Update count varies per test (some pre-seed
+	// blocks into the hub world), so we consume packets until SyncPos
+	// arrives, then read one more for the Declare Commands packet that
+	// follows it. After that, announceJoin's PlayerInfoUpdate / SpawnPlayer
+	// is the next thing on the wire.
 	for {
 		id, _ := cli.read(t)
 		if id == CbPlaySyncPos {
-			return
+			break
 		}
+	}
+	if id, _ := cli.read(t); id != CbPlayDeclareCommands {
+		t.Fatalf("expected DeclareCommands after SyncPos, got 0x%02X", id)
 	}
 }
 

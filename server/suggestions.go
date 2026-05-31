@@ -75,6 +75,10 @@ func (s *Server) Suggestions(c *ClientConnection, text string) (start, length in
 		}
 	case takesPlayerName(cmd, argIdx):
 		candidates = s.PlayerNames()
+	case cmd == "template" || cmd == "templates":
+		if argIdx == 1 {
+			candidates = []string{"list"}
+		}
 	case cmd == "instance" || cmd == "i":
 		switch argIdx {
 		case 1:
@@ -114,6 +118,11 @@ func (s *Server) Suggestions(c *ClientConnection, text string) (start, length in
 // takesPlayerName reports whether cmd's argIdx-th argument expects a
 // player name. Keep in sync with the command implementations in
 // commands.go.
+//
+// /unban is intentionally NOT here — banned players are offline and
+// PlayerNames() only lists online connections, so the suggestion list
+// would always be empty. A separate "banned names" source would be
+// needed if we want unban autocomplete.
 func takesPlayerName(cmd string, argIdx int) bool {
 	switch cmd {
 	case "op", "deop":
@@ -122,6 +131,8 @@ func takesPlayerName(cmd string, argIdx int) bool {
 		return argIdx == 1 // /tp <player> (also accepts coords; harmless to suggest)
 	case "gamemode", "gm":
 		return argIdx == 2 // /gamemode <mode> [player]
+	case "ban", "kick", "mute", "unmute":
+		return argIdx == 1 // /<cmd> <player> [args...]
 	}
 	return false
 }

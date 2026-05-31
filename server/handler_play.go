@@ -107,15 +107,20 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		_, _ = protocol.ReadStringFromBuf(packet)
 
 	case SbPlayCommandSuggestReq:
-		// Silent no-op. We previously tried to parse as (VarInt txID +
-		// String text) but real 1.20.1 clients send bytes that don't fit
-		// that layout — first non-txID byte parsed as a VarInt string
-		// length comes out as ~114 with only ~11 bytes available. Without
-		// a confirmed format we'd just spam the log with parse errors,
-		// and a wrong reply would risk crashing the client. Tab complete
-		// remains unimplemented until we capture a real vanilla packet
-		// for diff. Server.Suggestions + sendCommandSuggestionsResponse
-		// are kept ready for when the format is verified.
+		// VarInt(transactionId) + String(text). The earlier "parse fails"
+		// was because we were listening on the wrong packet id (0x08 =
+		// settings, not tab_complete). With the right id (0x09) the
+		// fields line up.
+		txID, err := protocol.ReadVarInt(packet)
+		if err != nil {
+			return fmt.Errorf("suggest req txID: %w", err)
+		}
+		text, err := protocol.ReadStringFromBuf(packet)
+		if err != nil {
+			return fmt.Errorf("suggest req text: %w", err)
+		}
+		start, length, matches := c.server.Suggestions(c, text)
+		_ = c.sendCommandSuggestionsResponse(int32(txID), start, length, matches)
 
 	case SbPlaySwingArm:
 		hand, err := protocol.ReadVarInt(packet)

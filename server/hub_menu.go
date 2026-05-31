@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"minecraft-server/protocol"
+	"minecraft-server/world"
 )
 
 // Hub navigation menu.
@@ -75,8 +76,11 @@ var (
 	swArenas  = []string{"Cumulus", "Stratos", "Nebula", "Vesper", "Aurora", "Eclipse"}
 )
 
-// SetupHubMenu wires the hub instance to give the blaze rod on join.
-// Idempotent — calling more than once just reassigns the hook.
+// SetupHubMenu wires the hub instance: gives the blaze rod on join and
+// installs the protection vetos (no block break/place, no PvP). The hub
+// is a navigation lobby — players go to a game instance to actually
+// build or fight. Idempotent — calling more than once just reassigns
+// the hooks.
 func SetupHubMenu(s *Server) {
 	prev := s.Hub.OnPlayerJoin
 	s.Hub.OnPlayerJoin = func(c *ClientConnection) {
@@ -84,6 +88,28 @@ func SetupHubMenu(s *Server) {
 			prev(c)
 		}
 		giveBlazeRod(c)
+	}
+
+	// Protection. The vetos work regardless of gamemode — creative
+	// "instant break" (action=0) still routes through OnBlockBreak and
+	// gets bounced. The server replies with a Block Update carrying the
+	// original block so the client rolls back its prediction; combined
+	// with the system message the player gets immediate feedback.
+	s.Hub.OnBlockBreak = func(c *ClientConnection, _ world.Position) bool {
+		_ = c.sendSystemMessage("Hub is protected — join a game to build.")
+		return false
+	}
+	s.Hub.OnBlockPlace = func(c *ClientConnection, _ world.Position, _ world.Block) bool {
+		_ = c.sendSystemMessage("Hub is protected — join a game to build.")
+		return false
+	}
+	// PvP-off. There's no damage system yet so the attack interaction is
+	// effectively a no-op either way, but returning false here documents
+	// the policy and gives a place to hang knockback / health rollback
+	// once those exist. Silent veto — attack swings are spammy and we
+	// don't want chat flooded.
+	s.Hub.OnPlayerAttack = func(_ *ClientConnection, _ *ClientConnection) bool {
+		return false
 	}
 }
 

@@ -1,22 +1,39 @@
 package main
 
 import (
+	"errors"
+	"fmt"
+	"io/fs"
 	"log/slog"
 	"minecraft-server/ban"
 	"minecraft-server/bots"
+	"minecraft-server/cfg"
 	"minecraft-server/logger"
 	"minecraft-server/schem"
 	"minecraft-server/server"
 	"net"
 	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"github.com/joho/godotenv"
 
 	// Each blank import registers a mini-game with game.Register during
 	// its init(). Drop a game by deleting the line.
 	_ "minecraft-server/games/ffa"
 )
 
+const (
+	templatesRoot   = "schem/templates"
+	templateBaseY   = 64 // bottom of every imported schematic in world coords
+	hubTemplateName = "spawn"
+)
+
 func main() {
-	logger.Init()
+	loadDotenv()  // .env → os.Setenv, BEFORE loadEnv reads them
+	loadEnv()     // ONLINE_MODE / INITIAL_OPS → cfg.*
+	logger.Init() // LOG_LEVEL / LOG_FORMAT read here
 
 	if err := ban.Load("banlist.json"); err != nil {
 		slog.Warn("failed to load banlist", "path", "banlist.json", "err", err)
@@ -24,16 +41,19 @@ func main() {
 
 	srv := server.New()
 	srv.ChatModerator = bots.NewNosleeperBot(srv)
-	loadHubSpawn(srv)
+	server.LoadFavicon(server.DefaultFaviconPath)
+	loadTemplates(srv)
+	mountHubFromTemplate(srv, hubTemplateName)
 	server.SetupHubMenu(srv)
 
-	const addr = ":25565"
+	addr := ":" + getEnv("PORT", "25565")
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		slog.Error("listen failed", "addr", addr, "err", err)
 		os.Exit(1)
 	}
-	slog.Info("listening", "addr", addr, "version", "1.20.1", "protocol", 763)
+	slog.Info("listening", "addr", addr, "version", "1.20.1", "protocol", 763,
+		"online_mode", cfg.OnlineMode)
 
 	for {
 		conn, err := lis.Accept()
@@ -45,30 +65,123 @@ func main() {
 	}
 }
 
-// loadHubSpawn drops the schematic at schem/templates/spawn.schem onto
-// the hub's world. Runs before the listener accepts any connection, so
-// directly mutating Hub.World is safe (no concurrent readers).
+// loadTemplates walks templatesRoot recursively and registers every
+// *.schem file as a world.Template under its relative path (sans
+// extension). After this, /instance create <id> <name> can clone any
+// of them, and /template list shows the same set the disk has.
 //
-// The schematic is centred horizontally around (0, _, 0) — its corner
-// lands at (-width/2, baseY, -length/2) — so players spawning at the
-// default (0, 80, 0) fall down onto/into the build instead of beside it.
-func loadHubSpawn(srv *server.Server) {
-	const (
-		path  = "schem/templates/spawn.schem"
-		baseY = 64 // bottom of the schematic in world coords
-	)
-	sch, err := schem.LoadFile(path)
+// Each schematic is centred horizontally around (0,_,0) — its corner
+// lands at (-width/2, templateBaseY, -length/2) — so the default spawn
+// at (0.5, 67, 0.5) drops the player on top instead of beside.
+//
+// A missing root is fine (server boots empty); per-file load errors are
+// logged but not fatal.
+func loadTemplates(srv *server.Server) {
+	err := filepath.WalkDir(templatesRoot, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if path == templatesRoot {
+				return filepath.SkipAll // no templates dir → nothing to load
+			}
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !strings.EqualFold(filepath.Ext(d.Name()), ".schem") {
+			return nil
+		}
+
+		sch, err := schem.LoadFile(path)
+		if err != nil {
+			slog.Warn("template load failed", "path", path, "err", err)
+			return nil // skip this one, continue walking
+		}
+		rel, _ := filepath.Rel(templatesRoot, path)
+		name := strings.TrimSuffix(rel, filepath.Ext(rel))
+
+		originX := -int(sch.Width) / 2
+		originZ := -int(sch.Length) / 2
+		tmpl := sch.ToTemplateAt(originX, templateBaseY, originZ)
+		srv.RegisterTemplate(name, tmpl)
+		slog.Info("template loaded",
+			"name", name, "path", path,
+			"size", fmt.Sprintf("%dx%dx%d", sch.Width, sch.Height, sch.Length),
+			"blocks", len(sch.Blocks))
+		return nil
+	})
 	if err != nil {
-		slog.Warn("skipping spawn load", "path", path, "err", err)
+		slog.Warn("template scan failed", "root", templatesRoot, "err", err)
+	}
+}
+
+// loadDotenv reads a `.env` file from the working directory (if present)
+// and exports each KEY=VALUE into the process environment, where the
+// rest of the bootstrap (loadEnv, logger.Init, getEnv) will pick them
+// up via os.Getenv. Already-set env vars take precedence — godotenv
+// won't overwrite, so `LOG_LEVEL=debug ./mc` still wins over `.env`.
+//
+// Missing file is silent (development setups often omit .env). Parse
+// errors warn but don't crash — bad lines just don't populate.
+func loadDotenv() {
+	if err := godotenv.Load(); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return
+		}
+		// stderr fallback: logger isn't initialized yet at this point.
+		_, _ = fmt.Fprintln(os.Stderr, "dotenv: load failed:", err)
+	}
+}
+
+// loadEnv reads optional environment variables and updates the shared
+// cfg package + leaves PORT / LOG_* for their direct consumers (the
+// listener in main, logger.Init). Stays here (not in cfg) so the
+// env-var → config mapping is in one obvious place.
+//
+// Vars: see .env.example for the full list with defaults.
+func loadEnv() {
+	switch strings.ToLower(os.Getenv("ONLINE_MODE")) {
+	case "true", "1", "yes", "on":
+		cfg.OnlineMode = true
+	case "false", "0", "no", "off":
+		cfg.OnlineMode = false
+	}
+	if v := os.Getenv("MAX_PLAYERS"); v != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
+			cfg.MaxPlayers = n
+		}
+	}
+	if ops := os.Getenv("INITIAL_OPS"); ops != "" {
+		var parsed []string
+		for _, n := range strings.Split(ops, ",") {
+			if n = strings.TrimSpace(n); n != "" {
+				parsed = append(parsed, n)
+			}
+		}
+		if len(parsed) > 0 {
+			cfg.InitialOps = parsed
+		}
+	}
+}
+
+// getEnv returns the value of name or fallback if unset/empty. Trims
+// surrounding whitespace so "PORT= 25565 " works.
+func getEnv(name, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+		return v
+	}
+	return fallback
+}
+
+// mountHubFromTemplate clones the named template into Hub.World. Runs
+// before the listener so direct mutation of Hub.World is race-free.
+// Missing template → hub stays with its empty MemoryWorld (warns).
+func mountHubFromTemplate(srv *server.Server, name string) {
+	tmpl := srv.GetTemplate(name)
+	if tmpl == nil {
+		slog.Warn("hub template not found", "name", name,
+			"hint", "place "+name+".schem under "+templatesRoot+"/")
 		return
 	}
-	originX := -int(sch.Width) / 2
-	originZ := -int(sch.Length) / 2
-	tmpl := sch.ToTemplateAt(originX, baseY, originZ)
 	srv.Hub.World = tmpl.Instantiate()
-	slog.Info("loaded spawn schematic",
-		"path", path,
-		"width", sch.Width, "height", sch.Height, "length", sch.Length,
-		"blocks", len(sch.Blocks),
-		"origin_x", originX, "origin_y", baseY, "origin_z", originZ)
+	slog.Info("hub mounted from template", "name", name)
 }

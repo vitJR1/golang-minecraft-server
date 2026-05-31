@@ -42,8 +42,8 @@ const (
 	SbPlayTeleportConfirm   = 0x00
 	SbPlayChatCommand       = 0x04
 	SbPlayChatMessage       = 0x05
-	SbPlayClientInfo        = 0x07
-	SbPlayCommandSuggestReq = 0x08
+	SbPlayClientInfo        = 0x08 // "settings": locale, view distance, etc.
+	SbPlayCommandSuggestReq = 0x09 // "tab_complete": fires per keystroke after "/"
 	SbPlayPluginMessage     = 0x0D
 	SbPlayInteract          = 0x10
 	SbPlayKeepAlive         = 0x12
@@ -69,7 +69,8 @@ const (
 	CbPlayEntityAnimation    = 0x04
 	CbPlayAckBlockChange     = 0x06
 	CbPlayBlockUpdate        = 0x0A
-	CbPlayCommandSuggestResp = 0x11
+	CbPlayCommandSuggestResp = 0x0F // "tab_complete" response
+	CbPlayDeclareCommands    = 0x10 // brigadier tree — what /<TAB> shows
 	CbPlayGameEvent          = 0x1F // NOT 0x20 (= Open Horse Screen for 1.20.1)
 	CbPlayKeepAlive          = 0x23
 	CbPlayChunkData          = 0x24

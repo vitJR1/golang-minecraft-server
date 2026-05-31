@@ -43,6 +43,27 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 		return nil
 	}
 
+	// Hard player cap. Ops bypass so admins can always rescue. Race
+	// window between PlayerCount() and the actual JoinAndAnnounce is
+	// small; an extra player slipping in under burst load is acceptable
+	// for now — proper enforcement would need an atomic counter
+	// incremented inside JoinAndAnnounce under the same lock as the
+	// PlayerList.Add.
+	if cfg.MaxPlayers > 0 &&
+		c.server.PlayerCount() >= cfg.MaxPlayers &&
+		!c.server.Ops.Has(c.playerName) {
+		slog.Info("server full, rejecting",
+			"player", c.playerName,
+			"online", c.server.PlayerCount(),
+			"max", cfg.MaxPlayers)
+		msg := []byte(`{"text":"Server is full (` +
+			fmt.Sprintf("%d/%d", c.server.PlayerCount(), cfg.MaxPlayers) +
+			`)"}`)
+		_ = c.safeWrite(CbLoginDisconnect, protocol.WriteString(string(msg)))
+		c.cleanup()
+		return nil
+	}
+
 	if cfg.OnlineMode {
 		if err := c.runOnlineLogin(); err != nil {
 			return err
@@ -199,6 +220,14 @@ func (c *ClientConnection) runOnlineLogin() error {
 	return nil
 }
 
+// Encryption Request (1.20.1 protocol 763) carries exactly three fields:
+//
+//	serverId    String
+//	publicKey   ByteArray (VarInt length + bytes)
+//	verifyToken ByteArray (VarInt length + bytes)
+//
+// A "should authenticate" boolean was added in 1.20.4 — DO NOT send it
+// here, the 1.20.1 client rejects the packet with "found 1 bytes extra".
 func (c *ClientConnection) sendEncryptionRequest(verifyToken []byte) error {
 	payload := make([]byte, 0, 64)
 	payload = append(payload, protocol.WriteString(cfg.ServerId)...)
@@ -206,7 +235,6 @@ func (c *ClientConnection) sendEncryptionRequest(verifyToken []byte) error {
 	payload = append(payload, publicKey...)
 	payload = append(payload, protocol.WriteVarInt32(int32(len(verifyToken)))...)
 	payload = append(payload, verifyToken...)
-	payload = append(payload, 0x01) // should authenticate
 
 	if err := c.safeWrite(CbLoginEncRequest, payload); err != nil {
 		return fmt.Errorf("sending encryption request: %w", err)

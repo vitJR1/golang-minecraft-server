@@ -584,6 +584,11 @@ func (c *ClientConnection) sendPlayPackets() error {
 		{"Sync Player Position", func() error {
 			return c.sendSyncPlayerPosition(spawn.X, spawn.Y, spawn.Z, 1)
 		}},
+		// After SyncPos so loading-terrain dismisses first. Declare
+		// Commands is a one-shot per-connection — Respawn (cross-instance
+		// teleport) does not reset the client's command tree, so we don't
+		// re-send it from MovePlayer.
+		{"Declare Commands", c.sendDeclareCommands},
 	}
 	for _, pkt := range packets {
 		if c.isClosed() {
