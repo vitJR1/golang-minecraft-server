@@ -129,6 +129,12 @@ func init() {
 		Help:    "/help — list available commands",
 		Run:     cmdHelp,
 	})
+	registerCommand(&Command{
+		Name:    "fly",
+		NeedsOp: true,
+		Help:    "/fly [player] — превращает тебя или друга в муху",
+		Run:     cmdFly,
+	})
 }
 
 // RunCommand parses a raw command string ("name arg1 arg2 ...") and
@@ -288,6 +294,69 @@ func teleportConnTo(c *ClientConnection, x, y, z float64) {
 	teleportID := int32(1) // TODO: bump per-connection counter when we add server tick.
 	_ = c.sendSyncPlayerPosition(x, y, z, teleportID)
 	c.broadcastEntityTeleport()
+}
+
+// --- /fly ---
+ 
+// cmdFly toggles flight for the caller or a named target.
+// Uses the Player Abilities packet (CB 0x36 in 1.20.1) to push the
+// allowFlight + isFlying flags to the client without touching gamemode.
+//
+// Ability flags (bitmask):
+//
+//	0x01 — invulnerable
+//	0x02 — isFlying
+//	0x04 — allowFlight
+//	0x08 — creativeMode (instant break)
+func cmdFly(c *ClientConnection, args []string) {
+	if len(args) > 1 {
+		_ = c.sendSystemMessage("Usage: /fly [player]")
+		return
+	}
+	target := c
+	if len(args) == 1 {
+		conn, _, ok := c.server.FindPlayer(args[0])
+		if !ok {
+			_ = c.sendSystemMessage("Player not found: " + args[0])
+			return
+		}
+		target = conn
+	}
+ 
+	canFly := target.player.ToggleFly()
+	if err := target.sendPlayerAbilities(canFly, false); err != nil {
+		_ = c.sendSystemMessage("Failed to send abilities packet")
+		return
+	}
+ 
+	state := "enabled"
+	if !canFly {
+		state = "disabled"
+	}
+	_ = target.sendSystemMessage("Flight " + state)
+	if target != c {
+		_ = c.sendSystemMessage(fmt.Sprintf("Flight %s for %s", state, target.player.Name))
+	}
+}
+ 
+// sendPlayerAbilities writes CB Player Abilities (0x36 in 1.20.1).
+// canFly=true sets the allowFlight bit; isFlying=true additionally sets
+// the isFlying bit so the client immediately starts hovering.
+func (c *ClientConnection) sendPlayerAbilities(canFly, isFlying bool) error {
+	var flags byte
+	if canFly {
+		flags |= 0x04
+	}
+	if isFlying {
+		flags |= 0x02
+	}
+ 
+	var payload []byte
+	payload = append(payload, flags)
+	payload = append(payload, protocol.WriteFloat(0.05)...) // flySpeed
+	payload = append(payload, protocol.WriteFloat(0.1)...)  // walkSpeed
+ 
+	return c.safeWrite(CbPlayPlayerAbil, payload)
 }
 
 // --- /instance ---

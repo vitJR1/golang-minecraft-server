@@ -29,6 +29,8 @@ type Snapshot struct {
 	Yaw, Pitch float32
 	OnGround   bool
 	Gamemode   Gamemode
+
+	canFly   bool
 }
 
 // Player is the per-connection gameplay entity. Identity fields
@@ -46,6 +48,8 @@ type Player struct {
 	pitch    float32
 	onGround bool
 	gamemode Gamemode
+
+	canFly   bool
 }
 
 // New constructs a Player at the default spawn (0.5, 67, 0.5) in
@@ -117,4 +121,12 @@ func (p *Player) SetGamemode(g Gamemode) {
 	p.mu.Lock()
 	p.gamemode = g
 	p.mu.Unlock()
+}
+
+func (p *Player) ToggleFly() (canFly bool) {
+	p.mu.Lock()
+	p.canFly = !p.canFly
+	canFly = p.canFly
+	p.mu.Unlock()
+	return
 }
