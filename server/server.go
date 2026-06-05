@@ -276,7 +276,7 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 	}
 
 	// 4. Switch the authoritative pointer before we stream the new world,
-	//    so sendCurrentWorldState reads the right blocks.
+	//    so sendWorldChunks reads the right blocks.
 	c.instance = target
 
 	// 5. Reset the player's position to spawn.
@@ -296,11 +296,8 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 	if err := c.sendStartWaitingForChunks(); err != nil {
 		return fmt.Errorf("start waiting for chunks: %w", err)
 	}
-	if err := c.sendInitialChunks(); err != nil {
-		return fmt.Errorf("chunk data: %w", err)
-	}
-	if err := c.sendCurrentWorldState(); err != nil {
-		return fmt.Errorf("world state: %w", err)
+	if err := c.sendWorldChunks(); err != nil {
+		return fmt.Errorf("world chunks: %w", err)
 	}
 	if err := c.sendSyncPlayerPosition(x, y, z, 1); err != nil {
 		return fmt.Errorf("sync pos: %w", err)
@@ -623,9 +620,8 @@ func (c *ClientConnection) sendPlayPackets() error {
 	//   2. Set Default Spawn Position    ← compass + respawn target
 	//   3. Set Center Chunk              ← "you live at (0,0)"
 	//   4. Game Event 13                 ← "begin waiting for chunks"
-	//   5. Chunk Data (16 empty chunks)
-	//   6. World State (Block Updates for the spawn schematic)
-	//   7. Synchronize Player Position   ← dismisses the overlay
+	//   5. World Chunks (baked chunk data covering the world)
+	//   6. Synchronize Player Position   ← dismisses the overlay
 	packets := []struct {
 		name string
 		f    func() error
@@ -638,8 +634,7 @@ func (c *ClientConnection) sendPlayPackets() error {
 			return c.sendSetCenterChunk(0, 0)
 		}},
 		{"Start Waiting For Chunks", c.sendStartWaitingForChunks},
-		{"Chunk Data", c.sendInitialChunks},
-		{"World State", c.sendCurrentWorldState},
+		{"World Chunks", c.sendWorldChunks},
 		{"Sync Player Position", func() error {
 			return c.sendSyncPlayerPosition(spawn.X, spawn.Y, spawn.Z, 1)
 		}},

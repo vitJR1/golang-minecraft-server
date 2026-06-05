@@ -22,6 +22,7 @@ import (
 
 	// Each blank import registers a mini-game with game.Register during
 	// its init(). Drop a game by deleting the line.
+	_ "minecraft-server/games/bedwars"
 	_ "minecraft-server/games/ffa"
 )
 
