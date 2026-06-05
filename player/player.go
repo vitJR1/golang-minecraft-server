@@ -152,6 +152,7 @@ func (p *Player) ToggleFly() (canFly bool) {
 	canFly = p.canFly
 	p.mu.Unlock()
 	return
+}
 // Health returns the player's current hit points.
 func (p *Player) Health() float32 {
 	p.mu.RLock()

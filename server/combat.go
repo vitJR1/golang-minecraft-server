@@ -235,11 +235,8 @@ func (c *ClientConnection) respawn() error {
 	if err := c.sendStartWaitingForChunks(); err != nil {
 		return fmt.Errorf("respawn start waiting: %w", err)
 	}
-	if err := c.sendInitialChunks(); err != nil {
-		return fmt.Errorf("respawn chunks: %w", err)
-	}
-	if err := c.sendCurrentWorldState(); err != nil {
-		return fmt.Errorf("respawn world state: %w", err)
+	if err := c.sendWorldChunks(); err != nil {
+    return fmt.Errorf("respawn chunks: %w", err)
 	}
 	if err := c.sendSyncPlayerPosition(sp.X, sp.Y, sp.Z, 1); err != nil {
 		return fmt.Errorf("respawn sync pos: %w", err)
