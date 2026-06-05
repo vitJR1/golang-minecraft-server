@@ -90,11 +90,18 @@ type Logic interface {
 	OnChat(*Ctx, PlayerHandle, string) (string, bool)
 
 	// OnPlayerAttack fires when one player sends an "attack" Interact
-	// targeted at another player in the same instance. The server has no
-	// damage system today — the hook is the only signal the game gets that
-	// a hit happened. Return value is currently informational (no rollback
-	// path); future work may turn false into a veto.
+	// targeted at another player in the same instance. Return false to veto
+	// the hit — no damage, knockback, or death results (use for teams,
+	// spawn protection, spectators). Return true to let the core 1.9 combat
+	// system resolve the hit (when the instance has PvP enabled).
 	OnPlayerAttack(ctx *Ctx, attacker, target PlayerHandle) bool
+
+	// OnPlayerDeath fires when the combat system kills a player. killer is
+	// the attacker, or nil for an environmental/unknown death. Award kills,
+	// drops, or scoreboards here. The respawn (death screen or instant, per
+	// the instance's combat config) is handled by the server around this
+	// call; a game may additionally Teleport the victim to a custom spawn.
+	OnPlayerDeath(ctx *Ctx, victim, killer PlayerHandle)
 }
 
 // Ctx carries the per-instance handles the Logic needs. Constructed by
@@ -141,6 +148,17 @@ type Instance interface {
 	// are moved to the hub, then OnInstanceEnd fires, then the instance
 	// is removed.
 	EndGame()
+
+	// SetPvP enables or disables the 1.9 combat system (damage, knockback,
+	// death) for this instance. Instances default to PvP enabled; the hub
+	// defaults to disabled. Call from OnInstanceStart.
+	SetPvP(enabled bool)
+
+	// SetInstantRespawn controls death behavior. When true (suited to
+	// arenas), a killed player is immediately healed and respawned at the
+	// instance spawn with no death screen. When false (the default), the
+	// vanilla death screen is shown and the player respawns on click.
+	SetInstantRespawn(enabled bool)
 }
 
 // PlayerHandle is the safe wrapper around a connected player. Plugins

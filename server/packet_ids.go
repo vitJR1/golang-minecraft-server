@@ -40,6 +40,7 @@ const (
 // Serverbound, state = play.
 const (
 	SbPlayTeleportConfirm   = 0x00
+	SbPlayClientCommand     = 0x07 // "client_command": 0 = perform respawn, 1 = request stats
 	SbPlayChatCommand       = 0x04
 	SbPlayChatMessage       = 0x05
 	SbPlayClientInfo        = 0x08 // "settings": locale, view distance, etc.
@@ -69,6 +70,12 @@ const (
 	CbPlaySpawnPlayer        = 0x03
 	CbPlayEntityAnimation    = 0x04
 	CbPlayAckBlockChange     = 0x06
+	CbPlayHurtAnimation      = 0x21 // "hurt_animation": entity id + yaw → red flash + recoil tilt
+	CbPlayCombatDeath        = 0x38 // "death_combat_event": triggers the death screen
+	CbPlayEntityVelocity     = 0x54 // "entity_velocity": knockback (short units, 1/8000 block/tick)
+	CbPlaySetHealth          = 0x57 // "update_health": float HP + VarInt food + float saturation
+	CbPlaySoundEffect        = 0x62 // "sound_effect": named or registry-id sound at a position
+	CbPlayUpdateAttributes   = 0x6A // "entity_update_attributes": e.g. generic.attack_speed (cooldown bar)
 	CbPlayBlockUpdate        = 0x0A
 	CbPlayCommandSuggestResp = 0x0F // "tab_complete" response
 	CbPlayDeclareCommands    = 0x10 // brigadier tree — what /<TAB> shows

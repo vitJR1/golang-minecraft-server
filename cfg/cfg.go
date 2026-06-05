@@ -22,6 +22,12 @@ var (
 	// Names are matched case-insensitively.
 	InitialOps = []string{}
 
+	// PvPVersion selects the combat model new instances start with:
+	//   1 = 1.8 — no attack cooldown, every hit deals full weapon damage.
+	//   2 = 1.9 — attack-cooldown "charge" scaling (default).
+	// Set from the PVP_VERSION env var in main; read once at startup.
+	PvPVersion = 2
+
 	// AuthEnabled controls whether the auth plugin (/register, /login,
 	// auth instance, IP ban after failed attempts) is installed. Set
 	// in main from the AUTH_ENABLED env var, with a sensible default:

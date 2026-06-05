@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"minecraft-server/cfg"
 	"minecraft-server/protocol"
 	"minecraft-server/world"
 	"sync"
@@ -24,6 +25,75 @@ var tickInterval = time.Second / TickRate
 // ticker doesn't queue), so a slow handler stretches game time visibly.
 type TickHandler func(tick uint64)
 
+// CombatConfig tunes the 1.9-style PvP system per instance. Zero value is
+// not usable — construct via DefaultCombatConfig and tweak. All damage is
+// in half-heart units (20 = full health). These are the numeric knobs only;
+// the live on/off toggles (PvP enabled, instant respawn) live on Instance as
+// atomics so they can be flipped at runtime (e.g. via /instance set pvp).
+type CombatConfig struct {
+	// Version is the combat model: PvP18 (no cooldown) or PvP19 (charge
+	// scaling). Defaults from cfg.PvPVersion (PVP_VERSION env var).
+	Version PvPVersion
+
+	// BaseDamage is the weapon's raw hit damage at full charge, before the
+	// cooldown scaling and crit multiplier. 6 ≈ a vanilla iron sword.
+	BaseDamage float32
+
+	// AttackSpeed is attacks-per-second (vanilla "Attack Speed" attribute):
+	// fist 4.0, sword 1.6, axe 1.0. Drives the cooldown charge window —
+	// cooldown is 1/AttackSpeed seconds.
+	AttackSpeed float32
+
+	// Knockback is the horizontal launch strength of a normal hit, in
+	// blocks/tick. SprintKnockback is the extra added when the attacker is
+	// sprinting (the 1.9 "w-tap"). VerticalKnockback is the upward launch.
+	Knockback         float32
+	SprintKnockback   float32
+	VerticalKnockback float32
+
+	// CritMultiplier scales damage on a critical hit (attacker falling, at
+	// full charge). Vanilla is 1.5.
+	CritMultiplier float32
+
+	// InvulnTicks is the per-target i-frame window (vanilla: 10 ticks).
+	InvulnTicks uint64
+
+	// RegenIntervalTicks is how often a below-max, alive player heals one
+	// half-heart. 0 disables natural regen.
+	RegenIntervalTicks uint64
+}
+
+// DefaultCombatConfig returns the out-of-the-box PvP tuning: a sword-like
+// weapon with the full 1.9 cooldown/crit/knockback model and slow natural
+// regen. Enabled by default — disable it on safe instances (e.g. the hub).
+func DefaultCombatConfig() CombatConfig {
+	return CombatConfig{
+		Version:            pvpVersionFromCfg(),
+		BaseDamage:         6,
+		AttackSpeed:        1.6,
+		Knockback:          0.4,
+		SprintKnockback:    0.4,
+		VerticalKnockback:  0.4,
+		CritMultiplier:     1.5,
+		InvulnTicks:        10,
+		RegenIntervalTicks: 40, // ~2s per half-heart
+	}
+}
+
+// pvpVersionFromCfg maps the cfg.PvPVersion int (set from PVP_VERSION) to a
+// PvPVersion, falling back to 1.9 for any unrecognized value.
+func pvpVersionFromCfg() PvPVersion {
+	if cfg.PvPVersion == int(PvP18) {
+		return PvP18
+	}
+	return PvP19
+}
+
+// Spawn is a respawn/teleport target. Defaults to the world origin column.
+type Spawn struct {
+	X, Y, Z float64
+}
+
 // Instance is one game-world "room": its own block storage, its own
 // player list, its own tick loop, its own broadcast scope. The Hub
 // instance is just an instance like any other. Cross-instance teleport
@@ -42,6 +112,22 @@ type Instance struct {
 	Server  *Server
 	World   world.World
 	Players *PlayerList
+
+	// Combat holds the numeric PvP tuning for this instance (damage, speed,
+	// knockback). Set at construction (DefaultCombatConfig) and safe to
+	// tweak before traffic arrives; the live on/off toggles below are
+	// separate atomics so they can flip mid-fight without a data race.
+	Combat CombatConfig
+
+	// combatEnabled gates the whole PvP system; instantRespawn picks the
+	// death behavior (instant heal+teleport vs death screen). Atomic so
+	// /instance set and game logic can toggle them while players fight.
+	combatEnabled  atomic.Bool
+	instantRespawn atomic.Bool
+
+	// SpawnPoint is where players respawn after death (and the world spawn
+	// for this instance). Defaults to the origin column.
+	SpawnPoint Spawn
 
 	// joinMu serializes registration + visibility announcements per
 	// instance, so one player's join can't observe another mid-join inside
@@ -71,10 +157,15 @@ type Instance struct {
 	OnChat func(c *ClientConnection, msg string) (rewrite string, allow bool)
 
 	// OnPlayerAttack fires when attacker sends SbPlayInteract type=attack
-	// targeting another player in the same instance. The hook is the only
-	// place games get to observe PvP — there is no damage system, so the
-	// return value is informational (reserved for a future veto path).
+	// targeting another player in the same instance. Returning false vetoes
+	// the hit; true lets the core combat system resolve damage/knockback
+	// (when PvP is enabled — see combatEnabled).
 	OnPlayerAttack func(attacker, target *ClientConnection) bool
+
+	// OnPlayerDeath fires when the combat system kills a player. killer is
+	// the attacker, or nil for an environmental death. Called before the
+	// respawn (death screen or instant) is finalized.
+	OnPlayerDeath func(victim, killer *ClientConnection)
 
 	// OnStop fires once when the instance is being torn down (via
 	// Server.RemoveInstance or Instance.Stop). Use for game cleanup;
@@ -87,15 +178,29 @@ type Instance struct {
 // or by future matchmaker logic).
 func NewInstance(id string, srv *Server, w world.World) *Instance {
 	i := &Instance{
-		ID:       id,
-		Server:   srv,
-		World:    w,
-		Players:  NewPlayerList(),
-		stopTick: make(chan struct{}),
+		ID:         id,
+		Server:     srv,
+		World:      w,
+		Players:    NewPlayerList(),
+		Combat:     DefaultCombatConfig(),
+		SpawnPoint: Spawn{X: 0.5, Y: 67, Z: 0.5},
+		stopTick:   make(chan struct{}),
 	}
+	i.combatEnabled.Store(true) // instances default to PvP on (hub turns it off)
+	i.OnTick(i.combatTick)
 	go i.tickLoop()
 	return i
 }
+
+// PvPEnabled reports whether the 1.9 combat system is active on this
+// instance. SetPvP toggles it (thread-safe, may be called mid-fight).
+func (i *Instance) PvPEnabled() bool    { return i.combatEnabled.Load() }
+func (i *Instance) SetPvP(enabled bool) { i.combatEnabled.Store(enabled) }
+
+// InstantRespawn reports the death behavior: true = heal+teleport on the
+// spot, false = vanilla death screen. SetInstantRespawn toggles it.
+func (i *Instance) InstantRespawn() bool           { return i.instantRespawn.Load() }
+func (i *Instance) SetInstantRespawn(enabled bool) { i.instantRespawn.Store(enabled) }
 
 // OnTick registers a callback fired once per tick (20 Hz). Concurrent-safe.
 // There is no Unsubscribe yet — destroy the whole instance via Stop when

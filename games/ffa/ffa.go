@@ -5,16 +5,15 @@
 // Rules:
 //   - 16×16 stone platform at Y=64, 4 fixed spawn points at the corners.
 //   - Each player spawns at a random corner on join.
-//   - "Attack" SbPlayInteract (Logic.OnPlayerAttack) = +1 to attacker,
-//     victim respawns at a random corner. No actual damage system —
-//     the attack hook IS the kill event.
-//   - First to winScore points wins; instance announces, schedules a
+//   - Real 1.9 combat (the instance's core PvP system): players trade
+//     health-based hits. A kill (Logic.OnPlayerDeath) = +1 to the killer;
+//     the victim respawns instantly at a random corner (no death screen).
+//   - First to winScore kills wins; instance announces, schedules a
 //     5-second tear-down via Ctx.Instance.EndGame.
 //
-// Limitations the simplicity papers over: no inventory/kit (players keep
-// the default empty Creative kit), no fall-off-platform detection, no
-// hit cooldown — a spam-clicker would farm points. Good enough as a
-// pipeline smoke test for the engine.
+// Limitations the simplicity papers over: no inventory/kit (players fight
+// with the configured default weapon), no fall-off-platform detection.
+// Good enough as a pipeline smoke test for the engine.
 package ffa
 
 import (
@@ -74,6 +73,10 @@ type ffaLogic struct {
 }
 
 func (g *ffaLogic) OnInstanceStart(ctx *game.Ctx) {
+	// Arena combat: keep the default PvP on, but respawn instantly at a
+	// corner instead of showing the vanilla death screen.
+	ctx.Instance.SetPvP(true)
+	ctx.Instance.SetInstantRespawn(true)
 	ctx.Instance.BroadcastChat("",
 		fmt.Sprintf("Free-For-All! First to %d kills wins.", winScore))
 }
@@ -93,14 +96,34 @@ func (g *ffaLogic) OnPlayerLeave(ctx *game.Ctx, p game.PlayerHandle) {
 	ctx.Instance.BroadcastChat("", p.Name()+" left.")
 }
 
+// OnPlayerAttack lets every hit through to the core combat system once the
+// game is live. Returning false would veto the hit; we only do that after a
+// winner is decided, to freeze the arena.
 func (g *ffaLogic) OnPlayerAttack(ctx *game.Ctx, attacker, target game.PlayerHandle) bool {
+	g.mu.Lock()
+	over := g.over
+	g.mu.Unlock()
+	return !over
+}
+
+// OnPlayerDeath scores the kill. The server already healed and respawned the
+// victim at the instance spawn (instant respawn) before this fires; we just
+// move them to a random corner and tally the killer's point.
+func (g *ffaLogic) OnPlayerDeath(ctx *game.Ctx, victim, killer game.PlayerHandle) {
+	// Re-place the victim at a random corner (overrides the default spawn).
+	g.spawnPlayer(victim)
+
+	if killer == nil {
+		return // environmental death — no one to credit
+	}
+
 	g.mu.Lock()
 	if g.over {
 		g.mu.Unlock()
-		return true
+		return
 	}
-	g.scores[attacker.EntityID()]++
-	score := g.scores[attacker.EntityID()]
+	g.scores[killer.EntityID()]++
+	score := g.scores[killer.EntityID()]
 	won := score >= winScore
 	if won {
 		g.over = true
@@ -108,23 +131,19 @@ func (g *ffaLogic) OnPlayerAttack(ctx *game.Ctx, attacker, target game.PlayerHan
 	g.mu.Unlock()
 
 	ctx.Instance.BroadcastChat("",
-		fmt.Sprintf("%s ▶ %s  (%d/%d)", attacker.Name(), target.Name(), score, winScore))
-
-	// "Death": respawn the victim at a random corner.
-	g.spawnPlayer(target)
+		fmt.Sprintf("%s ▶ %s  (%d/%d)", killer.Name(), victim.Name(), score, winScore))
 
 	if won {
 		ctx.Instance.BroadcastChat("",
 			fmt.Sprintf("*** %s wins! Returning to hub in %ds ***",
-				attacker.Name(), int(endDelay/time.Second)))
+				killer.Name(), int(endDelay/time.Second)))
 		// EndGame teleports everyone back to hub and removes the instance.
-		// Run it outside our hook so we don't block the attack handler.
+		// Run it outside our hook so we don't block the death handler.
 		go func() {
 			time.Sleep(endDelay)
 			ctx.Instance.EndGame()
 		}()
 	}
-	return true
 }
 
 // spawnPlayer teleports p to a random spawn corner. Centers them in the

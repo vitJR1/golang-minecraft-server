@@ -36,3 +36,5 @@ func (NoopLogic) OnChat(_ *Ctx, _ PlayerHandle, msg string) (string, bool) {
 }
 
 func (NoopLogic) OnPlayerAttack(*Ctx, PlayerHandle, PlayerHandle) bool { return true }
+
+func (NoopLogic) OnPlayerDeath(*Ctx, PlayerHandle, PlayerHandle) {}
