@@ -121,7 +121,6 @@ var (
 	RedBed       = Block{StateID: 1915, Name: "minecraft:red_bed"}
 	BlackBed     = Block{StateID: 1931, Name: "minecraft:black_bed"}
 	BlackConcrete         = Block{StateID: 12602, Name: "minecraft:black_concrete"}
-	Obsidian              = Block{StateID: 2354, Name: "minecraft:obsidian"}
 	CryingObsidian        = Block{StateID: 19308, Name: "minecraft:crying_obsidian"}
 	RedGlazedTerracotta   = Block{StateID: 12579, Name: "minecraft:red_glazed_terracotta"}
 	BlackGlazedTerracotta = Block{StateID: 12583, Name: "minecraft:black_glazed_terracotta"}
@@ -152,7 +151,7 @@ func init() {
 		LightGrayBed, CyanBed, PurpleBed, BlueBed,
 		BrownBed, GreenBed, RedBed, BlackBed,
 		BlackConcrete,
-		Obsidian, CryingObsidian,
+	 	CryingObsidian,
 		RedGlazedTerracotta, BlackGlazedTerracotta,
 	}
 	byName = make(map[string]Block, len(all))
