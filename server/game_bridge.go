@@ -21,6 +21,8 @@ func (b instanceBridge) SetBlock(p world.Position, blk world.Block) { b.inst.Set
 func (b instanceBridge) GetBlock(p world.Position) world.Block      { return b.inst.World.GetBlock(p) }
 func (b instanceBridge) BroadcastChat(sender, msg string)           { b.inst.BroadcastChat(sender, msg) }
 func (b instanceBridge) PlayerCount() int                           { return b.inst.Players.Count() }
+func (b instanceBridge) SetPvP(enabled bool)                        { b.inst.SetPvP(enabled) }
+func (b instanceBridge) SetInstantRespawn(enabled bool)             { b.inst.SetInstantRespawn(enabled) }
 
 func (b instanceBridge) Players() []game.PlayerHandle {
 	conns := b.inst.Players.snapshot()
@@ -127,6 +129,15 @@ func (s *Server) AttachLogic(inst *Instance, logic game.Logic) *game.Ctx {
 	}
 	inst.OnPlayerAttack = func(attacker, target *ClientConnection) bool {
 		return logic.OnPlayerAttack(ctx, playerBridge{conn: attacker}, playerBridge{conn: target})
+	}
+	inst.OnPlayerDeath = func(victim, killer *ClientConnection) {
+		// killer is nil for environmental deaths — pass a nil PlayerHandle
+		// (not a playerBridge wrapping nil) so the game's nil check works.
+		var killerHandle game.PlayerHandle
+		if killer != nil {
+			killerHandle = playerBridge{conn: killer}
+		}
+		logic.OnPlayerDeath(ctx, playerBridge{conn: victim}, killerHandle)
 	}
 	inst.OnStop = func() {
 		logic.OnInstanceEnd(ctx)

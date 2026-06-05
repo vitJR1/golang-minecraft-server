@@ -16,6 +16,10 @@ const (
 	Spectator Gamemode = 3
 )
 
+// MaxHealth is the full-health value (20 = ten hearts), matching vanilla.
+// Stored as the cap the combat system clamps to on spawn/respawn.
+const MaxHealth float32 = 20
+
 // Snapshot is an immutable point-in-time view of mutable Player fields.
 // Obtained via Player.Snapshot — safe to pass around and read freely without
 // holding any lock. The identity fields (EntityID/Name/UUID) are duplicated
@@ -29,6 +33,12 @@ type Snapshot struct {
 	Yaw, Pitch float32
 	OnGround   bool
 	Gamemode   Gamemode
+
+	// Health is current hit points in [0, MaxHealth]. Dead is true once a
+	// killing blow lands and stays true until Respawn resets it — used to
+	// reject further hits on a corpse and to gate the respawn flow.
+	Health float32
+	Dead   bool
 }
 
 // Player is the per-connection gameplay entity. Identity fields
@@ -46,6 +56,18 @@ type Player struct {
 	pitch    float32
 	onGround bool
 	gamemode Gamemode
+
+	// Combat state. health is current HP; dead latches after a killing
+	// blow. lastAttackTick is the instance tick of this player's most
+	// recent attack (drives the 1.9 attack-cooldown damage scaling).
+	// lastHurtTick / lastHurtAmount implement vanilla's per-target
+	// invulnerability window: within ~10 ticks of a hit, a new hit only
+	// lands if it's stronger, and only for the difference.
+	health         float32
+	dead           bool
+	lastAttackTick uint64
+	lastHurtTick   uint64
+	lastHurtAmount float32
 }
 
 // New constructs a Player at the default spawn (0.5, 67, 0.5) in
@@ -61,6 +83,7 @@ func New(entityID int32, name string, uuid [16]byte) *Player {
 		x:        0.5,
 		z:        0.5,
 		gamemode: Adventure,
+		health:   MaxHealth,
 	}
 }
 
@@ -82,6 +105,8 @@ func (p *Player) Snapshot() Snapshot {
 		Pitch:    p.pitch,
 		OnGround: p.onGround,
 		Gamemode: p.gamemode,
+		Health:   p.health,
+		Dead:     p.dead,
 	}
 }
 
@@ -116,5 +141,94 @@ func (p *Player) LookAt(yaw, pitch float32, onGround bool) {
 func (p *Player) SetGamemode(g Gamemode) {
 	p.mu.Lock()
 	p.gamemode = g
+	p.mu.Unlock()
+}
+
+// Health returns the player's current hit points.
+func (p *Player) Health() float32 {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.health
+}
+
+// IsDead reports whether the player is currently on the death screen.
+func (p *Player) IsDead() bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.dead
+}
+
+// SetHealth sets HP directly, clamped to [0, MaxHealth]. Used by regen and
+// admin tooling; combat damage goes through ApplyDamage. Does not touch the
+// dead flag — Respawn is the only thing that clears it.
+func (p *Player) SetHealth(h float32) {
+	if h < 0 {
+		h = 0
+	}
+	if h > MaxHealth {
+		h = MaxHealth
+	}
+	p.mu.Lock()
+	p.health = h
+	p.mu.Unlock()
+}
+
+// ApplyDamage subtracts amount from health under vanilla's per-target
+// invulnerability window. now is the current instance tick; invulnTicks is
+// the window length (vanilla: 10). Within the window a fresh hit only lands
+// if it exceeds the last hit's amount, and then only for the difference —
+// this is what lets a faster weapon "re-hit" through i-frames but blocks
+// rapid spam. Returns the damage actually applied, the resulting health,
+// and whether this blow was lethal. A no-op (applied==0) when the hit is
+// swallowed by i-frames or the player is already dead.
+func (p *Player) ApplyDamage(amount float32, now uint64, invulnTicks uint64) (applied, health float32, killed bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.dead || amount <= 0 {
+		return 0, p.health, false
+	}
+
+	if now-p.lastHurtTick < invulnTicks && now >= p.lastHurtTick {
+		// Still invulnerable: only the surplus over the prior hit lands.
+		if amount <= p.lastHurtAmount {
+			return 0, p.health, false
+		}
+		applied = amount - p.lastHurtAmount
+		p.lastHurtAmount = amount
+	} else {
+		applied = amount
+		p.lastHurtTick = now
+		p.lastHurtAmount = amount
+	}
+
+	p.health -= applied
+	if p.health <= 0 {
+		p.health = 0
+		p.dead = true
+		killed = true
+	}
+	return applied, p.health, killed
+}
+
+// AttackCooldownTick records that this player just attacked at tick now, and
+// returns the previous attack tick so the caller can compute the cooldown
+// charge (1.9 attack-strength scaling) before the update.
+func (p *Player) AttackCooldownTick(now uint64) (prev uint64) {
+	p.mu.Lock()
+	prev = p.lastAttackTick
+	p.lastAttackTick = now
+	p.mu.Unlock()
+	return prev
+}
+
+// Respawn resets the player to full health and clears the dead flag. Caller
+// is responsible for the position reset and the wire packets.
+func (p *Player) Respawn() {
+	p.mu.Lock()
+	p.health = MaxHealth
+	p.dead = false
+	p.lastHurtTick = 0
+	p.lastHurtAmount = 0
 	p.mu.Unlock()
 }

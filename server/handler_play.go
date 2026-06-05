@@ -220,9 +220,16 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		// Only "attack" (1) is wired up so far. interact / interact_at go
 		// to entity gameplay we haven't built (right-click NPCs, etc.).
 		if atype == 1 {
-			if hook := c.instance.OnPlayerAttack; hook != nil {
-				if victim, ok := c.instance.Players.Get(int32(target)); ok && victim != c {
-					hook(c, victim)
+			if victim, ok := c.instance.Players.Get(int32(target)); ok && victim != c {
+				// The game logic hook gets first refusal: returning false
+				// vetoes the hit (no damage), so a game can implement teams,
+				// spawn protection, spectators, etc. A nil hook = allow.
+				allow := true
+				if hook := c.instance.OnPlayerAttack; hook != nil {
+					allow = hook(c, victim)
+				}
+				if allow {
+					c.handleAttack(victim)
 				}
 			}
 		}
@@ -233,11 +240,33 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		_, _ = packet.ReadByte()
 
 	case SbPlayPlayerCommand:
-		// entity_id (VarInt) + action (VarInt: sneak/sprint/etc.) +
-		// jump_boost (VarInt). No-op until games care about stamina.
+		// entity_id (VarInt) + action (VarInt) + jump_boost (VarInt).
+		// We track sprint start/stop (actions 3/4) so combat can apply the
+		// 1.9 sprint-knockback bonus; the rest is ignored for now.
 		_, _ = protocol.ReadVarInt(packet)
+		action, err := protocol.ReadVarInt(packet)
+		if err != nil {
+			return fmt.Errorf("player command action: %w", err)
+		}
 		_, _ = protocol.ReadVarInt(packet)
-		_, _ = protocol.ReadVarInt(packet)
+		switch action {
+		case 3: // start sprinting
+			c.sprinting.Store(true)
+		case 4: // stop sprinting
+			c.sprinting.Store(false)
+		}
+
+	case SbPlayClientCommand:
+		// action (VarInt): 0 = perform respawn, 1 = request stats.
+		action, err := protocol.ReadVarInt(packet)
+		if err != nil {
+			return fmt.Errorf("client command action: %w", err)
+		}
+		if action == 0 {
+			if err := c.respawn(); err != nil {
+				return fmt.Errorf("respawn: %w", err)
+			}
+		}
 
 	case SbPlayUseItem:
 		// hand(VarInt) + sequence(VarInt). Dispatches by the player's

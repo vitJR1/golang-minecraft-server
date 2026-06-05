@@ -112,3 +112,58 @@ func TestConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestApplyDamageBasic(t *testing.T) {
+	p := New(1, "Bob", [16]byte{})
+	applied, health, killed := p.ApplyDamage(6, 100, 10)
+	if applied != 6 || health != MaxHealth-6 || killed {
+		t.Errorf("first hit: applied=%v health=%v killed=%v", applied, health, killed)
+	}
+}
+
+func TestApplyDamageInvulnerabilityWindow(t *testing.T) {
+	p := New(1, "Bob", [16]byte{})
+
+	// First hit at tick 100 for 6 lands fully.
+	if applied, _, _ := p.ApplyDamage(6, 100, 10); applied != 6 {
+		t.Fatalf("first hit applied %v, want 6", applied)
+	}
+	// A weaker/equal hit inside the 10-tick window is swallowed.
+	if applied, _, _ := p.ApplyDamage(4, 103, 10); applied != 0 {
+		t.Errorf("weaker hit in window: applied %v, want 0", applied)
+	}
+	if applied, _, _ := p.ApplyDamage(6, 105, 10); applied != 0 {
+		t.Errorf("equal hit in window: applied %v, want 0", applied)
+	}
+	// A stronger hit in the window lands only for the surplus (8-6=2).
+	if applied, health, _ := p.ApplyDamage(8, 107, 10); applied != 2 || health != MaxHealth-8 {
+		t.Errorf("stronger hit in window: applied=%v health=%v, want 2 / %v", applied, health, MaxHealth-8)
+	}
+	// Past the window, a full hit lands again.
+	if applied, _, _ := p.ApplyDamage(6, 120, 10); applied != 6 {
+		t.Errorf("hit after window: applied %v, want 6", applied)
+	}
+}
+
+func TestApplyDamageKillsAndLatchesDead(t *testing.T) {
+	p := New(1, "Bob", [16]byte{})
+	p.SetHealth(3)
+	// applied is the nominal damage (used for i-frame comparison), not the
+	// clamped health loss — an overkill of 5 against 3 HP still reports 5.
+	applied, health, killed := p.ApplyDamage(5, 50, 10)
+	if !killed || health != 0 || applied != 5 {
+		t.Errorf("lethal hit: applied=%v health=%v killed=%v, want 5/0/true", applied, health, killed)
+	}
+	if !p.IsDead() {
+		t.Error("player should be dead after lethal hit")
+	}
+	// A corpse takes no further damage.
+	if applied, _, _ := p.ApplyDamage(5, 200, 10); applied != 0 {
+		t.Errorf("hit on corpse: applied %v, want 0", applied)
+	}
+	// Respawn clears death and restores full health.
+	p.Respawn()
+	if p.IsDead() || p.Health() != MaxHealth {
+		t.Errorf("after respawn: dead=%v health=%v", p.IsDead(), p.Health())
+	}
+}

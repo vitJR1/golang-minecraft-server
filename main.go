@@ -185,6 +185,15 @@ func loadEnv() {
 			cfg.SetAuthBanDuration(d)
 		}
 	}
+	// Combat model: PVP_VERSION=1 → 1.8, 2 → 1.9. Anything else is ignored
+	// (keeps the default). Only 1/2 are valid so a typo can't silently pick
+	// a bogus mode.
+	switch strings.TrimSpace(os.Getenv("PVP_VERSION")) {
+	case "1":
+		cfg.PvPVersion = 1
+	case "2":
+		cfg.PvPVersion = 2
+	}
 	if ops := os.Getenv("INITIAL_OPS"); ops != "" {
 		var parsed []string
 		for _, n := range strings.Split(ops, ",") {

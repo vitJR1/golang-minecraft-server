@@ -88,6 +88,9 @@ func New() *Server {
 		templates: make(map[string]*world.Template),
 	}
 	s.Hub = NewInstance("hub", s, world.NewMemoryWorld())
+	// The hub is a safe lobby — no PvP. Game instances keep the default
+	// (combat enabled); they can re-tune or disable via SetPvP.
+	s.Hub.SetPvP(false)
 	s.instances[s.Hub.ID] = s.Hub
 	s.Matchmaker = NewMatchmaker(s)
 	return s
@@ -302,6 +305,9 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 	if err := c.sendSyncPlayerPosition(x, y, z, 1); err != nil {
 		return fmt.Errorf("sync pos: %w", err)
 	}
+	// Respawn reset the client's attributes — re-send the cooldown-bar
+	// attribute for the destination instance's combat model.
+	_ = c.sendCombatAttributes()
 
 	// 7. Register in target + broadcast tab list and Spawn for everyone.
 	target.JoinAndAnnounce(c)
@@ -438,6 +444,12 @@ type ClientConnection struct {
 	// power-on default. Read by SbPlayUseItem to pick which menu item
 	// the right-click should fire (blaze rod vs ender pearl, etc.).
 	heldSlot atomic.Int32
+
+	// sprinting tracks whether the client is currently sprinting, fed by the
+	// Player Command packet (start/stop sprinting actions). The combat code
+	// reads it to apply the extra sprint knockback ("w-tap") from 1.9. Atomic
+	// because the writer (readLoop) and readers (attack handling) can race.
+	sprinting atomic.Bool
 
 	// writerDone is closed by writerLoop on exit. cleanup waits on it
 	// (with a timeout) so any in-flight frames — particularly the Pong that
@@ -636,6 +648,9 @@ func (c *ClientConnection) sendPlayPackets() error {
 		// teleport) does not reset the client's command tree, so we don't
 		// re-send it from MovePlayer.
 		{"Declare Commands", c.sendDeclareCommands},
+		// Attack-speed attribute drives the client's cooldown bar for the
+		// instance's PvP model (re-sent on move/respawn since Respawn resets it).
+		{"Combat Attributes", c.sendCombatAttributes},
 	}
 	for _, pkt := range packets {
 		if c.isClosed() {

@@ -69,7 +69,7 @@ func init() {
 		Name:    "instance",
 		Aliases: []string{"i"},
 		NeedsOp: true,
-		Help:    "/instance <create|join|delete|list> [args]",
+		Help:    "/instance <create|join|delete|list|set> [args]",
 		Run:     cmdInstance,
 	})
 	registerCommand(&Command{
@@ -310,6 +310,8 @@ func cmdInstance(c *ClientConnection, args []string) {
 		cmdInstanceDelete(c, rest)
 	case "list", "ls":
 		cmdInstanceList(c, rest)
+	case "set":
+		cmdInstanceSet(c, rest)
 	default:
 		instanceUsage(c)
 	}
@@ -321,6 +323,69 @@ func instanceUsage(c *ClientConnection) {
 	_ = c.sendSystemMessage("  /instance join <id>")
 	_ = c.sendSystemMessage("  /instance delete <id>")
 	_ = c.sendSystemMessage("  /instance list")
+	_ = c.sendSystemMessage("  /instance set <pvp|instantrespawn> <on|off> [id]")
+}
+
+// cmdInstanceSet flips a runtime toggle on an instance. Defaults to the
+// caller's current instance; an optional trailing id targets another one.
+//
+//	/instance set pvp on|off [id]
+//	/instance set instantrespawn on|off [id]
+func cmdInstanceSet(c *ClientConnection, args []string) {
+	if len(args) < 2 {
+		_ = c.sendSystemMessage("Usage: /instance set <pvp|instantrespawn> <on|off> [id]")
+		return
+	}
+	property := strings.ToLower(args[0])
+	value, ok := parseOnOff(args[1])
+	if !ok {
+		_ = c.sendSystemMessage("Value must be on or off")
+		return
+	}
+
+	inst := c.instance
+	if len(args) >= 3 {
+		inst = c.server.GetInstance(args[2])
+		if inst == nil {
+			_ = c.sendSystemMessage("Unknown instance: " + args[2])
+			return
+		}
+	}
+	if inst == nil {
+		_ = c.sendSystemMessage("Not in an instance")
+		return
+	}
+
+	switch property {
+	case "pvp":
+		inst.SetPvP(value)
+	case "instantrespawn", "respawn":
+		inst.SetInstantRespawn(value)
+	default:
+		_ = c.sendSystemMessage("Unknown property: " + property + " (pvp, instantrespawn)")
+		return
+	}
+	_ = c.sendSystemMessage(fmt.Sprintf("%s on instance %s is now %s",
+		property, inst.ID, onOff(value)))
+}
+
+// parseOnOff accepts the usual truthy/falsy words for a boolean argument.
+func parseOnOff(s string) (value, ok bool) {
+	switch strings.ToLower(s) {
+	case "on", "true", "yes", "1", "enable", "enabled":
+		return true, true
+	case "off", "false", "no", "0", "disable", "disabled":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func onOff(v bool) string {
+	if v {
+		return "on"
+	}
+	return "off"
 }
 
 func cmdInstanceCreate(c *ClientConnection, args []string) {
