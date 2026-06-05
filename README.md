@@ -1,4 +1,4 @@
 <p align="center">
-  <img src="favicon.png" width="200" alt="Nest Logo" />
+  <img src="server-icon.png" width="200" alt="Nest Logo" />
 </p>
 

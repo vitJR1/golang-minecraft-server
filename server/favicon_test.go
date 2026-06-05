@@ -1,32 +1,39 @@
 package server
 
 import (
+	"bytes"
 	"encoding/base64"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// smallestPNG is a 1×1 transparent PNG (valid bytes). We don't validate
-// dimensions, so this works for the "loads and encodes" path.
-var smallestPNG = []byte{
-	0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
-	0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
-	0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-	0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
-	0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41,
-	0x54, 0x78, 0x9C, 0x62, 0x00, 0x01, 0x00, 0x00,
-	0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
-	0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
-	0x42, 0x60, 0x82,
+// makePNG renders a solid w×h PNG and returns its bytes.
+func makePNG(t *testing.T, w, h int) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			img.Set(x, y, color.RGBA{0x33, 0x99, 0xCC, 0xFF})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
 }
 
 func TestLoadFaviconEncodes(t *testing.T) {
 	t.Cleanup(func() { favicon.Store(nil) })
 
+	want := makePNG(t, faviconSize, faviconSize)
 	path := filepath.Join(t.TempDir(), "server-icon.png")
-	if err := os.WriteFile(path, smallestPNG, 0o644); err != nil {
+	if err := os.WriteFile(path, want, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	LoadFavicon(path)
@@ -44,8 +51,21 @@ func TestLoadFaviconEncodes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(decoded) != string(smallestPNG) {
+	if !bytes.Equal(decoded, want) {
 		t.Errorf("decoded favicon differs from source PNG")
+	}
+}
+
+func TestLoadFaviconWrongSize(t *testing.T) {
+	t.Cleanup(func() { favicon.Store(nil) })
+
+	path := filepath.Join(t.TempDir(), "server-icon.png")
+	if err := os.WriteFile(path, makePNG(t, 1024, 1024), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	LoadFavicon(path)
+	if got := currentFavicon(); got != "" {
+		t.Errorf("oversized icon should be rejected, got %q", got[:30])
 	}
 }
 

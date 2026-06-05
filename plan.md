@@ -1,376 +1,343 @@
 # План развития
 
-Дорожная карта к стабильному mini-game серверу. Не контракт — пересматриваем
+Дорожная карта к полноценному mini-game серверу. Не контракт — пересматриваем
 после каждого шага. Версия протокола: **763 (1.20.1)**. Stdlib only.
 
 ---
 
 ## Где мы сейчас
 
-- Протокол 1.20.1 покрыт от handshake до play-state.
-- 87 тестов (`go test -race ./...` чисто).
-- Compression (zlib threshold 256), online-mode (Mojang auth + AES-CFB8),
-  offline-mode + `banlist.json` loader.
-- Два игрока видят друг друга: Player Info Update, Spawn Player, Teleport
-  Entity, Remove Entities, Player Info Remove работают и проверены.
-- Block Update broadcast'ится; pre-seed мира в `main.go` доходит до клиента.
-- Регистрация/деспавн под одним `Server.joinMu` — никаких race'ов на
-  visibility.
+Базовый mini-game движок **готов и работает**. Закрыты все 14 пунктов
+исходного roadmap'а (история — в конце файла, секция «Сделано»). Коротко,
+что есть на руках:
 
-## Архитектурный поворот: mini-game сервер
+- **Сеть**: протокол от handshake до play, compression (zlib threshold 256),
+  online-mode (Mojang auth + AES-CFB8), offline-mode. Per-connection send
+  queue (`writerLoop` + `net.Buffers`), KeepAlive timeout enforcement.
+- **Instance abstraction**: каждый «room» (хаб, лобби, раунд) — свой мир,
+  свой `PlayerList`, свой 20 Hz tick loop, свой broadcast-scope. Хаб — такой
+  же Instance. Cross-instance teleport (`Server.MovePlayer`) переносит игрока
+  без disconnect.
+- **Plugin API** (`game/`): `Definition` + `Logic` + `Ctx` + `PlayerHandle`,
+  адаптеры в `server/game_bridge.go`. Игры живут в `games/` и регистрируются
+  через `init()`, не трогая ядро.
+- **Matchmaker**: `/play <game>`, авто-старт при `MinPlayers`, очереди.
+- **Интерактивные пакеты**: Swing/Interact/UseItemOn/PlayerAction + event
+  hooks (`OnBlockBreak/Place`, `OnChat`, `OnPlayerAttack`, `OnPlayerJoin/Leave`).
+- **World templates**: `.schem` v2/v3 → `world.Template`, property-aware.
+- **Хаб-навигация**: blaze-rod → сундук-GUI с выбором игры (`hub_menu.go`),
+  лобби FFA/BedWars/SkyWars (`lobbies.go`), ender-pearl → меню арен.
+- **Модерация/идентичность**: ops, ban (durations), mute, chat-moderator,
+  offline-auth (`auth.json`, /register + /login).
+- **Референс-игра**: `games/ffa` — FFA-арена, проверяет, что plugin API не
+  сломан.
 
-Раньше план целился в «один большой мир». Теперь — **mini-game платформа**:
-- Несколько изолированных **Instance**'ов (хаб, лобби, активные раунды игр).
-- Игроки переходят между Instance'ами без disconnect от TCP.
-- Каждая игра — **internal Go-плагин** (пакет в `games/`, регистрируется
-  через `init()`). Конфиг включает/выключает по ID.
+`go test -race ./...` — чисто.
 
-Это меняет приоритеты: view-distance culling не нужен (границы Instance'а
-делают то же самое естественно), но нужны Instance, tick loop, перенос
-игроков, шаблоны миров.
+### Честная оценка: что движок ещё НЕ умеет
 
-## Roadmap к стабильно работающему серверу
+Эти пробелы всплыли при подготовке к party/friends/мини-играм. Они —
+фундамент, без которого новые фичи либо невозможны, либо строятся на гонках:
 
-В порядке выполнения. Каждый пункт автономный — закончил, мердж, переходим
-к следующему.
+1. **Нет способа выполнить действие на горутине чужого соединения.**
+   `MovePlayer` обязан вызываться из readLoop-горутины самого игрока
+   (`server.go`, комментарий над `MovePlayer`). Matchmaker обходит это через
+   `go MovePlayer(...)` (гонка), а `EndGame` в `game_bridge.go` прямо
+   расписывается: «accept the race». Чтобы затащить **всю party** в игру или
+   телепортнуть друга — нужен безопасный per-connection канал команд.
+2. **Нет боевой системы.** `OnPlayerAttack` чисто информативный; FFA фейкает
+   килл одним кликом. Нет HP, урона, смерти, knockback, респауна.
+3. **Нет модели инвентаря/китов.** `giveHotbarItem` — ad-hoc Set Container
+   Slot; click-container исходит из «реальных трансферов нет».
+4. **Меню арены — тупик.** `arenaOnClick` (`hub_menu.go`) только логирует
+   выбор; в matchmaker не диспатчит. Хаб рекламирует BedWars/SkyWars, которых
+   ещё нет.
+5. **Нет persistent player-identity store.** ban/mutes/ops/auth.json есть, но
+   для friends нужен отдельный store отношений, переживающий рестарт.
+6. **Matchmaker не держит группу вместе** — забирает из очереди FIFO, нет
+   понятия «эти N игроков — в один инстанс» (нужно для party).
 
-### 1. Load-test harness + первый pprof
+---
 
-**Зачем:** все цифры ниже — гипотезы. Без harness'а оптимизации вслепую.
+## Архитектурный фундамент (делаем ПЕРЕД фичами)
 
-- N горутин-«клиентов», каждая через `net.Pipe` логинится и держит
-  соединение.
-- Симуляция движения (20 Hz SetPos), чата (1/мин), периодический disconnect.
-- Метрики: подключений/сек, latency броадкаста, CPU breakdown, GC pause.
+В порядке выполнения. Каждый пункт автономный.
 
-**Стоимость:** 1–2 дня. До этого никаких других оптимизаций.
+### 15. Per-connection task queue
 
-### 2. Per-connection send queue
+**Зачем:** единственный безопасный способ выполнить `MovePlayer` (и любую
+мутацию состояния соединения) для *чужого* игрока. Разблокирует party-warp,
+matchmaker без `go MovePlayer`, корректный `EndGame`.
 
-**Зачем:** сейчас `safeWrite` синхронный. Один тормозящий клиент = весь
-broadcast стоит 5 сек (write-deadline). Для хаба с сотнями игроков —
-блокер.
+- `tasks chan func()` на `ClientConnection` + выделенная drainer-горутина
+  (select на `tasks` и `done`), запускается в `HandleConn` рядом с
+  `writerLoop`/`keepAlive`.
+- `c.instance` → `atomic.Pointer[Instance]` (сейчас «нет синхронизации»,
+  читается в каждом play-пакете, пишется в `MovePlayer`).
+- `MovePlayer` вызывается **только** из task-горутины → сериализован
+  per-connection. Matchmaker и `EndGame` переводятся на `c.Enqueue(fn)`.
+- Закрытие: drain + дренаж канала в `cleanup`, идемпотентно.
 
-- Канал `outbound chan []byte` на каждое `ClientConnection`.
-- Dedicated writer goroutine читает из канала, пишет в `conn`.
-- Backpressure: при переполнении канала — кикать клиента **или**
-  coalescing'ом дропать устаревшие position-update'ы (хранить «последнее
-  значение для entity X», а не очередь).
-- `safeWrite` становится non-blocking push.
+**Стоимость:** 2–3 дня. Тесты на конкурентный move + disconnect.
 
-**Стоимость:** 2–3 дня. Тесты на медленного клиента, на coalescing.
+### 16. Боевая система (HP / урон / смерть / knockback / респаун)
 
-### 3. Player race fix
+**Зачем:** фундамент для FFA-real, BedWars, SkyWars. Сейчас бой — фикция.
 
-**Зачем:** `c.player.X/Y/Z` сейчас пишет owning goroutine, читают
-broadcast'ы из чужих. `-race` пока не словил, но проблема есть.
+- `player.Player`: `health float32` (0..20), опц. `food`, под тем же `mu`.
+- Клиентские пакеты (см. `packet_ids.go` / wiki.vg 763):
+  - **Set Health (Cb)** — HP/еда/saturation.
+  - **Damage Event** или Entity Animation (hurt) — визуальный удар по жертве.
+  - **Set Entity Velocity (Cb)** — knockback (вектор из yaw атакующего +
+    вертикальный бамп).
+  - **Combat Death / Death combat event (Cb)** — экран смерти.
+  - **Client Command (Sb)** — обработать «perform respawn».
+- `OnPlayerAttack` → реальный путь урона: attack-cooldown, base damage,
+  расчёт knockback, применение к жертве. При HP ≤ 0 — смерть.
+- Новый хук **`OnPlayerDeath(victim, killer)`** на `Instance` и в `game.Logic`
+  (сейчас в интерфейсе только `OnPlayerAttack`). `NoopLogic` — дефолт.
+- Респаун: `Player.Reset()` (HP/положение) + телепорт на spawn игры.
+- **Void/fall death**: tick-проверка Y < порога (нужно для Spleef/SkyWars) и
+  опц. fall-distance урон.
 
-- `Player` получает `sync.RWMutex` (или атомики через `math.Float64bits`).
-- Геттеры/сеттеры под Lock.
+**Стоимость:** 5–7 дней. Самая мясная часть; тестировать живым клиентом.
 
-**Стоимость:** полдня. Чисто санитарная работа.
+### 17. Инвентарь и киты
 
-### 4. Instance abstraction
+**Зачем:** FFA-real хочет меч, BedWars/SkyWars — броню/блоки/ресурсы.
+Обобщает `giveHotbarItem`.
 
-**Зачем:** фундамент для всего mini-game'ового.
+- Серверная модель инвентаря (44 слота) на `ClientConnection` или `Player`.
+- `Kit` — список `{slot, itemID, count, nbt}`, применяется на spawn через
+  Set Container Content (window 0).
+- Shop-GUI для BedWars/SkyWars **переиспользует** существующий `openMenu` /
+  chest-GUI паттерн (`hub_menu.go`) — отдельный движок транзакций не нужен.
+- Реальный drag-n-drop / Click Container транзакции — **откладываем**: игры
+  идут на Adventure/Survival с локнутым инвентарём + chest-shop.
 
-```go
-type Instance struct {
-    ID      string
-    World   world.World
-    Players *PlayerList    // переезжает сюда из Server
-    // hooks (см. шаг 6)
-}
-```
+**Стоимость:** 3–4 дня.
 
-- `Server` теперь держит `Hub *Instance` + `Instances map[string]*Instance`.
-- Все коннектящиеся попадают в Hub.
-- `ClientConnection.instance *Instance` — текущий инстанс игрока.
-- `Server.Players` остаётся для cross-instance операций, но визуальные
-  broadcast'ы (Spawn, Position, Chat) идут через `instance.Players`.
-- Player Info Update — per-instance: в tab list только текущая игра.
+### 18. Командная абстракция (teams)
 
-**Стоимость:** 3–5 дней. Большой рефакторинг handler'ов.
+**Зачем:** только для BedWars (и опц. командных режимов). Цвета, общий spawn,
+friendly-fire off, командный tab/чат.
 
-### 5. Tick loop per Instance
+- `Team` на уровне `Instance` (или внутри game.Logic): id, цвет, состав,
+  spawn, статус (жива/выбита).
+- Teams (Cb) packet — цвет ника/коллизии/nametag в tab-list.
+- `OnPlayerAttack`/`OnPlayerDamage` уважает friendly-fire флаг команды.
 
-**Зачем:** базис для всего динамического — game state machine, движение
-NPC, регенерация HP, периодические события.
+**Стоимость:** 2–3 дня. Можно делать прямо внутри `games/bedwars`, если не
+выносить в ядро.
 
-- Один `time.Ticker(50ms)` на Instance (20Hz).
-- `Instance.OnTick(fn func(tick uint64))` для подписки.
-- Остановка через `Instance.Stop()` (нужно добавить lifecycle).
+### 19. Persistent player-identity store (для friends)
+
+**Зачем:** дружба переживает рестарт; ключ — стабильный UUID
+(`OfflineUUID` для offline, Mojang UUID для online).
+
+- Пакет `friends/` по образцу `ban`/`mutes`: `friends.json`, Load/Save/reload,
+  атомарная запись.
+- Модель: запрос → подтверждение (mutual). Хранить `map[uuid] -> set[uuid]` +
+  pending-requests.
+- API: `Add/Request/Accept/Deny/Remove/List/AreFriends`.
+
+**Стоимость:** 1–2 дня (store) — UI отдельно в треке friends.
+
+### 20. Matchmaker: party-aware + проводка меню арен
+
+**Зачем:** закрыть тупик меню и научить очередь держать группу вместе.
+
+- `arenaOnClick` / `hubMainOnClick` → `Matchmaker.Queue` (вместо лог-заглушки).
+  Иконка/арена → gameID.
+- `Matchmaker.QueueParty([]*ClientConnection, gameID)` — группа как единица:
+  попадает в один инстанс целиком, отклоняется если `len(party) > MaxPlayers`.
+- Снять временный `go MovePlayer` в `startGame` — переход на `c.Enqueue` (п.15).
+
+**Стоимость:** 2–3 дня.
+
+---
+
+## Трек A: сами мини-игры
+
+Каждая — пакет в `games/`, регистрация через `init()`, мир из `.schem`
+template (см. `schem/templates/<game>/`). Зависят от боевой системы (16) и
+инвентаря (17), кроме Parkour.
+
+### 21. FFA-real
+
+**Зачем:** переписать референс на настоящий бой — доказать движок 16+17.
+
+- Использовать HP/урон/смерть вместо «клик = килл».
+- Kit: меч + еда (17). Респаун через 16. Счёт по реальным киллам.
+- Спавн-защита (короткая неуязвимость после респауна).
+
+**Стоимость:** 1–2 дня (поверх 16/17).
+
+### 22. Spleef
+
+**Зачем:** лёгкая игра на уже существующих хуках, проверяет void-death.
+
+- `OnBlockBreak` ломает снег/блок под ногами (мгновенно, без дропа).
+- Падение в void (16, Y-порог) = выбывание. Последний оставшийся побеждает.
+- Не требует боевой HP-системы — только void-death из 16.
 
 **Стоимость:** 1–2 дня.
 
-### 5.5. Обработка интерактивных serverbound-пакетов
+### 23. Parkour
 
-**Зачем:** клиент шлёт пакеты для PvP, анимации, постановки блоков, а
-сервер их сейчас игнорирует (фоллбек в `default` с логом «Unknown play
-packet»). Без них mini-game-логика не имеет смысла.
+**Зачем:** игра вообще без боя/инвентаря — раньше всех (не блокируется 16/17).
 
-| Packet | ID | Содержит | Зачем нужен |
-|---|---|---|---|
-| Swing Arm | `0x2F` | VarInt(hand) | Анимация удара — broadcast как `Entity Animation (Cb 0x04)` |
-| Interact | `0x10` | target_eid + action(attack/use) + опц. coords + hand + sneak | PvP-атака, использование сущности |
-| Use Item On Block | `0x31` | hand + Position + face + cursor + sequence | Постановка блоков |
-| Player Action | `0x1C` | action + Position + face + sequence | Ломание блоков (digging started/finished/cancel) |
+- Чекпойнты + таймер на `OnTick`: детект позиции игрока в зоне.
+- Старт/финиш, личное время, /parkour reset.
+- Падение → телепорт на последний чекпойнт.
 
-- Добавить ID-константы в `packet_ids.go`.
-- Парсеры в `handler_play.go` для каждого.
-- Для Swing Arm — broadcast в Instance анимации.
-- Для Interact (attack) — вызывать `Instance.OnPlayerDamage` (хук для игр).
-- Для Use Item On + Player Action — обновлять `world.World` через
-  `Server.SetBlock` (Block Update уже работает), но через хук
-  `OnBlockBreak`/`OnBlockPlace` — чтобы игра могла отменить.
+**Стоимость:** 1–2 дня. Можно делать параллельно фундаменту.
 
-**Стоимость:** 2–3 дня. Без этого хук-API из шага 6 не на чем тестировать.
+### 24. BedWars
 
-### 6. Event hooks в Instance
+**Зачем:** флагман. Команды (18), кровати, генераторы ресурсов, shop (17).
 
-**Зачем:** игры должны реагировать на `BlockBreak`/`BlockPlace`/`Chat`/
-`PlayerDeath`/`PlayerJoin`/`PlayerLeave` без правки ядра.
+- 2–4 команды, у каждой кровать + spawn + остров.
+- `OnBlockBreak` кровати чужой команды → команда теряет респаун.
+- Tick-генераторы: периодический спавн железа/золота на базах.
+- Shop через chest-GUI (17): покупка блоков/брони/оружия за ресурсы.
+- Победа: последняя команда с живыми игроками.
 
-- Каждый хук — поле-функция на Instance: `Instance.OnBlockBreak func(...)
-  bool` (вернуть false = отменить событие).
-- В handler'ах (`handler_play.go`, `cleanup.go`) — вызовы этих хуков перед
-  применением события к миру.
-- Дефолтные значения: разрешено всё.
+**Стоимость:** 7–10 дней. Самая большая. Делать после 16/17/18.
 
-**Стоимость:** 2–3 дня.
+### 25. SkyWars
 
-### 7. Cross-instance teleport
+**Зачем:** второй флагман. Острова, лут-сундуки, void-death.
 
-**Зачем:** игрок перемещается hub → лобби → игра → hub без переподключения.
+- N островов-спавнов из template, центральный остров.
+- Сундуки с лутом (loot table) — раздача предметов на старте раунда.
+- Void-death (16). PvP до последнего выжившего.
+- Опц.: chest-refill в середине раунда (tick).
 
-- `Server.MovePlayer(c, target *Instance)`:
-  1. `announceLeave` в старом Instance.
-  2. Очистить с клиента сущности старого Instance (Remove Entities).
-  3. Сменить `c.instance = target`.
-  4. Отправить **Respawn** packet (`Cb 0x41`) — клиент чистит мир.
-  5. Отправить чанки нового мира.
-  6. `announceJoin` в новом.
-  7. Synchronize Player Position на spawn point.
-- `Player.Reset()` — HP, инвентарь, gamemode из template'а Instance'а.
+**Стоимость:** 5–7 дней. После 16/17.
 
-**Стоимость:** 3–5 дней. Самая хрупкая часть — тестировать с реальным
-клиентом обязательно.
+---
 
-### 8. World templates + Clone
+## Трек B: Party (объединение в группы)
 
-**Зачем:** каждая игра стартует с одинаковой ареной. Шаблон → копия на
-раунд → удалить после.
+Зависит от per-connection task queue (15) для warp.
 
-- `world.Template` — read-only снапшот блоков + spawn points + metadata.
-- `Template.Instantiate() *MemoryWorld` — клонирует в свежий World.
-- Загрузка из памяти (хардкод-арена для тестов) или из файла — см. секцию
-  «Парсинг карт» ниже.
+### 26. Party core + команды
 
-**Стоимость:** 2 дня (без файл-парсера, только in-memory).
+- `Party` (server-side, эфемерная): leader, members, pending-invites.
+  `PartyManager` на `Server` (как `Matchmaker`).
+- Команды: `/party invite <player>`, `/party accept <leader>`,
+  `/party leave`, `/party kick <player>`, `/party list`, `/party disband`.
+- Party-чат scope (`/party chat` или префикс) — отдельный broadcast по
+  членам, поверх `FindPlayer` (кросс-instance).
+- Очистка в `cleanup` на disconnect (как `Matchmaker.Dequeue`).
 
-### 9. `game/` package — plugin API
+**Стоимость:** 3–4 дня.
 
-**Зачем:** игры подключаются как пакеты, не правят ядро.
+### 27. Party ↔ matchmaker / warp
 
-```go
-// game/game.go
-type Definition struct {
-    ID         string
-    Name       string
-    MinPlayers int
-    MaxPlayers int
-    Template   *world.Template
-    New        func() Logic     // фабрика runtime-логики на инстанс
-}
-
-type Logic interface {
-    OnInstanceStart(ctx *Ctx)
-    OnPlayerJoin(ctx *Ctx, p *player.Player)
-    OnPlayerLeave(ctx *Ctx, p *player.Player)
-    OnPlayerDeath(ctx *Ctx, p, killer *player.Player)
-    OnTick(ctx *Ctx, tick uint64)
-    OnBlockBreak(ctx *Ctx, p *player.Player, pos world.Position) bool
-    OnBlockPlace(ctx *Ctx, p *player.Player, pos world.Position, b world.Block) bool
-    OnChat(ctx *Ctx, p *player.Player, msg string) (rewrite string, allow bool)
-    OnInstanceEnd(ctx *Ctx)
-}
-
-type NoopLogic struct{}  // embed-able defaults
-
-func Register(*Definition)
-func Get(id string) (*Definition, bool)
-func All() []*Definition
-```
-
-`Ctx` — единственная точка для плагина общаться с движком:
-`Broadcast`, `Teleport`, `SetBlock`, `EndGame`, `PlayersInRadius` и т.д.
-**Не выставляется наружу:** `ClientConnection`, encryption, raw mutex'ы,
-произвольное `go fn()`.
-
-**Стоимость:** 1 день.
-
-### 10. Matchmaker
-
-**Зачем:** очереди игроков в игры, создание Instance'ов на запрос.
-
-- `Server.Matchmaker.Queue(c, gameID)` — добавить в очередь.
-- При достижении `MinPlayers`: создать Instance из Template, переместить
-  ожидающих.
-- При нехватке за `WaitSeconds` — кикнуть таймер или продолжить ждать
-  (стратегия конфигурируется).
-- Жизненный цикл Instance: `pending → starting → running → ending →
-  cleanup`. State machine.
+- `/party warp` — leader тащит всю party в свой текущий инстанс
+  (через `c.Enqueue` + `MovePlayer`, п.15).
+- При `/play <game>` лидером — вся party встаёт в очередь как группа
+  (`QueueParty`, п.20) и попадает в один раунд.
+- При входе лидера в лобби/игру через меню — party следует за ним.
 
 **Стоимость:** 2–3 дня.
 
-### 11. KeepAlive timeout enforcement
+---
 
-**Зачем:** сейчас server шлёт keep-alive каждые 20с, но ответ не проверяет.
-Зомби-соединения копятся.
+## Трек C: Friends (реально полезный список друзей)
 
-- Хранить `outstandingKeepAliveID int64` + `sentAt time.Time` на
-  `ClientConnection`.
-- В `handlePlay` для `SbPlayKeepAlive`: проверить совпадение ID, обновить
-  RTT.
-- Если предыдущий ID не подтверждён за 30 сек — кикнуть с disconnect
-  reason.
+Зависит от identity-store (19) и party (26).
 
-**Стоимость:** 1 час. Маленькая, но обязательная.
+### 28. Friends store + команды
 
-### 12. Структурированный логгер (`slog`)
+- Поверх `friends/` (19).
+- Команды: `/friend add <player>`, `/friend accept <player>`,
+  `/friend deny <player>`, `/friend remove <player>`, `/friend list`,
+  `/friend requests`.
+- Презенс: онлайн/оффлайн + где сейчас (инстанс) через `FindPlayer`.
+- Уведомления: друг зашёл/вышел (опц., с подавлением спама).
 
-**Зачем:** `fmt.Printf` везде; в проде нужны уровни и фильтрация.
+**Стоимость:** 2–3 дня.
 
-- Перейти на `log/slog` (stdlib).
-- Уровни: debug, info, warn, error.
-- Дефолтный формат: текст; JSON через флаг.
+### 29. Friends menu + invite-to-party (главная цель трека)
 
-**Стоимость:** 2–3 часа.
+**Зачем:** ради этого всё — открыть меню и пригласить друга в party кликом.
 
-### 13. Первая референс-игра
+- Новый предмет в хабе (напр. «голова игрока» / бумага) → chest-GUI
+  «Друзья» (переиспользуем `openMenu` из `hub_menu.go`).
+- Слот на друга: голова/иконка + ник + статус (онлайн/в игре X/оффлайн).
+- Клик по онлайн-другу → действие: **пригласить в party** (создаёт party
+  если её нет) **или** «прыгнуть к нему» (`/party warp` наоборот — join к
+  его инстансу). Меню действий — второй экран chest-GUI.
+- Pending-запросы дружбы — отдельная страница меню (accept/deny кликом).
 
-**Зачем:** доказать что plugin API не сломанный.
-
-Простейшая FFA-арена:
-- 1 мир (16×16×8 платформа), 4 спавна.
-- При входе: kit (меч/еда). Спавн на случайной точке.
-- Death = `+1` убийце. Респавн через 3 сек.
-- Первый до 10 очков выигрывает.
-
-**Стоимость:** 1–2 дня. Если работает с двумя клиентами без проблем —
-движок готов.
+**Стоимость:** 3–4 дня. Завязано на 26/27 (invite создаёт/пополняет party).
 
 ---
 
 ## Контрольные точки
 
-| Веха | Сигнал что достигнута |
-|---|---|
-| **Stable foundation** | Шаги 1–3: load-test держит 200 idle игроков без degradation, race detector чист. |
-| **Instance MVP** | Шаги 4–7: ручной `Server.MovePlayer(c, hub2)` переводит игрока в другой Instance без disconnect, оба мира видны. |
-| **Plugin engine ready** | Шаги 8–9: можно зарегистрировать игру в `games/test/test.go`, она появляется в matchmaker'е. |
-| **Реально играбельно** | Шаг 13: FFA-арена работает с двумя клиентами от старта до завершения раунда. |
-| **Готовы к парсингу карт** | После всего выше: появится осмысленный сценарий для арен из файлов. |
-
----
-
-## Следующая большая задача: парсинг карт
-
-После того как движок и плагин-API готовы, главный блокер — **арены вручную
-не нарисовать в коде**. Нужен импорт из стандартного формата.
-
-### Цель
-
-Загрузить файл арены, созданный в Minecraft через WorldEdit (или Sponge,
-или Litematica), и получить `*world.Template` с блоками и (опционально)
-spawn-точками.
-
-### Форматы — выбор
-
-| Формат | Расширение | NBT | Поддержка инструментами | Что несёт |
-|---|---|---|---|---|
-| **Sponge Schematic v2** | `.schem` | да | WorldEdit (1.13+), FAWE | блоки + block entities + entities + metadata |
-| Sponge Schematic v3 | `.schem` | да | новее, не везде | то же + расширения |
-| Litematica | `.litematic` | да | мод Litematica | поддерживает несколько регионов в файле |
-| Classic Schematic | `.schematic` | да | legacy WorldEdit (< 1.13) | плоский массив block ID — устаревший |
-| `.mcstructure` | bedrock | NBT (LE) | Bedrock only | не наш кейс |
-
-**Выбор:** **Sponge v2** (`.schem`) — наиболее распространён, читается
-WorldEdit'ом начиная с 1.13, формат стабилен, документирован, держит
-block states по namespaced ID (важно для нас — наш `world.Block.Name`
-тоже namespaced).
-
-### Структура задачи парсинга
-
-| Подзадача | Содержание | Стоимость |
-|---|---|---|
-| **NBT Unmarshal** | Сейчас у нас только `Marshal`. Нужен зеркальный `Unmarshal([]byte) (Compound, error)` с поддержкой gzip-обёртки (Sponge файлы gzip-сжаты). | 2–3 дня |
-| **Sponge schematic parser** | Прочитать `Width/Height/Length`, `Palette` (mapping name→state ID **в файле**), `BlockData` (varint-stream индексов в палитру). Перенести в наш `world.Block` через имена. | 2–3 дня |
-| **Block name registry** | Нужен mapping `"minecraft:stone"` → `world.Block.StateID`. Сейчас у нас 6 констант. На реальную арену надо ~50–200 блоков. **Либо** генерация регистра из vanilla `blocks.json` (есть в `server -reports`), **либо** ручное расширение `world/block.go`. | 1 день (если ручное) до 1–2 недель (если кодеген) |
-| **Block entities** | Сундуки, таблички, скаймайнеры. Сейчас не поддерживаем. Для арен — можно сначала игнорировать. | отложить |
-| **Spawn points в metadata** | Sponge v2 поддерживает кастомные metadata-теги. Договориться о схеме: например, `Metadata.SpawnPoints: List<{x, y, z, yaw, pitch}>`. Парсить в `Template.SpawnPoints`. | 1 день |
-| **CLI tool**: `cmd/import-schem/main.go` | Дев-инструмент: на вход `.schem`, на выход — Go-файл с серилизованным Template (например, `embed`-able бинарь), либо JSON. Чтобы не парсить .schem на старте каждого сервера. | 1 день |
-| **Тесты** | Round-trip: построить простой Template вручную → серилизовать в наш формат → распарсить обратно. И парс реального `.schem` файла со стандартной аренки. | 1 день |
-
-**Общая стоимость импорта карт:** 7–10 дней с генерацией block registry,
-**4–5 дней** с ручным расширением блоков на старте.
-
-### Что отложить
-
-- **Entities** в schematic'е (моба-spawner'ы и т.п.) — пока без них.
-- **Block entities** (NBT блоков типа сундука с предметами внутри) — пока
-  без них.
-- **Litematica multi-region** — один регион достаточно для арен.
-- **Запись `.schem`** (наш мир → файл) — не нужно для игрового сервера.
+| Веха                | Сигнал что достигнута                                                                                    |
+|---------------------|----------------------------------------------------------------------------------------------------------|
+| **Фундамент готов** | 15–17: можно безопасно двигать чужого игрока; удар снимает HP, смерть → респаун; кит выдаётся на спавне. |
+| **Бой играбелен**   | 21: FFA-real проходит раунд на реальном HP с двумя клиентами.                                            |
+| **Командные игры**  | 24: BedWars — ломаем кровать, команда без респауна, последняя команда побеждает.                         |
+| **Party работает**  | 27: лидер `/party warp` тащит группу в инстанс; `/play` ставит всю party в один раунд.                   |
+| **Friends-цель**    | 29: открыл меню друзей → кликнул онлайн-друга → он получил инвайт в party → вместе зашли в игру.         |
 
 ---
 
 ## Что отложено (всё ещё в дорожной карте, но не сейчас)
 
-| Тема | Когда вернёмся |
-|---|---|
-| Реальный chunk streaming (view distance, динамическая подгрузка) | Когда mini-game'ы заработают и захочется «открытого мира» как один из режимов |
-| Persistence (сохранение World на диск между перезапусками) | Когда появятся persistent игры (например, town/build server) |
-| Player persistence (инвентари, ачивки) | Вместе с persistence миров |
-| `gnet`/`netpoll` (event-loop вместо goroutine-per-conn) | Только если pprof покажет scheduler bottleneck на 5k+ соединениях |
-| Update Entity Position вместо Teleport Entity | Когда движение станет реально жирным по трафику |
-| Pre-built frame для broadcast | После load-test'а, если zlib окажется горячим |
-| Dynamic plugins (Lua/WASM) | Если когда-нибудь захочется отдавать API третьим сторонам |
+| Тема                                                             | Когда вернёмся                                                   |
+|------------------------------------------------------------------|------------------------------------------------------------------|
+| Реальные Click-Container транзакции (drag-n-drop инвентаря)      | Если игре понадобится свободный инвентарь, а не kit + chest-shop |
+| Реальный chunk streaming (view distance, динамическая подгрузка) | Когда захочется «открытого мира» как режима                      |
+| Persistence миров (сохранение World на диск)                     | Когда появятся persistent-игры (town/build)                      |
+| Player persistence (инвентари, ачивки, статы)                    | Вместе с persistence миров; статистика по играм                  |
+| Друзья: оффлайн-инвайты / уведомления при заходе                 | После базового friends-меню (29)                                 |
+| `gnet`/`netpoll` (event-loop вместо goroutine-per-conn)          | Только если pprof покажет scheduler bottleneck на 5k+            |
+| Update Entity Position вместо Teleport Entity                    | Когда движение станет жирным по трафику                          |
+| Dynamic plugins (Lua/WASM)                                       | Если захочется отдавать API третьим сторонам                     |
 
 ---
 
 ## Что мы НЕ делаем
 
 - **Generic packet builder/DSL** — императивный стиль в `play_send.go`
-  читается, любая абстракция здесь раньше времени.
-- **Кодеген всех 26 000 block states из `blocks.json` до того, как
-  понадобятся** — пока хватает горстки констант, расширяем по мере
-  необходимости.
-- **External dependencies** — пока обходимся stdlib, и это плюс. Если
-  кажется что нужно — пересмотреть задачу.
-- **gRPC/REST API для мониторинга** — сервер один, держит автор, логов
-  достаточно.
-- **Prometheus/метрики** — сначала надо понимать что измерять (это придёт
-  из load-test'а).
-- **Динамические плагины (Lua/WASM)** до появления реальной потребности —
-  internal Go-пакеты с `init()` дают 95% профита без 100% сложности.
+  читается, абстракция тут преждевременна.
+- **Кодеген всех block states до того, как понадобятся** — расширяем по мере.
+- **External dependencies** — обходимся stdlib.
+- **gRPC/REST/Prometheus для мониторинга** — сервер один, логов достаточно
+  (метрики придут из load-test'а, если понадобятся).
+- **Античит** — не на этом этапе; mini-game арены контролируемые.
 
 ---
 
-## TL;DR порядок действий
+## Сделано (история roadmap'а)
 
-1. ✅ Load-test harness + pprof.
-2. ✅ Per-connection send queue.
-3. ✅ Player race fix.
-4. ✅ Instance abstraction.
-5. ✅ Tick loop per Instance.
+Исходный план целился сначала в «один большой мир», потом развернулся в
+mini-game платформу. Все 14 пунктов закрыты:
+
+1. ✅ Load-test harness + pprof (`cmd/loadtest`).
+2. ✅ Per-connection send queue (`writerLoop`, `net.Buffers`).
+3. ✅ Player race fix (`sync.RWMutex` в `player.Player`).
+4. ✅ Instance abstraction (`server/instance.go`).
+5. ✅ Tick loop per Instance (20 Hz).
 5.5. ✅ Интерактивные пакеты (Swing/Interact/UseItemOn/PlayerAction).
-6. ✅ Event hooks.
-7. ✅ Cross-instance teleport.
-8. ✅ World templates + Clone.
-9. ✅ `game/` package (Definition, Logic, Registry).
+6. ✅ Event hooks (`OnBlockBreak/Place`, `OnChat`, `OnPlayerAttack`, join/leave).
+7. ✅ Cross-instance teleport (`Server.MovePlayer`).
+8. ✅ World templates + Clone (`world.Template`).
+9. ✅ `game/` package (Definition, Logic, Registry, Ctx, PlayerHandle).
 10. ✅ Matchmaker (`/play <game>` + auto-start at MinPlayers).
-11. ✅ KeepAlive timeout (atomic config, kick после `KeepAliveTimeout`).
+11. ✅ KeepAlive timeout enforcement.
 12. ✅ `slog` (LOG_LEVEL/LOG_FORMAT через env).
-13. ✅ Референс-игра (FFA arena, `games/ffa`, OnPlayerAttack hook).
-14. ✅ Парсинг карт (`.schem` v2/v3 → world.Template, property-aware).
+13. ✅ Референс-игра (`games/ffa`, OnPlayerAttack hook).
+14. ✅ Парсинг карт (`.schem` v2/v3 → `world.Template`, property-aware).
+
+**Парсинг карт** (бывшая «следующая большая задача») закрыт: NBT Unmarshal с
+gzip, Sponge schematic parser, block-name registry, spawn-points из metadata,
+CLI-инструмент. Запись `.schem`, block entities и Litematica multi-region —
+сознательно не делаем (для арен не нужно).
