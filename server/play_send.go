@@ -171,20 +171,98 @@ func (c *ClientConnection) sendPlayDisconnect(reason string) error {
 	return c.safeWrite(CbPlayDisconnect, protocol.WriteString(string(payload)))
 }
 
-// sendCurrentWorldState replays every non-Air block in the world to this
-// client as Block Update packets. Used at login until we have a real chunk
-// streamer that bakes blocks into chunk-data palettes.
-func (c *ClientConnection) sendCurrentWorldState() error {
-	var firstErr error
+// sendWorldChunks bakes the instance's world into real chunk-data packets:
+// every non-air block is bucketed into its (chunkX, chunkZ) column and
+// 16-tall section, packed into paletted sections by chunk.BuildChunkData, and
+// streamed. The rectangle sent spans the world's occupied columns (plus a
+// one-chunk pad) unioned with the spawn ring, so the client never sees void
+// at the origin. Columns with no blocks go out as empty chunks.
+//
+// This replaces the old "empty chunks + a Block Update per block" path, which
+// couldn't render large maps (millions of packets, and only a tiny ring of
+// chunks was ever loaded).
+func (c *ClientConnection) sendWorldChunks() error {
+	type colKey struct{ cx, cz int32 }
+	cols := make(map[colKey][][]int32)
+
+	haveBounds := false
+	var minCx, maxCx, minCz, maxCz int32
+
 	c.instance.World.Range(func(p world.Position, b world.Block) {
-		if firstErr != nil {
+		if b.StateID == 0 { // air — sections default to air
 			return
 		}
-		if err := c.sendBlockUpdate(p, b); err != nil {
-			firstErr = err
+		sec := floorDiv(p.Y-chunk.MinY, 16)
+		if sec < 0 || sec >= chunk.SectionCount {
+			return // outside the dimension's vertical range
 		}
+		cx := int32(floorDiv(p.X, 16))
+		cz := int32(floorDiv(p.Z, 16))
+		k := colKey{cx, cz}
+		col, ok := cols[k]
+		if !ok {
+			col = make([][]int32, chunk.SectionCount)
+			cols[k] = col
+			if !haveBounds {
+				minCx, maxCx, minCz, maxCz, haveBounds = cx, cx, cz, cz, true
+			}
+			minCx, maxCx = minI32(minCx, cx), maxI32(maxCx, cx)
+			minCz, maxCz = minI32(minCz, cz), maxI32(maxCz, cz)
+		}
+		if col[sec] == nil {
+			col[sec] = make([]int32, 4096)
+		}
+		lx := p.X - int(cx)*16
+		lz := p.Z - int(cz)*16
+		ly := (p.Y - chunk.MinY) - sec*16
+		col[sec][ly*256+lz*16+lx] = b.StateID
 	})
-	return firstErr
+
+	// Union the build's bounding box (padded) with the spawn ring.
+	if !haveBounds {
+		minCx, maxCx, minCz, maxCz = -HubChunkRadius, HubChunkRadius-1, -HubChunkRadius, HubChunkRadius-1
+	} else {
+		minCx, maxCx = minI32(minCx-1, -HubChunkRadius), maxI32(maxCx+1, HubChunkRadius-1)
+		minCz, maxCz = minI32(minCz-1, -HubChunkRadius), maxI32(maxCz+1, HubChunkRadius-1)
+	}
+
+	empty := chunk.BuildEmptyChunkData()
+	for cx := minCx; cx <= maxCx; cx++ {
+		for cz := minCz; cz <= maxCz; cz++ {
+			data := empty
+			if col := cols[colKey{cx, cz}]; col != nil {
+				data = chunk.BuildChunkData(col)
+			}
+			if err := c.sendChunkColumn(cx, cz, data); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// floorDiv divides a by b rounding toward negative infinity (Go's / truncates
+// toward zero), so negative world coordinates map to the correct chunk.
+func floorDiv(a, b int) int {
+	q := a / b
+	if (a%b != 0) && ((a < 0) != (b < 0)) {
+		q--
+	}
+	return q
+}
+
+func minI32(a, b int32) int32 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxI32(a, b int32) int32 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // HubChunkRadius controls how many empty chunks are streamed around the
@@ -194,26 +272,11 @@ func (c *ClientConnection) sendCurrentWorldState() error {
 // in the client's view).
 const HubChunkRadius int32 = 2
 
-// sendInitialChunks streams a 2R × 2R square of empty chunks centred on
-// world (0, 0). Used at login and after cross-instance teleport so the
-// client has loaded terrain to render before sendCurrentWorldState
-// replays the actual blocks via Block Update packets.
-func (c *ClientConnection) sendInitialChunks() error {
-	for cx := -HubChunkRadius; cx < HubChunkRadius; cx++ {
-		for cz := -HubChunkRadius; cz < HubChunkRadius; cz++ {
-			if err := c.sendChunkData(cx, cz); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// sendChunkData writes the Chunk Data and Update Light packet (0x24) for an
-// empty chunk. All sections are air, all light masks are empty (the client
-// fills in default full-bright light for missing data, which is acceptable
-// for an Overworld empty chunk).
-func (c *ClientConnection) sendChunkData(chunkX, chunkZ int32) error {
+// sendChunkColumn writes the Chunk Data and Update Light packet (0x24) for
+// one column, using the caller-supplied paletted-section blob (see
+// chunk.BuildChunkData / BuildEmptyChunkData). Light masks are sent empty —
+// the client falls back to full-bright, acceptable for an Overworld chunk.
+func (c *ClientConnection) sendChunkColumn(chunkX, chunkZ int32, data []byte) error {
 	var buf bytes.Buffer
 
 	buf.Write(protocol.WriteInt(chunkX))
@@ -223,7 +286,6 @@ func (c *ClientConnection) sendChunkData(chunkX, chunkZ int32) error {
 	buf.Write(chunk.BuildEmptyHeightmaps())
 
 	// Chunk data (paletted sections) with VarInt size prefix.
-	data := chunk.BuildEmptyChunkData()
 	protocol.WriteVarInt32ToBuffer(&buf, int32(len(data)))
 	buf.Write(data)
 

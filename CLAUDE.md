@@ -94,7 +94,7 @@ CFB8 in `encryption/cfb8.go` is a hand-optimized ring-buffer variant. The wrappi
 
 After LoginSuccess + state transition to play, `sendPlayPackets` (in `server.go`) fires in order:
 1. `sendLoginPlay` (Cb 0x28) — includes the registry codec (NBT). Codec is built once via `RegistryCodec()` in `registry.go`, which embeds `registry-codec.json` and converts to NBT through `nbt.FromJSONBytes` with `registryHints`. The hints map encodes per-key NBT type overrides for the 1.20.1 codec; **if the client kicks complaining about a type mismatch, add the offending key to the relevant hint set.**
-2. `sendChunkData` (Cb 0x24) — chunk x/z, heightmaps NBT (`chunk.BuildEmptyHeightmaps`), 24 paletted-air sections (`chunk.BuildEmptyChunkData`), 0 block entities, empty light masks.
+2. `sendWorldChunks` (Cb 0x24 per column) — bakes the instance world into real chunk data. Every non-air block is bucketed by (chunkX, chunkZ) column + 16-tall section and packed into paletted sections by `chunk.BuildChunkData` (single-valued / indirect 4–8-bit palette / direct 15-bit, 1.16+ non-spanning long packing). Streams the occupied-column bounding box (plus a one-chunk pad) unioned with the spawn ring; empty columns use `chunk.BuildEmptyChunkData`. Heightmaps are still empty (`chunk.BuildEmptyHeightmaps`), block entities 0, light masks empty. Per-block Block Updates are no longer used for initial world state.
 3. `sendSyncPlayerPosition` (Cb 0x3C) — X/Y/Z + yaw/pitch + flags + teleport ID. Client echoes teleport ID via `SbPlayTeleportConfirm`.
 
 ## Gotchas
@@ -103,7 +103,8 @@ After LoginSuccess + state transition to play, `sendPlayPackets` (in `server.go`
 - **`ban.IsBanned` is hardcoded** (returns a stub for `"BannedPerson"`); `banlist.json` at the repo root is not read.
 - **`OfflineUUID`** (`protocol/uuid.go`) uses vanilla `MD5("OfflinePlayer:" + name)` with v3 UUID bits — match this exactly if reproducing behavior.
 - **Registry codec type hints (`server/registry.go`) are best-effort.** If the client disconnects right after LoginSuccess complaining about a wrong type, add the key to ByteKeys/FloatKeys/DoubleKeys/LongKeys.
-- **Light data is sent as four empty BitSets** in `sendChunkData`. If the world renders black, fill sky-light arrays for all 26 sections (24 + 2 padding) explicitly.
+- **Light data is sent as four empty BitSets** in `sendChunkColumn`. The client falls back to full-bright; if a baked world renders black, fill sky-light arrays for all 26 sections (24 + 2 padding) explicitly.
+- **Chunk baking holds the whole occupied region in memory per join.** `sendWorldChunks` ranges the (sparse) instance world once and allocates a `[4096]int32` per occupied section. Fine for current map sizes; a streaming/per-chunk-on-demand approach is the future step if maps get much larger or view distance grows.
 
 ## Conventions
 
