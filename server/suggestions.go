@@ -87,24 +87,33 @@ func (s *Server) Suggestions(c *ClientConnection, text string) (start, length in
 	case cmd == "instance" || cmd == "i":
 		switch argIdx {
 		case 1:
-			candidates = []string{"create", "join", "delete", "list"}
+			candidates = []string{"create", "join", "delete", "list", "set"}
 		case 2:
-			// Only join/delete take an instance ID. create takes a new id
-			// (no suggestion possible), list takes no args.
+			// join/delete take an instance ID; set takes a property name.
+			// create takes a new id (no suggestion), list takes no args.
 			if len(parts) >= 2 {
 				switch strings.ToLower(parts[1]) {
 				case "join", "go", "delete", "remove", "rm":
 					candidates = s.InstanceIDs()
+				case "set":
+					candidates = []string{"pvp", "instantrespawn"}
 				}
 			}
 		case 3:
-			// /instance create <id> [template] — third arg is template
-			// name for the create subcommand.
 			if len(parts) >= 2 {
 				switch strings.ToLower(parts[1]) {
 				case "create", "new":
+					// /instance create <id> [template] — template name.
 					candidates = s.TemplateNames()
+				case "set":
+					// /instance set <prop> <on|off> — the value.
+					candidates = []string{"on", "off"}
 				}
+			}
+		case 4:
+			// /instance set <prop> <on|off> [id] — target instance.
+			if len(parts) >= 2 && strings.ToLower(parts[1]) == "set" {
+				candidates = s.InstanceIDs()
 			}
 		}
 	}
