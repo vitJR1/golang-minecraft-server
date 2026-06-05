@@ -40,6 +40,7 @@ const (
 // Serverbound, state = play.
 const (
 	SbPlayTeleportConfirm   = 0x00
+	SbPlayClientCommand     = 0x07 // "client_command": 0 = perform respawn, 1 = request stats
 	SbPlayChatCommand       = 0x04
 	SbPlayChatMessage       = 0x05
 	SbPlayClientInfo        = 0x08 // "settings": locale, view distance, etc.
@@ -66,9 +67,16 @@ const (
 
 // Clientbound, state = play.
 const (
+	CbPlaySpawnEntity  = 0x01 // Spawn Entity — used for all entity types incl. mobs in 1.20.1
 	CbPlaySpawnPlayer        = 0x03
 	CbPlayEntityAnimation    = 0x04
 	CbPlayAckBlockChange     = 0x06
+	CbPlayHurtAnimation      = 0x21 // "hurt_animation": entity id + yaw → red flash + recoil tilt
+	CbPlayCombatDeath        = 0x38 // "death_combat_event": triggers the death screen
+	CbPlayEntityVelocity     = 0x54 // "entity_velocity": knockback (short units, 1/8000 block/tick)
+	CbPlaySetHealth          = 0x57 // "update_health": float HP + VarInt food + float saturation
+	CbPlaySoundEffect        = 0x62 // "sound_effect": named or registry-id sound at a position
+	CbPlayUpdateAttributes   = 0x6A // "entity_update_attributes": e.g. generic.attack_speed (cooldown bar)
 	CbPlayBlockUpdate        = 0x0A
 	CbPlayCommandSuggestResp = 0x0F // "tab_complete" response
 	CbPlayDeclareCommands    = 0x10 // brigadier tree — what /<TAB> shows
@@ -93,6 +101,11 @@ const (
 	CbPlayTeleportEntity   = 0x68
 	CbPlaySetExperience    = 0x56 // float bar + VarInt level + VarInt total xp
 
+	// Mob effects. IDs verified against wiki.vg/Protocol for 1.20.1.
+	// NOTE: 0x71 and 0x72 sit above the inventory cluster — don't confuse
+	// with the inventory packets at 0x12/0x14/0x30.
+	CbPlayRemoveEffect = 0x6D // Remove Mob Effect — entity ID + effect ID 
+	CbPlayAddEffect    = 0x6C // Add Mob Effect    — entity ID + effect ID + amplifier + duration + flags
 	// Inventory / container packets. IDs from minecraft-data 1.20
 	// protocol.json (window_items / set_slot / open_window).
 	CbPlaySetContainerContent = 0x12 // window_items

@@ -58,6 +58,12 @@ var blockStates = map[string]blockStateInfo{
 		{Name: "type", Values: []string{"top", "bottom", "double"}},
 		{Name: "waterlogged", Values: []string{"true", "false"}},
 	}},
+	"minecraft:red_glazed_terracotta": {MinStateID: 12579, DefaultStateID: 12579, Properties: []stateProperty{
+    {Name: "facing", Values: []string{"north", "south", "west", "east"}},
+	}},
+	"minecraft:black_glazed_terracotta": {MinStateID: 12583, DefaultStateID: 12583, Properties: []stateProperty{
+		{Name: "facing", Values: []string{"north", "south", "west", "east"}},
+	}},
 }
 
 // ResolveStateID returns the wire-level state ID for a block name plus the

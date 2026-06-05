@@ -3,6 +3,7 @@ package protocol
 import (
 	"bytes"
 	"testing"
+	"fmt"
 )
 
 func TestWriteUUIDHyphenated(t *testing.T) {
@@ -90,5 +91,37 @@ func TestOfflineUUIDRoundTrip(t *testing.T) {
 	// OfflineUUID returns hyphenated form — WriteUUID should accept it directly.
 	if _, err := WriteUUID(OfflineUUID("Notch")); err != nil {
 		t.Errorf("WriteUUID rejects OfflineUUID output: %v", err)
+	}
+}
+
+func TestRandomUUIDIsVersion4(t *testing.T) {
+	uuid := RandomUUID()
+
+	// version nibble (bits 4-7 of byte 6) must be 4
+	if uuid[6]>>4 != 4 {
+		t.Errorf("version nibble = %x, want 4", uuid[6]>>4)
+	}
+
+	// variant bits (top 2 bits of byte 8) must be 0b10
+	if uuid[8]>>6 != 2 {
+		t.Errorf("variant bits = %02b, want 10", uuid[8]>>6)
+	}
+}
+
+func TestRandomUUIDIsUnique(t *testing.T) {
+	a := RandomUUID()
+	b := RandomUUID()
+	if a == b {
+		t.Error("two sequential RandomUUID calls returned identical values")
+	}
+}
+
+func TestRandomUUIDAcceptedByWriteUUID(t *testing.T) {
+	// Format to hyphenated string and verify WriteUUID accepts it.
+	uuid := RandomUUID()
+	s := fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		uuid[0:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:16])
+	if _, err := WriteUUID(s); err != nil {
+		t.Errorf("WriteUUID rejects RandomUUID output: %v", err)
 	}
 }

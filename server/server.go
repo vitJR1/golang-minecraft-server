@@ -78,6 +78,9 @@ func (s *Server) nextInstanceSerial() uint64 {
 	return s.instanceSerialNext.Add(1)
 }
 
+func (s *Server) AllocEntityID() int32 {
+	return s.nextEntityID.Add(1)
+}
 // New constructs a Server with an empty Hub instance and an op set seeded
 // from cfg.InitialOps.
 func New() *Server {
@@ -88,6 +91,9 @@ func New() *Server {
 		templates: make(map[string]*world.Template),
 	}
 	s.Hub = NewInstance("hub", s, world.NewMemoryWorld())
+	// The hub is a safe lobby — no PvP. Game instances keep the default
+	// (combat enabled); they can re-tune or disable via SetPvP.
+	s.Hub.SetPvP(false)
 	s.instances[s.Hub.ID] = s.Hub
 	s.Matchmaker = NewMatchmaker(s)
 	return s
@@ -273,7 +279,7 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 	}
 
 	// 4. Switch the authoritative pointer before we stream the new world,
-	//    so sendCurrentWorldState reads the right blocks.
+	//    so sendWorldChunks reads the right blocks.
 	c.instance = target
 
 	// 5. Reset the player's position to spawn.
@@ -293,15 +299,15 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 	if err := c.sendStartWaitingForChunks(); err != nil {
 		return fmt.Errorf("start waiting for chunks: %w", err)
 	}
-	if err := c.sendInitialChunks(); err != nil {
-		return fmt.Errorf("chunk data: %w", err)
-	}
-	if err := c.sendCurrentWorldState(); err != nil {
-		return fmt.Errorf("world state: %w", err)
+	if err := c.sendWorldChunks(); err != nil {
+		return fmt.Errorf("world chunks: %w", err)
 	}
 	if err := c.sendSyncPlayerPosition(x, y, z, 1); err != nil {
 		return fmt.Errorf("sync pos: %w", err)
 	}
+	// Respawn reset the client's attributes — re-send the cooldown-bar
+	// attribute for the destination instance's combat model.
+	_ = c.sendCombatAttributes()
 
 	// 7. Register in target + broadcast tab list and Spawn for everyone.
 	target.JoinAndAnnounce(c)
@@ -442,6 +448,12 @@ type ClientConnection struct {
 	// power-on default. Read by SbPlayUseItem to pick which menu item
 	// the right-click should fire (blaze rod vs ender pearl, etc.).
 	heldSlot atomic.Int32
+
+	// sprinting tracks whether the client is currently sprinting, fed by the
+	// Player Command packet (start/stop sprinting actions). The combat code
+	// reads it to apply the extra sprint knockback ("w-tap") from 1.9. Atomic
+	// because the writer (readLoop) and readers (attack handling) can race.
+	sprinting atomic.Bool
 
 	// writerDone is closed by writerLoop on exit. cleanup waits on it
 	// (with a timeout) so any in-flight frames — particularly the Pong that
@@ -615,9 +627,8 @@ func (c *ClientConnection) sendPlayPackets() error {
 	//   2. Set Default Spawn Position    ← compass + respawn target
 	//   3. Set Center Chunk              ← "you live at (0,0)"
 	//   4. Game Event 13                 ← "begin waiting for chunks"
-	//   5. Chunk Data (16 empty chunks)
-	//   6. World State (Block Updates for the spawn schematic)
-	//   7. Synchronize Player Position   ← dismisses the overlay
+	//   5. World Chunks (baked chunk data covering the world)
+	//   6. Synchronize Player Position   ← dismisses the overlay
 	packets := []struct {
 		name string
 		f    func() error
@@ -630,8 +641,7 @@ func (c *ClientConnection) sendPlayPackets() error {
 			return c.sendSetCenterChunk(0, 0)
 		}},
 		{"Start Waiting For Chunks", c.sendStartWaitingForChunks},
-		{"Chunk Data", c.sendInitialChunks},
-		{"World State", c.sendCurrentWorldState},
+		{"World Chunks", c.sendWorldChunks},
 		{"Sync Player Position", func() error {
 			return c.sendSyncPlayerPosition(spawn.X, spawn.Y, spawn.Z, 1)
 		}},
@@ -640,6 +650,9 @@ func (c *ClientConnection) sendPlayPackets() error {
 		// teleport) does not reset the client's command tree, so we don't
 		// re-send it from MovePlayer.
 		{"Declare Commands", c.sendDeclareCommands},
+		// Attack-speed attribute drives the client's cooldown bar for the
+		// instance's PvP model (re-sent on move/respawn since Respawn resets it).
+		{"Combat Attributes", c.sendCombatAttributes},
 	}
 	for _, pkt := range packets {
 		if c.isClosed() {

@@ -60,6 +60,16 @@ var (
 	CoalOre    = Block{StateID: 127, Name: "minecraft:coal_ore"}
 	DiamondOre = Block{StateID: 4274, Name: "minecraft:diamond_ore"}
 
+	// Mineral blocks + island materials — handy for BedWars-style maps
+	// (generator markers, indestructible bases). default-state IDs from the
+	// same minecraft-data 1.20 dump as the rest of this file.
+	GoldBlock    = Block{StateID: 2091, Name: "minecraft:gold_block"}
+	IronBlock    = Block{StateID: 2092, Name: "minecraft:iron_block"}
+	Obsidian     = Block{StateID: 2354, Name: "minecraft:obsidian"}
+	DiamondBlock = Block{StateID: 4276, Name: "minecraft:diamond_block"}
+	EndStone     = Block{StateID: 7415, Name: "minecraft:end_stone"}
+	EmeraldBlock = Block{StateID: 7665, Name: "minecraft:emerald_block"}
+
 	OakLog    = Block{StateID: 131, Name: "minecraft:oak_log"}
 	SpruceLog = Block{StateID: 134, Name: "minecraft:spruce_log"}
 	BirchLog  = Block{StateID: 137, Name: "minecraft:birch_log"}
@@ -87,6 +97,34 @@ var (
 	GreenWool     = Block{StateID: 2060, Name: "minecraft:green_wool"}
 	RedWool       = Block{StateID: 2061, Name: "minecraft:red_wool"}
 	BlackWool     = Block{StateID: 2062, Name: "minecraft:black_wool"}
+
+	// Beds — the BedWars centrepiece. Like stairs/slabs above, a bed has
+	// property variants (facing / part=head|foot / occupied), so these are
+	// the *default* state only (facing=north, part=foot, occupied=false).
+	// The block KIND is correct and breakable; rendering a full two-block
+	// bed with matching facing needs per-block property support we don't
+	// have yet, so a game places two adjacent bed blocks as "the bed".
+	WhiteBed     = Block{StateID: 1691, Name: "minecraft:white_bed"}
+	OrangeBed    = Block{StateID: 1707, Name: "minecraft:orange_bed"}
+	MagentaBed   = Block{StateID: 1723, Name: "minecraft:magenta_bed"}
+	LightBlueBed = Block{StateID: 1739, Name: "minecraft:light_blue_bed"}
+	YellowBed    = Block{StateID: 1755, Name: "minecraft:yellow_bed"}
+	LimeBed      = Block{StateID: 1771, Name: "minecraft:lime_bed"}
+	PinkBed      = Block{StateID: 1787, Name: "minecraft:pink_bed"}
+	GrayBed      = Block{StateID: 1803, Name: "minecraft:gray_bed"}
+	LightGrayBed = Block{StateID: 1819, Name: "minecraft:light_gray_bed"}
+	CyanBed      = Block{StateID: 1835, Name: "minecraft:cyan_bed"}
+	PurpleBed    = Block{StateID: 1851, Name: "minecraft:purple_bed"}
+	BlueBed      = Block{StateID: 1867, Name: "minecraft:blue_bed"}
+	BrownBed     = Block{StateID: 1883, Name: "minecraft:brown_bed"}
+	GreenBed     = Block{StateID: 1899, Name: "minecraft:green_bed"}
+	RedBed       = Block{StateID: 1915, Name: "minecraft:red_bed"}
+	BlackBed     = Block{StateID: 1931, Name: "minecraft:black_bed"}
+	BlackConcrete         = Block{StateID: 12602, Name: "minecraft:black_concrete"}
+	Obsidian              = Block{StateID: 2354, Name: "minecraft:obsidian"}
+	CryingObsidian        = Block{StateID: 19308, Name: "minecraft:crying_obsidian"}
+	RedGlazedTerracotta   = Block{StateID: 12579, Name: "minecraft:red_glazed_terracotta"}
+	BlackGlazedTerracotta = Block{StateID: 12583, Name: "minecraft:black_glazed_terracotta"}
 )
 
 // byName indexes the hand-rolled set above. Populated by init() so adding
@@ -101,6 +139,7 @@ func init() {
 		OakPlanks, SprucePlanks, BirchPlanks, JunglePlanks, AcaciaPlanks, DarkOakPlanks,
 		Bedrock,
 		Sand, Gravel, GoldOre, IronOre, CoalOre, DiamondOre,
+		GoldBlock, IronBlock, Obsidian, DiamondBlock, EndStone, EmeraldBlock,
 		OakLog, SpruceLog, BirchLog,
 		Glass,
 		OakStairs, OakSlab, Beacon, BrownStainedGlass,
@@ -108,6 +147,13 @@ func init() {
 		YellowWool, LimeWool, PinkWool, GrayWool,
 		LightGrayWool, CyanWool, PurpleWool, BlueWool,
 		BrownWool, GreenWool, RedWool, BlackWool,
+		WhiteBed, OrangeBed, MagentaBed, LightBlueBed,
+		YellowBed, LimeBed, PinkBed, GrayBed,
+		LightGrayBed, CyanBed, PurpleBed, BlueBed,
+		BrownBed, GreenBed, RedBed, BlackBed,
+		BlackConcrete,
+		Obsidian, CryingObsidian,
+		RedGlazedTerracotta, BlackGlazedTerracotta,
 	}
 	byName = make(map[string]Block, len(all))
 	for _, b := range all {

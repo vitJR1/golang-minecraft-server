@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"crypto/rand"
 	"crypto/md5"
 	"encoding/hex"
 	"errors"
@@ -53,4 +54,13 @@ func OfflineUUID(name string) string {
 		b[8], b[9],
 		b[10], b[11], b[12], b[13], b[14], b[15],
 	)
+}
+
+// RandomUUID generates a random UUID (version 4).
+func RandomUUID() [16]byte {
+	var uuid [16]byte
+	_, _ = rand.Read(uuid[:])
+	uuid[6] = (uuid[6] & 0x0f) | 0x40 // version 4
+	uuid[8] = (uuid[8] & 0x3f) | 0x80 // variant
+	return uuid
 }
