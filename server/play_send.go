@@ -272,10 +272,25 @@ func maxI32(a, b int32) int32 {
 // in the client's view).
 const HubChunkRadius int32 = 2
 
+// lightSections is the number of 16-tall sections the light data covers: the
+// 24 world sections plus one padding section below and above (the client
+// always expects sections [-1 .. SectionCount] for light).
+const lightSections = chunk.SectionCount + 2
+
+// skyLightMaskLong is a BitSet long with the low lightSections bits set — i.e.
+// "every section carries a transmitted sky-light array". 26 bits fit in one
+// long, so the masks are always a single-long BitSet.
+const skyLightMaskLong int64 = (1 << lightSections) - 1
+
+// fullSkyLight is one section's sky-light array: 4096 blocks × 4 bits = 2048
+// bytes, every nibble 0xF (level 15). Shared read-only across all columns.
+var fullSkyLight = bytes.Repeat([]byte{0xFF}, 2048)
+
 // sendChunkColumn writes the Chunk Data and Update Light packet (0x24) for
 // one column, using the caller-supplied paletted-section blob (see
-// chunk.BuildChunkData / BuildEmptyChunkData). Light masks are sent empty —
-// the client falls back to full-bright, acceptable for an Overworld chunk.
+// chunk.BuildChunkData / BuildEmptyChunkData). It sends a full sky-light array
+// (level 15) for every section so the world renders in permanent daylight —
+// no dark chunks regardless of which blocks occlude.
 func (c *ClientConnection) sendChunkColumn(chunkX, chunkZ int32, data []byte) error {
 	var buf bytes.Buffer
 
@@ -292,15 +307,38 @@ func (c *ClientConnection) sendChunkColumn(chunkX, chunkZ int32, data []byte) er
 	// Block entities count
 	protocol.WriteVarInt32ToBuffer(&buf, 0)
 
-	// Light masks — empty (no sections have transmitted light arrays).
-	// BitSet on the wire: VarInt(long count) followed by long(s). We send a
-	// zero-length BitSet for each mask, which the client treats as all-zero.
-	for i := 0; i < 4; i++ {
-		protocol.WriteVarInt32ToBuffer(&buf, 0)
-	}
-	// Sky light array count + Block light array count
-	protocol.WriteVarInt32ToBuffer(&buf, 0)
-	protocol.WriteVarInt32ToBuffer(&buf, 0)
+	writeFullDaylight(&buf)
 
 	return c.safeWrite(CbPlayChunkData, buf.Bytes())
+}
+
+// writeFullDaylight appends the light section of the Chunk Data packet: a full
+// level-15 sky-light array for every section, zero block light. Each mask is a
+// BitSet (VarInt long-count + longs).
+//
+//	Sky Light Mask        = all sections (we send a sky array for each)
+//	Block Light Mask      = empty (no block-light arrays)
+//	Empty Sky Light Mask  = empty (none are all-zero — they're all full)
+//	Empty Block Light Mask= all sections (block light is explicitly zero)
+func writeFullDaylight(buf *bytes.Buffer) {
+	// Sky Light Mask: one long with all section bits set.
+	protocol.WriteVarInt32ToBuffer(buf, 1)
+	buf.Write(protocol.WriteLong(skyLightMaskLong))
+	// Block Light Mask: empty.
+	protocol.WriteVarInt32ToBuffer(buf, 0)
+	// Empty Sky Light Mask: empty.
+	protocol.WriteVarInt32ToBuffer(buf, 0)
+	// Empty Block Light Mask: one long with all section bits set.
+	protocol.WriteVarInt32ToBuffer(buf, 1)
+	buf.Write(protocol.WriteLong(skyLightMaskLong))
+
+	// Sky Light arrays: one per section, each a length-prefixed 2048-byte
+	// (all-0xF) nibble array.
+	protocol.WriteVarInt32ToBuffer(buf, lightSections)
+	for range lightSections {
+		protocol.WriteVarInt32ToBuffer(buf, int32(len(fullSkyLight)))
+		buf.Write(fullSkyLight)
+	}
+	// Block Light arrays: none.
+	protocol.WriteVarInt32ToBuffer(buf, 0)
 }

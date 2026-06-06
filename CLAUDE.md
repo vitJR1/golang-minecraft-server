@@ -119,7 +119,7 @@ After LoginSuccess + state transition to play, `sendPlayPackets` (in `server.go`
 - **`ban.IsBanned` is hardcoded** (returns a stub for `"BannedPerson"`); `banlist.json` at the repo root is not read.
 - **`OfflineUUID`** (`protocol/uuid.go`) uses vanilla `MD5("OfflinePlayer:" + name)` with v3 UUID bits — match this exactly if reproducing behavior.
 - **Registry codec type hints (`server/registry.go`) are best-effort.** If the client disconnects right after LoginSuccess complaining about a wrong type, add the key to ByteKeys/FloatKeys/DoubleKeys/LongKeys.
-- **Light data is sent as four empty BitSets** in `sendChunkColumn`. The client falls back to full-bright; if a baked world renders black, fill sky-light arrays for all 26 sections (24 + 2 padding) explicitly.
+- **Light data is a full level-15 sky-light for every section** (`writeFullDaylight` in `play_send.go`): all 26 light sections (24 + 2 padding) get a 2048-byte 0xFF sky array, block light zero. This forces permanent daylight with no dark chunks. The server never sends Update Time, so the client stays at its default day time and never cycles to night — that's what keeps the bright sky-light rendering as day. If you ever add a day/night cycle, sky light alone will darken at night.
 - **Chunk baking holds the whole occupied region in memory per join.** `sendWorldChunks` ranges the (sparse) instance world once and allocates a `[4096]int32` per occupied section. Fine for current map sizes; a streaming/per-chunk-on-demand approach is the future step if maps get much larger or view distance grows.
 
 ## Conventions
