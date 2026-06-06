@@ -8,8 +8,11 @@ import (
 	"io"
 	"log/slog"
 	"minecraft-server/cfg"
+	"minecraft-server/db"
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/redisc"
+	"minecraft-server/store"
 	"minecraft-server/world"
 	"net"
 	"sync"
@@ -60,7 +63,19 @@ type Server struct {
 	Matchmaker *Matchmaker
 	// ChatModerator, when non-nil, gets a chance to inspect every chat
 	// line before it broadcasts. See chat_moderation.go for the contract.
-	ChatModerator      ChatModerator
+	ChatModerator ChatModerator
+
+	// DB and Redis are the optional persistence/cache backends, wired up in
+	// main from the POSTGRES_* / REDIS_* env config. Either may be nil when
+	// the backend is disabled or unreachable at startup — callers must
+	// nil-check before use. Nothing in the core server depends on them yet.
+	DB    *db.DB
+	Redis *redisc.Client
+
+	// Store holds the typed repositories over DB.Pool (players, bans, mutes,
+	// per-mode matches/participation/ratings, stats). Nil when DB is nil.
+	Store *store.Store
+
 	nextEntityID       atomic.Int32
 	instanceSerialNext atomic.Uint64
 

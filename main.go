@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -8,9 +9,12 @@ import (
 	"minecraft-server/ban"
 	"minecraft-server/bots"
 	"minecraft-server/cfg"
+	"minecraft-server/db"
 	"minecraft-server/logger"
+	"minecraft-server/redisc"
 	"minecraft-server/schem"
 	"minecraft-server/server"
+	"minecraft-server/store"
 	"net"
 	"os"
 	"path/filepath"
@@ -44,6 +48,7 @@ func main() {
 	srv := server.New()
 	srv.ChatModerator = bots.NewNosleeperBot(srv)
 	server.LoadFavicon(server.DefaultFaviconPath)
+	connectStores(srv) // Postgres + Redis, gated by *_ENABLED env (default on)
 	// Auth plugin install gated by cfg.AuthEnabled (defaulted from
 	// ONLINE_MODE in loadEnv, overridable via AUTH_ENABLED env).
 	if cfg.AuthEnabled {
@@ -119,6 +124,56 @@ func loadTemplates(srv *server.Server) {
 	})
 	if err != nil {
 		slog.Warn("template scan failed", "root", templatesRoot, "err", err)
+	}
+}
+
+// connectStores opens the optional Postgres and Redis backends and stashes
+// the handles on the server. Each is gated by its *_ENABLED env var (default
+// on) and is best-effort: a connection failure is logged and the server boots
+// without it (the corresponding srv field stays nil). Nothing in the core
+// server requires them yet, so a down database shouldn't block startup.
+func connectStores(srv *server.Server) {
+	ctx := context.Background()
+
+	if envEnabled("POSTGRES_ENABLED", true) {
+		dbCfg := db.ConfigFromEnv()
+		pg, err := db.Connect(ctx, dbCfg)
+		if err != nil {
+			slog.Warn("postgres connect failed; continuing without it", "err", err)
+		} else {
+			srv.DB = pg
+			// Bring the schema up to date, then expose the repositories.
+			if err := store.Migrate(dbCfg.DSN()); err != nil {
+				slog.Error("db migrations failed; repositories may be unusable", "err", err)
+			} else {
+				slog.Info("db migrations applied")
+			}
+			srv.Store = store.New(pg.Pool)
+			slog.Info("postgres connected")
+		}
+	}
+
+	if envEnabled("REDIS_ENABLED", true) {
+		rc, err := redisc.Connect(ctx, redisc.ConfigFromEnv())
+		if err != nil {
+			slog.Warn("redis connect failed; continuing without it", "err", err)
+		} else {
+			srv.Redis = rc
+			slog.Info("redis connected")
+		}
+	}
+}
+
+// envEnabled reads a boolean-ish env var, returning def when unset or
+// unrecognized. Mirrors the truthy/falsy words accepted elsewhere.
+func envEnabled(name string, def bool) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "true", "1", "yes", "on":
+		return true
+	case "false", "0", "no", "off":
+		return false
+	default:
+		return def
 	}
 }
 

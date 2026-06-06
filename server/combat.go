@@ -225,7 +225,7 @@ func (c *ClientConnection) respawn() error {
 	if err := c.sendRespawn(); err != nil {
 		return fmt.Errorf("respawn packet: %w", err)
 	}
-	// 2. Re-stream spawn triplet → chunks → blocks → position.
+	// 2. Re-stream spawn triplet → baked world chunks → position.
 	if err := c.sendSetDefaultSpawnPosition(int(sp.X), int(sp.Y), int(sp.Z), 0); err != nil {
 		return fmt.Errorf("respawn spawn pos: %w", err)
 	}
@@ -235,11 +235,8 @@ func (c *ClientConnection) respawn() error {
 	if err := c.sendStartWaitingForChunks(); err != nil {
 		return fmt.Errorf("respawn start waiting: %w", err)
 	}
-	if err := c.sendInitialChunks(); err != nil {
+	if err := c.sendWorldChunks(); err != nil {
 		return fmt.Errorf("respawn chunks: %w", err)
-	}
-	if err := c.sendCurrentWorldState(); err != nil {
-		return fmt.Errorf("respawn world state: %w", err)
 	}
 	if err := c.sendSyncPlayerPosition(sp.X, sp.Y, sp.Z, 1); err != nil {
 		return fmt.Errorf("respawn sync pos: %w", err)
