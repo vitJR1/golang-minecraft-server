@@ -226,6 +226,25 @@ func (c *ClientConnection) sendWorldChunks() error {
 		minCz, maxCz = minI32(minCz-1, -HubChunkRadius), maxI32(maxCz+1, HubChunkRadius-1)
 	}
 
+	// Group block entities (beds, chests, banners, …) by column so each
+	// chunk packet can list the ones it contains — without them the client's
+	// BlockEntityRenderer draws nothing and those blocks look missing.
+	beByCol := map[colKey][]blockEntityWire{}
+	if bep, ok := c.instance.World.(world.BlockEntityProvider); ok {
+		for pos, typeName := range bep.BlockEntities() {
+			id, ok := world.BlockEntityTypeID(typeName)
+			if !ok {
+				continue
+			}
+			k := colKey{int32(floorDiv(pos.X, 16)), int32(floorDiv(pos.Z, 16))}
+			beByCol[k] = append(beByCol[k], blockEntityWire{
+				packedXZ: byte((pos.X&15)<<4 | (pos.Z & 15)),
+				y:        int16(pos.Y),
+				typeID:   id,
+			})
+		}
+	}
+
 	empty := chunk.BuildEmptyChunkData()
 	for cx := minCx; cx <= maxCx; cx++ {
 		for cz := minCz; cz <= maxCz; cz++ {
@@ -233,12 +252,19 @@ func (c *ClientConnection) sendWorldChunks() error {
 			if col := cols[colKey{cx, cz}]; col != nil {
 				data = chunk.BuildChunkData(col)
 			}
-			if err := c.sendChunkColumn(cx, cz, data); err != nil {
+			if err := c.sendChunkColumn(cx, cz, data, beByCol[colKey{cx, cz}]); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+// blockEntityWire is a block entity ready to write into a Chunk Data packet.
+type blockEntityWire struct {
+	packedXZ byte  // ((x & 15) << 4) | (z & 15)
+	y        int16 // absolute world Y
+	typeID   int32 // block-entity registry id
 }
 
 // floorDiv divides a by b rounding toward negative infinity (Go's / truncates
@@ -291,7 +317,7 @@ var fullSkyLight = bytes.Repeat([]byte{0xFF}, 2048)
 // chunk.BuildChunkData / BuildEmptyChunkData). It sends a full sky-light array
 // (level 15) for every section so the world renders in permanent daylight —
 // no dark chunks regardless of which blocks occlude.
-func (c *ClientConnection) sendChunkColumn(chunkX, chunkZ int32, data []byte) error {
+func (c *ClientConnection) sendChunkColumn(chunkX, chunkZ int32, data []byte, bes []blockEntityWire) error {
 	var buf bytes.Buffer
 
 	buf.Write(protocol.WriteInt(chunkX))
@@ -304,8 +330,16 @@ func (c *ClientConnection) sendChunkColumn(chunkX, chunkZ int32, data []byte) er
 	protocol.WriteVarInt32ToBuffer(&buf, int32(len(data)))
 	buf.Write(data)
 
-	// Block entities count
-	protocol.WriteVarInt32ToBuffer(&buf, 0)
+	// Block entities: count + one entry each (packed XZ, Y, type, empty NBT).
+	// Empty NBT (TAG_End) is enough for the client to render the model; per-BE
+	// detail (sign text, banner patterns, chest contents) isn't transmitted.
+	protocol.WriteVarInt32ToBuffer(&buf, int32(len(bes)))
+	for _, be := range bes {
+		buf.WriteByte(be.packedXZ)
+		buf.Write(protocol.WriteShort(be.y))
+		protocol.WriteVarInt32ToBuffer(&buf, be.typeID)
+		buf.WriteByte(0x00) // empty NBT
+	}
 
 	writeFullDaylight(&buf)
 

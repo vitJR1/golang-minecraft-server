@@ -162,18 +162,45 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		}
 		// Acknowledge the client's prediction first so it doesn't roll back.
 		_ = c.sendAckBlockChange(int32(seq))
-		// Until we have inventory, every right-click places a Stone block on
-		// the face that was clicked.
+
 		placePos := offsetByFace(world.Position{X: bx, Y: by, Z: bz}, face)
+		held := c.heldItemName()
+
+		// Item frames are entities, not blocks — placing one spawns an item
+		// frame on the clicked face (the UseItemOnBlock face enum 0..5 maps
+		// directly onto the frame Facing enum).
+		if held == "minecraft:item_frame" || held == "minecraft:glow_item_frame" {
+			c.instance.AddWorldEntity(world.Entity{
+				Type: held,
+				X:    float64(placePos.X) + 0.5,
+				Y:    float64(placePos.Y) + 0.5,
+				Z:    float64(placePos.Z) + 0.5,
+				Frame: &world.FrameData{
+					Facing:  byte(face),
+					Glowing: held == "minecraft:glow_item_frame",
+				},
+			})
+			break
+		}
+
+		// Otherwise place a block: the held block when we know it (creative),
+		// falling back to Stone when the held item is unknown (no inventory in
+		// survival games — keeps the old build-with-stone behavior).
+		block := world.Stone
+		if held != "" {
+			if b, ok := world.BlockByName(held); ok {
+				block = b
+			}
+		}
 		if hook := c.instance.OnBlockPlace; hook != nil {
-			if !hook(c, placePos, world.Stone) {
+			if !hook(c, placePos, block) {
 				// Veto: replay the existing block back to the client to
 				// roll back its placement prediction.
 				_ = c.sendBlockUpdate(placePos, c.instance.World.GetBlock(placePos))
 				break
 			}
 		}
-		c.instance.SetBlock(placePos, world.Stone)
+		c.instance.SetBlock(placePos, block)
 
 	case SbPlayPlayerAction:
 		// action(VarInt) + Position(8) + face(Byte) + sequence(VarInt)
@@ -304,6 +331,13 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		}
 		slot := int16(raw) // signed cast preserves bits; vanilla sends 0..8
 		c.heldSlot.Store(int32(slot))
+
+	case SbPlaySetCreativeSlot:
+		// Short slot + Slot(item). Creative players send this whenever they
+		// pick/replace an inventory item; we record the item's name per slot so
+		// UseItemOnBlock can place what's actually held. Trailing item NBT (if
+		// any) is left unread — the per-packet buffer is discarded after.
+		c.onSetCreativeSlot(packet)
 
 	case SbPlayClickContainer:
 		// Window ID(UByte) + State ID(VarInt) + Slot(Short) + Button(Byte)

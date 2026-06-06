@@ -31,7 +31,10 @@ nbt/           NBT tag types + Marshal (typed Compound/List values) +
                FromJSONBytes (with explicit TypeHints for Byte/Float/
                Double/Long disambiguation).
 world/         Block (StateID + namespaced name) and World interface
-               with a sparse hash-map MemoryWorld implementation.
+               with a sparse hash-map MemoryWorld implementation. Also a
+               generic Entity layer (item frames today: type + pos +
+               FrameData{facing,rotation,item,glow}) carried on
+               Template/MemoryWorld, plus item-registry IDs (item_ids.go).
 player/        Player gameplay entity (EntityID, Name, UUID, position,
                gamemode). Pure data type; no wire knowledge.
 chunk/         Chunk-level data builders (empty chunk sections,
@@ -110,7 +113,7 @@ CFB8 in `encryption/cfb8.go` is a hand-optimized ring-buffer variant. The wrappi
 
 After LoginSuccess + state transition to play, `sendPlayPackets` (in `server.go`) fires in order:
 1. `sendLoginPlay` (Cb 0x28) — includes the registry codec (NBT). Codec is built once via `RegistryCodec()` in `registry.go`, which embeds `registry-codec.json` and converts to NBT through `nbt.FromJSONBytes` with `registryHints`. The hints map encodes per-key NBT type overrides for the 1.20.1 codec; **if the client kicks complaining about a type mismatch, add the offending key to the relevant hint set.**
-2. `sendWorldChunks` (Cb 0x24 per column) — bakes the instance world into real chunk data. Every non-air block is bucketed by (chunkX, chunkZ) column + 16-tall section and packed into paletted sections by `chunk.BuildChunkData` (single-valued / indirect 4–8-bit palette / direct 15-bit, 1.16+ non-spanning long packing). Streams the occupied-column bounding box (plus a one-chunk pad) unioned with the spawn ring; empty columns use `chunk.BuildEmptyChunkData`. Heightmaps are still empty (`chunk.BuildEmptyHeightmaps`), block entities 0, light masks empty. Per-block Block Updates are no longer used for initial world state.
+2. `sendWorldChunks` (Cb 0x24 per column) — bakes the instance world into real chunk data. Every non-air block is bucketed by (chunkX, chunkZ) column + 16-tall section and packed into paletted sections by `chunk.BuildChunkData` (single-valued / indirect 4–8-bit palette / direct 15-bit, 1.16+ non-spanning long packing). Streams the occupied-column bounding box (plus a one-chunk pad) unioned with the spawn ring; empty columns use `chunk.BuildEmptyChunkData`. Heightmaps are still empty (`chunk.BuildEmptyHeightmaps`). Block entities ARE sent (beds/chests/banners/skulls/… from the world's `BlockEntityProvider`, with empty NBT) so BlockEntityRenderer blocks aren't invisible. Light is full daylight (`writeFullDaylight`). Per-block Block Updates are no longer used for initial world state. Item-frame and other world entities go out separately via `sendWorldEntities` (Spawn Entity 0x01 + metadata).
 3. `sendSyncPlayerPosition` (Cb 0x3C) — X/Y/Z + yaw/pitch + flags + teleport ID. Client echoes teleport ID via `SbPlayTeleportConfirm`.
 
 ## Gotchas

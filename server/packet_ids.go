@@ -58,6 +58,7 @@ const (
 	SbPlayUseItemOnBlock    = 0x31
 	SbPlayUseItem           = 0x32 // right-click in air (e.g. holding blaze rod)
 	SbPlaySetHeldItem       = 0x28 // Int16 hotbar slot the player switched to
+	SbPlaySetCreativeSlot   = 0x2B // creative inventory edit: Short slot + Slot(item)
 
 	// Inventory / container interaction. IDs verified against
 	// minecraft-data protocol.json for 1.20 (which 1.20.1 inherits).
@@ -67,10 +68,12 @@ const (
 
 // Clientbound, state = play.
 const (
+	CbPlaySpawnEntity        = 0x01 // "spawn_entity": non-player entities (item frames, …)
 	CbPlaySpawnPlayer        = 0x03
 	CbPlayEntityAnimation    = 0x04
 	CbPlayAckBlockChange     = 0x06
 	CbPlayHurtAnimation      = 0x21 // "hurt_animation": entity id + yaw → red flash + recoil tilt
+	CbPlaySetEntityMetadata  = 0x52 // "entity_metadata": e.g. item-frame item + rotation
 	CbPlayCombatDeath        = 0x38 // "death_combat_event": triggers the death screen
 	CbPlayEntityVelocity     = 0x54 // "entity_velocity": knockback (short units, 1/8000 block/tick)
 	CbPlaySetHealth          = 0x57 // "update_health": float HP + VarInt food + float saturation

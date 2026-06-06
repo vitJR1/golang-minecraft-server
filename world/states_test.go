@@ -116,3 +116,58 @@ func TestResolveStateIDUnknownValueFallsBackToDefault(t *testing.T) {
 		t.Errorf("bad axis falls back: got %d, want 131", got)
 	}
 }
+
+// TestResolveStateIDMapVariants cross-checks ResolveStateID for stairs, slabs,
+// fences, walls, panes, logs, and clusters against state IDs independently
+// computed from minecraft-data 1.20 blocks.json. Guards the generated
+// blockStates tables (property order + value lists + ranges).
+func TestResolveStateIDMapVariants(t *testing.T) {
+	cases := []struct {
+		name  string
+		props map[string]string
+		want  int32
+	}{
+		{"minecraft:diorite_stairs", map[string]string{"facing": "west", "half": "bottom", "shape": "straight", "waterlogged": "false"}, 13912},
+		{"minecraft:blackstone_slab", map[string]string{"type": "top", "waterlogged": "false"}, 19725},
+		{"minecraft:quartz_slab", map[string]string{"type": "double", "waterlogged": "false"}, 11146},
+		{"minecraft:dark_oak_fence", map[string]string{"east": "true", "north": "false", "south": "false", "waterlogged": "false", "west": "true"}, 11599},
+		{"minecraft:mossy_stone_brick_wall", map[string]string{"east": "low", "north": "low", "south": "none", "up": "true", "waterlogged": "false", "west": "low"}, 15139},
+		{"minecraft:light_blue_stained_glass_pane", map[string]string{"east": "true", "north": "true", "south": "true", "waterlogged": "false", "west": "false"}, 9331},
+		{"minecraft:spruce_log", map[string]string{"axis": "z"}, 135},
+		{"minecraft:amethyst_cluster", map[string]string{"facing": "up", "waterlogged": "false"}, 20901},
+	}
+	for _, tc := range cases {
+		if got := ResolveStateID(tc.name, tc.props); got != tc.want {
+			t.Errorf("ResolveStateID(%s, %v) = %d, want %d", tc.name, tc.props, got, tc.want)
+		}
+	}
+}
+
+func TestBlockEntityTypeIDs(t *testing.T) {
+	cases := map[string]int32{
+		"minecraft:bed": 24, "minecraft:chest": 1, "minecraft:ender_chest": 3,
+		"minecraft:banner": 19, "minecraft:beacon": 14, "minecraft:campfire": 32,
+		"minecraft:skull": 15,
+	}
+	for name, want := range cases {
+		if got, ok := BlockEntityTypeID(name); !ok || got != want {
+			t.Errorf("BlockEntityTypeID(%s) = %d,%v; want %d", name, got, ok, want)
+		}
+	}
+	if _, ok := BlockEntityTypeID("minecraft:not_a_block_entity"); ok {
+		t.Error("unknown type should return ok=false")
+	}
+}
+
+func TestTemplateInstantiateCopiesBlockEntities(t *testing.T) {
+	tmpl := NewTemplate()
+	tmpl.AddBlockEntity(Position{X: 1, Y: 2, Z: 3}, "minecraft:bed")
+	w := tmpl.Instantiate()
+	bep, ok := any(w).(BlockEntityProvider)
+	if !ok {
+		t.Fatal("MemoryWorld should implement BlockEntityProvider")
+	}
+	if bep.BlockEntities()[Position{X: 1, Y: 2, Z: 3}] != "minecraft:bed" {
+		t.Errorf("block entity not copied on instantiate: %v", bep.BlockEntities())
+	}
+}

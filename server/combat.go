@@ -245,6 +245,7 @@ func (c *ClientConnection) respawn() error {
 	//    (the Respawn packet reset it on the client).
 	_ = c.sendSetHealth(player.MaxHealth)
 	_ = c.sendCombatAttributes()
+	_ = c.sendWorldEntities() // Respawn wiped client entities — re-spawn frames
 
 	// 4. Rebuild this client's view of everyone else (its Respawn wiped them).
 	others := c.instance.Players.snapshot()

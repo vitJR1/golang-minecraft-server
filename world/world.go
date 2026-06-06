@@ -26,12 +26,54 @@ type World interface {
 // Suitable for tests and small playgrounds. Not a replacement for chunked
 // region storage when real worlds appear.
 type MemoryWorld struct {
-	mu     sync.RWMutex
-	blocks map[Position]Block
+	mu            sync.RWMutex
+	blocks        map[Position]Block
+	entities      []Entity
+	blockEntities map[Position]string // pos → block-entity type name
 }
 
 func NewMemoryWorld() *MemoryWorld {
 	return &MemoryWorld{blocks: make(map[Position]Block)}
+}
+
+// AddEntity records a non-block entity (e.g. an item frame) in the world.
+func (w *MemoryWorld) AddEntity(e Entity) {
+	w.mu.Lock()
+	w.entities = append(w.entities, e)
+	w.mu.Unlock()
+}
+
+// Entities returns a copy of the world's entities, satisfying EntityProvider.
+func (w *MemoryWorld) Entities() []Entity {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	out := make([]Entity, len(w.entities))
+	copy(out, w.entities)
+	return out
+}
+
+// AddBlockEntity records that the block at p is a block entity of the given
+// type ("minecraft:bed"). Used so the chunk streamer can list it for the
+// client's BlockEntityRenderer.
+func (w *MemoryWorld) AddBlockEntity(p Position, typeName string) {
+	w.mu.Lock()
+	if w.blockEntities == nil {
+		w.blockEntities = make(map[Position]string)
+	}
+	w.blockEntities[p] = typeName
+	w.mu.Unlock()
+}
+
+// BlockEntities returns a copy of the world's block-entity map, satisfying
+// BlockEntityProvider.
+func (w *MemoryWorld) BlockEntities() map[Position]string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	out := make(map[Position]string, len(w.blockEntities))
+	for p, t := range w.blockEntities {
+		out[p] = t
+	}
+	return out
 }
 
 func (w *MemoryWorld) GetBlock(p Position) Block {
