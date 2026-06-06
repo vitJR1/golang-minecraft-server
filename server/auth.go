@@ -1,13 +1,14 @@
 package server
 
 import (
-	"crypto/sha256"
-	"encoding/base64"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"minecraft-server/cfg"
+	"minecraft-server/protocol"
+	"minecraft-server/store"
 	"minecraft-server/world"
 	"net"
 	"os"
@@ -45,10 +46,11 @@ const bcryptCost = 10
 //	6. On success → MovePlayer to Hub (player sees Respawn + hub
 //	   chunks).
 //
-// Storage: JSON file at the configured path, keyed by lower-cased name.
-// Passwords are stored as SHA-256(salt || password) with a 16-byte
-// per-user random salt — defeats rainbow tables; not bcrypt-strength
-// but stdlib-only. Swap to argon2/bcrypt later if you care.
+// Storage: password hashes (bcrypt) live in Postgres — the players table's
+// password_hash column, via the store package (see credStore / dbCredStore).
+// When no database is configured the plugin falls back to an in-memory store
+// (non-persistent; also what the tests use). IP bans are still a JSON sidecar
+// file (bansPath) — they're operational state, not user data.
 
 // authStore is the single live plugin instance. nil = auth disabled
 // (default). Set by EnableAuth.
@@ -59,8 +61,9 @@ type authPlugin struct {
 	bansPath string // sibling of path: derived as <path>.ipbans.json
 	srv      *Server
 
-	mu    sync.RWMutex
-	creds map[string]*authCred // key = lowercase player name
+	// creds is where password hashes are read/written: Postgres in
+	// production, in-memory otherwise.
+	creds credStore
 
 	// IP failure tracking. ipFails counts consecutive wrong-password
 	// attempts since the last success; cleared on successful login. ipBans
@@ -81,21 +84,62 @@ type authPlugin struct {
 	lastSeenIP map[string]string
 }
 
-// authCred is the on-disk credential record. New entries use bcrypt and
-// leave Salt empty (Hash is the full bcrypt string "$2a$10$…"). Legacy
-// SHA-256 entries — written by an earlier version of this plugin —
-// have both Salt + Hash set; they still verify and get auto-migrated
-// to bcrypt on the next successful /login.
-type authCred struct {
-	Salt         string    `json:"salt,omitempty"` // legacy SHA-256 salt; empty for bcrypt
-	Hash         string    `json:"hash"`           // bcrypt string OR base64(SHA-256(salt||pw))
-	RegisteredAt time.Time `json:"registered_at"`
+// credStore is where /register and /login persist bcrypt password hashes.
+// uuid is the stable per-player key (the offline-mode UUID, which is also the
+// players.uuid column); name is carried so the DB impl can populate / refresh
+// the players.username column. The production impl writes to the players
+// table; the in-memory impl backs tests and the no-database fallback.
+type credStore interface {
+	// hash returns the player's stored bcrypt hash and whether one exists.
+	hash(ctx context.Context, uuid, name string) (string, bool, error)
+	// set stores hash for the player, creating the player record if needed.
+	set(ctx context.Context, uuid, name, hash string) error
 }
 
-// isLegacySHA reports whether the credential is the older SHA-256
-// format (which kept Salt populated). bcrypt strings always begin
-// with "$2" so the cheap-and-cheerful test is: salt set => legacy.
-func (c *authCred) isLegacySHA() bool { return c.Salt != "" }
+// dbCredStore keeps credentials in the players table (password_hash column).
+type dbCredStore struct{ players *store.PlayerRepo }
+
+func (d dbCredStore) hash(ctx context.Context, uuid, _ string) (string, bool, error) {
+	p, err := d.players.GetByUUID(ctx, uuid)
+	if errors.Is(err, store.ErrNotFound) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return d.players.PasswordHash(ctx, p.ID)
+}
+
+func (d dbCredStore) set(ctx context.Context, uuid, name, hash string) error {
+	p, err := d.players.Upsert(ctx, uuid, name)
+	if err != nil {
+		return err
+	}
+	return d.players.SetPassword(ctx, p.ID, hash)
+}
+
+// memCredStore is the non-persistent fallback used when no database is
+// configured (and by the unit tests). Keyed by lower-cased name.
+type memCredStore struct {
+	mu sync.RWMutex
+	m  map[string]string
+}
+
+func newMemCredStore() *memCredStore { return &memCredStore{m: map[string]string{}} }
+
+func (s *memCredStore) hash(_ context.Context, _, name string) (string, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	h, ok := s.m[strings.ToLower(name)]
+	return h, ok, nil
+}
+
+func (s *memCredStore) set(_ context.Context, _, name, hash string) error {
+	s.mu.Lock()
+	s.m[strings.ToLower(name)] = hash
+	s.mu.Unlock()
+	return nil
+}
 
 // EnableAuth installs the offline-mode auth gate: creates the dedicated
 // `auth` instance, wires its protection hooks, loads credentials from
@@ -108,14 +152,22 @@ func EnableAuth(s *Server, path string) {
 		path:       path,
 		bansPath:   path + ".ipbans.json",
 		srv:        s,
-		creds:      map[string]*authCred{},
 		ipFails:    map[string]int{},
 		ipBans:     map[string]time.Time{},
 		lastSeenIP: map[string]string{},
 	}
-	if err := p.load(); err != nil {
-		slog.Warn("auth: failed to load credentials", "path", path, "err", err)
+
+	// Credentials live in Postgres when the store is up; otherwise fall back
+	// to a non-persistent in-memory map so the gate still works (e.g. in dev
+	// without a database, and in tests).
+	credBackend := "postgres"
+	if s.Store != nil {
+		p.creds = dbCredStore{players: s.Store.Players}
+	} else {
+		p.creds = newMemCredStore()
+		credBackend = "memory"
 	}
+
 	if err := p.loadBans(); err != nil {
 		slog.Warn("auth: failed to load IP bans", "path", p.bansPath, "err", err)
 	}
@@ -169,8 +221,7 @@ func EnableAuth(s *Server, path string) {
 		Run:     cmdAuthUnbanIP,
 	})
 	slog.Info("auth: enabled",
-		"credentials", path,
-		"registered_count", len(p.creds),
+		"credentials", credBackend,
 		"timeout", cfg.AuthTimeout(),
 		"max_attempts", cfg.AuthMaxAttempts(),
 		"ban_duration", cfg.AuthBanDuration())
@@ -358,12 +409,13 @@ func clientIP(addr net.Addr) string {
 	return addr.String()
 }
 
-// has reports whether playerName has a credential entry.
+// has reports whether playerName has a stored password. Resolves the player's
+// offline-mode UUID from the name (auth is offline-mode only) to key the
+// lookup. A storage error is treated as "no account" — the player is asked to
+// register, and the real error surfaces (and is logged) on the actual attempt.
 func (p *authPlugin) has(name string) bool {
-	p.mu.RLock()
-	_, ok := p.creds[strings.ToLower(name)]
-	p.mu.RUnlock()
-	return ok
+	_, ok, err := p.creds.hash(context.Background(), protocol.OfflineUUID(name), name)
+	return err == nil && ok
 }
 
 // bcryptHash wraps bcrypt.GenerateFromPassword and returns the result as
@@ -376,71 +428,6 @@ func bcryptHash(password string) (string, error) {
 		return "", err
 	}
 	return string(b), nil
-}
-
-// verifyCred returns true if password matches the stored credential.
-// Picks the right algorithm based on whether the legacy SHA-256 salt is
-// present. Constant-time compare is built into bcrypt; the legacy SHA
-// path uses a plain string compare on hex output (still constant-time
-// in practice since both sides are fixed-length base64).
-func verifyCred(cred *authCred, password string) bool {
-	if cred.isLegacySHA() {
-		salt, err := base64.StdEncoding.DecodeString(cred.Salt)
-		if err != nil {
-			return false
-		}
-		return hashLegacySHA(salt, password) == cred.Hash
-	}
-	return bcrypt.CompareHashAndPassword([]byte(cred.Hash), []byte(password)) == nil
-}
-
-// hashLegacySHA is the original base64(SHA-256(salt || password)) used
-// before the bcrypt migration. Kept only for verifyCred's legacy
-// branch — never write new entries this way.
-func hashLegacySHA(salt []byte, password string) string {
-	h := sha256.New()
-	h.Write(salt)
-	h.Write([]byte(password))
-	return base64.StdEncoding.EncodeToString(h.Sum(nil))
-}
-
-// load reads the credentials file. Missing file is fine — store stays
-// empty and every player will get the register prompt.
-func (p *authPlugin) load() error {
-	data, err := os.ReadFile(p.path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return fmt.Errorf("read %s: %w", p.path, err)
-	}
-	var loaded map[string]*authCred
-	if err := json.Unmarshal(data, &loaded); err != nil {
-		return fmt.Errorf("parse %s: %w", p.path, err)
-	}
-	norm := make(map[string]*authCred, len(loaded))
-	for k, v := range loaded {
-		norm[strings.ToLower(k)] = v
-	}
-	p.mu.Lock()
-	p.creds = norm
-	p.mu.Unlock()
-	return nil
-}
-
-// save atomically writes the credential map back to disk.
-func (p *authPlugin) save() error {
-	p.mu.RLock()
-	data, err := json.MarshalIndent(p.creds, "", "  ")
-	p.mu.RUnlock()
-	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
-	}
-	tmp := p.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return fmt.Errorf("write temp: %w", err)
-	}
-	return os.Rename(tmp, p.path)
 }
 
 // loadBans hydrates ipBans from bansPath. Expired entries are dropped on
@@ -674,6 +661,7 @@ func cmdAuthRegister(c *ClientConnection, args []string) {
 		_ = c.sendSystemMessage("Password too short (min 4 chars).")
 		return
 	}
+	uuid := protocol.OfflineUUID(c.playerName)
 	if authStore.has(c.playerName) {
 		_ = c.sendSystemMessage("Name already registered — use /login <password>.")
 		return
@@ -685,16 +673,8 @@ func cmdAuthRegister(c *ClientConnection, args []string) {
 		slog.Error("auth: bcrypt failed", "err", err)
 		return
 	}
-	cred := &authCred{
-		Hash:         hash,
-		RegisteredAt: time.Now(),
-	}
-	authStore.mu.Lock()
-	authStore.creds[strings.ToLower(c.playerName)] = cred
-	authStore.mu.Unlock()
-
-	if err := authStore.save(); err != nil {
-		slog.Error("auth: save failed", "path", authStore.path, "err", err)
+	if err := authStore.creds.set(context.Background(), uuid, c.playerName, hash); err != nil {
+		slog.Error("auth: credential save failed", "player", c.playerName, "err", err)
 		_ = c.sendSystemMessage("Couldn't save credentials — try /register again.")
 		return
 	}
@@ -724,15 +704,19 @@ func cmdAuthLogin(c *ClientConnection, args []string) {
 		return
 	}
 
-	authStore.mu.RLock()
-	cred, ok := authStore.creds[strings.ToLower(c.playerName)]
-	authStore.mu.RUnlock()
+	uuid := protocol.OfflineUUID(c.playerName)
+	hash, ok, err := authStore.creds.hash(context.Background(), uuid, c.playerName)
+	if err != nil {
+		slog.Error("auth: credential lookup failed", "player", c.playerName, "err", err)
+		_ = c.sendSystemMessage("Auth storage unavailable — try again shortly.")
+		return
+	}
 	if !ok {
 		_ = c.sendSystemMessage("No account — use /register <password> <password>.")
 		return
 	}
 
-	if !verifyCred(cred, args[0]) {
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(args[0])) != nil {
 		addr := c.conn.RemoteAddr()
 		banned := authStore.recordFail(addr)
 		if banned {
@@ -747,25 +731,6 @@ func cmdAuthLogin(c *ClientConnection, args []string) {
 		_ = c.sendSystemMessage("Wrong password.")
 		slog.Info("auth: bad password", "player", c.playerName)
 		return
-	}
-
-	// Successful login on a legacy SHA-256 entry → upgrade to bcrypt
-	// transparently. We have the plaintext password right here; this is
-	// the one moment we can re-hash it correctly. Failure is non-fatal —
-	// the login still succeeds, the migration just happens next time.
-	if cred.isLegacySHA() {
-		if newHash, err := bcryptHash(args[0]); err == nil {
-			authStore.mu.Lock()
-			cred.Hash = newHash
-			cred.Salt = ""
-			authStore.mu.Unlock()
-			if err := authStore.save(); err != nil {
-				slog.Warn("auth: post-login bcrypt migration save failed",
-					"player", c.playerName, "err", err)
-			} else {
-				slog.Info("auth: migrated to bcrypt", "player", c.playerName)
-			}
-		}
 	}
 
 	c.authed.Store(true)

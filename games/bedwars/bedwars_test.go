@@ -120,6 +120,11 @@ func (i *fakeInstance) EndGame() {
 	i.mu.Unlock()
 }
 
+// SetPvP / SetInstantRespawn satisfy the game.Instance combat-toggle methods.
+// The fake doesn't model combat, so they're no-ops.
+func (i *fakeInstance) SetPvP(bool)            {}
+func (i *fakeInstance) SetInstantRespawn(bool) {}
+
 func (i *fakeInstance) sawBroadcast(substr string) bool {
 	i.mu.Lock()
 	defer i.mu.Unlock()

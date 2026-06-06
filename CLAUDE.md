@@ -40,10 +40,26 @@ encryption/    AES-128 CFB8 cipher + net.Conn wrapper.
 mojang/        sessionserver.mojang.com client (hasJoined endpoint).
 ban/           Ban list loader (reads banlist.json with reload support).
 cfg/           Runtime config vars (ServerId, OnlineMode).
+db/            PostgreSQL connection layer (pgx/v5 pool; config from env,
+               ping, graceful close).
+redisc/        Redis connection layer (go-redis/v9; config from env, ping,
+               graceful close).
+store/         Persistence entities + repositories over db's pgx pool:
+               players, bans, mutes, per-mode match history +
+               participation (bedwars/skywars/ffa), bedwars event log,
+               per-mode ELO ratings (rank computed at read time), and
+               cross-mode stats. Schema via golang-migrate (embedded SQL in
+               store/migrations/, applied at startup by store.Migrate).
 server/        Server struct (world + entity-ID counter), per-connection
                state machine, handlers per state, packet IDs, play-state
                senders, registry codec loader.
 ```
+
+Optional Postgres + Redis backends are deployed via `docker-compose.yml`
+(`docker compose up -d`) and connected at startup (`connectStores` in
+`main.go`). Both are best-effort: a down backend logs a warning and the
+server boots without it. Handles live on `Server.DB` / `Server.Redis`
+(nil-checked; nothing in the core depends on them yet).
 
 ## Architecture
 
