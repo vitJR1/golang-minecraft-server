@@ -544,24 +544,37 @@ func cmdPlay(c *ClientConnection, args []string) {
 			_ = c.sendSystemMessage("Not in any matchmaker queue")
 		}
 	default:
-		// /play <game> [arena]: with an arena name, queue that specific arena
-		// (its Definition is registered under the arena name); otherwise queue
-		// the base game.
-		gameID := sub
+		// /play <game> <arena>: join that arena's running instance directly
+		// (created by /arena create), so all players share one world and see
+		// each other. /play <game> with no arena uses the matchmaker.
 		if len(args) >= 2 {
 			arena := args[1]
 			if !c.server.IsArena(arena) {
 				_ = c.sendSystemMessage("Unknown arena: " + arena + " (see /arena list " + sub + ")")
 				return
 			}
-			gameID = arena
+			target := c.server.GetInstance(arena)
+			if target == nil {
+				_ = c.sendSystemMessage("Arena " + arena + " is not running — recreate it with /arena create.")
+				return
+			}
+			if target == c.instance {
+				_ = c.sendSystemMessage("Already in " + arena)
+				return
+			}
+			if err := c.server.MovePlayer(c, target, 0, 80, 0); err != nil {
+				_ = c.sendSystemMessage("Couldn't join " + arena + ": " + err.Error())
+				return
+			}
+			_ = c.sendSystemMessage("Joined arena " + arena)
+			return
 		}
-		if err := c.server.Matchmaker.Queue(c, gameID); err != nil {
+		if err := c.server.Matchmaker.Queue(c, sub); err != nil {
 			_ = c.sendSystemMessage("Queue failed: " + err.Error())
 			return
 		}
-		_ = c.sendSystemMessage("Queued for " + gameID +
-			" (" + strconv.Itoa(c.server.Matchmaker.QueueSize(gameID)) + " waiting)")
+		_ = c.sendSystemMessage("Queued for " + sub +
+			" (" + strconv.Itoa(c.server.Matchmaker.QueueSize(sub)) + " waiting)")
 	}
 }
 

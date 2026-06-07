@@ -100,15 +100,17 @@ func (m *Matchmaker) startGame(def *game.Definition, players []*ClientConnection
 	slog.Info("matchmaker: starting game",
 		"game", def.ID, "instance", inst.ID, "players", len(players))
 
+	// Move players in one at a time, NOT concurrently: each MovePlayer sends a
+	// Respawn (which wipes the client's entities) before announcing the joiner.
+	// Overlapping moves let one player's Respawn arrive after another player's
+	// Spawn was already broadcast to them, so they'd never see each other.
+	// Sequential moves keep the per-client order correct.
 	for _, c := range players {
-		cc := c
-		go func() {
-			if err := m.server.MovePlayer(cc, inst, 0, 80, 0); err != nil {
-				slog.Warn("matchmaker: move failed",
-					"player", cc.playerName, "instance", inst.ID, "err", err)
-				_ = cc.sendSystemMessage("Couldn't enter " + def.Name + ": " + err.Error())
-			}
-		}()
+		if err := m.server.MovePlayer(c, inst, 0, 80, 0); err != nil {
+			slog.Warn("matchmaker: move failed",
+				"player", c.playerName, "instance", inst.ID, "err", err)
+			_ = c.sendSystemMessage("Couldn't enter " + def.Name + ": " + err.Error())
+		}
 	}
 }
 

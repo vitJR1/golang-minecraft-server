@@ -30,6 +30,7 @@ type MemoryWorld struct {
 	blocks        map[Position]Block
 	entities      []Entity
 	blockEntities map[Position]string // pos → block-entity type name
+	biome         string              // namespaced biome for the whole world
 }
 
 func NewMemoryWorld() *MemoryWorld {
@@ -74,6 +75,21 @@ func (w *MemoryWorld) BlockEntities() map[Position]string {
 		out[p] = t
 	}
 	return out
+}
+
+// SetBiome sets the world's (uniform) biome, e.g. "minecraft:plains".
+func (w *MemoryWorld) SetBiome(name string) {
+	w.mu.Lock()
+	w.biome = name
+	w.mu.Unlock()
+}
+
+// Biome returns the world's biome name (or "" if unset), satisfying
+// BiomeProvider.
+func (w *MemoryWorld) Biome() string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.biome
 }
 
 func (w *MemoryWorld) GetBlock(p Position) Block {

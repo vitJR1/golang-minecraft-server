@@ -12,7 +12,7 @@ func TestEmptyChunkDataSize(t *testing.T) {
 	//                + data array length VarInt (1 byte)   = 3 bytes
 	//   Biome palette: same 3 bytes
 	// Total per section: 2 + 3 + 3 = 8 bytes; 24 × 8 = 192.
-	got := BuildEmptyChunkData()
+	got := BuildEmptyChunkData(0)
 	if len(got) != 24*8 {
 		t.Errorf("empty chunk data: %d bytes, want %d", len(got), 24*8)
 	}
@@ -22,7 +22,7 @@ func TestEmptyChunkDataSectionLayout(t *testing.T) {
 	// Verify the first section's bytes match the documented layout: every
 	// byte is zero (block count = 0, single-value palette = 0 = air, no data
 	// array, biome palette = 0).
-	data := BuildEmptyChunkData()
+	data := BuildEmptyChunkData(0)
 	for i := 0; i < 8; i++ {
 		if data[i] != 0 {
 			t.Errorf("section[0] byte[%d] = 0x%02x, want 0x00", i, data[i])
@@ -60,4 +60,19 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func TestChunkDataBiomeValue(t *testing.T) {
+	// Section layout: [0,1]=block count, [2]=block bpe, [3]=block value,
+	// [4]=block data len, [5]=biome bpe, [6]=biome value, [7]=biome data len.
+	// A 1-byte biome id (39 = plains) lands at byte 6 of the first section.
+	data := BuildEmptyChunkData(39)
+	if data[6] != 39 {
+		t.Errorf("biome value byte = 0x%02x, want 0x27 (39)", data[6])
+	}
+	// BuildChunkData carries the same biome for a real column.
+	full := BuildChunkData(make([][]int32, SectionCount), 39)
+	if full[6] != 39 {
+		t.Errorf("BuildChunkData biome byte = 0x%02x, want 39", full[6])
+	}
 }

@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"minecraft-server/protocol"
 	"minecraft-server/world"
@@ -45,13 +46,6 @@ const (
 	hotbarSlot1 int16 = 37 // arena selector (ender pearl, lobby only)
 )
 
-// chest window types (minecraft.wiki "Open Screen" inventory types):
-//
-//	0 = generic_9x1, 2 = generic_9x3. We use 9x1 for everything since
-//	neither the main menu (3 icons) nor an arena list (6 icons) needs
-//	more than one row.
-const chestType9x1 int32 = 0
-
 // arenaWindowID is the window id we hand the client when opening a chest.
 // Stays constant per connection since only one menu can be open at a time
 // (the client closes the previous one when we send a new Open Screen).
@@ -61,9 +55,13 @@ const menuWindowID byte = 1
 // openMenu tracks which menu the connection currently has open and how to
 // dispatch clicks. Nil-valued field on ClientConnection means no menu.
 type openMenu struct {
-	kind    string              // "main" | "ffa" | "bw" | "sw"
+	kind    string              // "main" | "ffa" | "bw" | "sw" | "chest"
 	entries map[int16]menuEntry // slot → entry
 	onClick func(c *ClientConnection, e menuEntry)
+
+	// chestPos is the block position of the open chest when kind == "chest",
+	// so Click Container changes persist to the right chest.
+	chestPos world.Position
 }
 
 type menuEntry struct {
@@ -71,6 +69,7 @@ type menuEntry struct {
 	itemID int32
 	name   string // display label and the string used in logs / dispatch
 	key    string // stable identifier for code paths (e.g. "ffa", "garden")
+	count  byte   // item stack size (0 → 1); used to show player counts
 }
 
 // hubMenuTargets maps a menu icon's `key` to the lobby instance ID the
@@ -183,8 +182,8 @@ func (c *ClientConnection) openHubMainMenu() {
 		entries: entries,
 		onClick: hubMainOnClick,
 	})
-	_ = c.sendOpenScreen("Choose a game")
-	_ = c.sendChestContents(entries)
+	_ = c.sendOpenScreen("Choose a game", 1)
+	_ = c.sendChestContents(1, entries)
 }
 
 // openArenaMenu opens the per-lobby chest GUI listing arenas to pick.
@@ -202,8 +201,8 @@ func (c *ClientConnection) openArenaMenu(lobbyID string, arenas []string) {
 		entries: entries,
 		onClick: arenaOnClick,
 	})
-	_ = c.sendOpenScreen(strings.ToUpper(lobbyID[:1]) + lobbyID[1:] + " arenas")
-	_ = c.sendChestContents(entries)
+	_ = c.sendOpenScreen(strings.ToUpper(lobbyID[:1])+lobbyID[1:]+" arenas", 1)
+	_ = c.sendChestContents(1, entries)
 }
 
 // arenaOnClick: arena slot click — logs + system-chat the choice and
@@ -214,6 +213,87 @@ func arenaOnClick(c *ClientConnection, e menuEntry) {
 		"player", c.playerName, "lobby", e.key, "arena", e.name)
 	_ = c.sendSystemMessage("You picked " + e.key + " — " + e.name)
 	c.menu.Store(nil)
+}
+
+// bedwarsDotaTemplate is the registered template name for the DOTA bedwars map
+// (schem/templates/bedwars/badwars_dota_map.schem + sibling .json config).
+const bedwarsDotaTemplate = "bedwars/badwars_dota_map"
+
+// openBedwarsArenaMenu shows the live DOTA arena browser: a "create new arena"
+// compass plus one compass per running bedwars arena that already has players
+// (its stack size = player count). Clicking creates-and-joins or joins.
+func (c *ClientConnection) openBedwarsArenaMenu() {
+	entries := bedwarsArenaEntries(c.server)
+	c.menu.Store(&openMenu{kind: "bw-arenas", entries: entries, onClick: bedwarsArenaOnClick})
+	_ = c.sendOpenScreen("DOTA arenas", 1)
+	_ = c.sendChestContents(1, entries)
+}
+
+// bedwarsArenaEntries builds the DOTA arena browser slots: slot 0 is always
+// "create a new arena"; each following slot is a running bedwars arena that has
+// players, its compass stack size showing the online count.
+func bedwarsArenaEntries(s *Server) map[int16]menuEntry {
+	entries := map[int16]menuEntry{
+		0: {slot: 0, itemID: itemCompass, name: "+ New DOTA arena", key: "create", count: 1},
+	}
+	slot := int16(1)
+	for _, name := range s.ArenasOfKind("bedwars") {
+		inst := s.GetInstance(name)
+		if inst == nil {
+			continue
+		}
+		n := inst.Players.Count()
+		if n <= 0 {
+			continue // only list arenas someone's already on
+		}
+		count := byte(n)
+		if n > 64 {
+			count = 64 // item stacks cap at 64
+		}
+		entries[slot] = menuEntry{
+			slot: slot, itemID: itemCompass, count: count,
+			name: fmt.Sprintf("DOTA %s — %d online", name, n), key: name,
+		}
+		slot++
+	}
+	return entries
+}
+
+// bedwarsArenaOnClick handles the DOTA arena browser: "create" spins up a fresh
+// arena from the DOTA map and joins it; any other key is an existing arena name
+// to join directly.
+func bedwarsArenaOnClick(c *ClientConnection, e menuEntry) {
+	c.menu.Store(nil)
+	name := e.key
+	if name == "create" {
+		created, err := c.server.CreateArena("bedwars", bedwarsDotaTemplate, "")
+		if err != nil {
+			_ = c.sendSystemMessage("Couldn't create arena: " + err.Error())
+			slog.Warn("bedwars arena create failed", "player", c.playerName, "err", err)
+			return
+		}
+		name = created
+	}
+	c.joinArena(name)
+}
+
+// joinArena moves the player into a running arena instance by name. Runs on the
+// player's readLoop (menu click / command handler).
+func (c *ClientConnection) joinArena(name string) {
+	target := c.server.GetInstance(name)
+	if target == nil {
+		_ = c.sendSystemMessage("Arena " + name + " is not running.")
+		return
+	}
+	if target == c.instance {
+		return
+	}
+	if err := c.server.MovePlayer(c, target, 0, 80, 0); err != nil {
+		_ = c.sendSystemMessage("Couldn't join " + name + ": " + err.Error())
+		slog.Warn("join arena failed", "player", c.playerName, "arena", name, "err", err)
+		return
+	}
+	_ = c.sendSystemMessage("Joined arena " + name)
 }
 
 // hubMainOnClick: clicking a game icon (FFA / BedWars / SkyWars)
@@ -243,43 +323,43 @@ func hubMainOnClick(c *ClientConnection, e menuEntry) {
 		"player", c.playerName, "lobby", lobbyID)
 }
 
-// sendOpenScreen tells the client to open a single-row chest GUI under
-// the connection's reserved window id.
-func (c *ClientConnection) sendOpenScreen(title string) error {
+// sendOpenScreen tells the client to open a chest GUI of `rows` rows (1..6)
+// under the connection's reserved window id. The window type enum is rows-1
+// (0 = generic_9x1 … 5 = generic_9x6).
+func (c *ClientConnection) sendOpenScreen(title string, rows int) error {
 	titleJSON, _ := json.Marshal(map[string]string{"text": title})
 	var buf bytes.Buffer
 	protocol.WriteVarInt32ToBuffer(&buf, int32(menuWindowID))
-	protocol.WriteVarInt32ToBuffer(&buf, chestType9x1)
+	protocol.WriteVarInt32ToBuffer(&buf, int32(rows-1))
 	buf.Write(protocol.WriteString(string(titleJSON)))
 	return c.safeWrite(CbPlayOpenScreen, buf.Bytes())
 }
 
-// Chest window slot layout for generic_9x1:
+// Chest window slot layout for a generic_9x`rows` chest:
 //
-//	0..8   = chest contents
-//	9..35  = player main inventory (3 rows × 9)
-//	36..44 = player hotbar (9 slots)
+//	0 .. rows*9-1          = chest contents
+//	rows*9 .. rows*9+26    = player main inventory (3 rows × 9)
+//	rows*9+27 .. +35       = player hotbar (9 slots)
 //
 // Without re-emitting the player inventory in the chest's mirror, the
 // client treats those 36 slots as authoritative-empty and the blaze rod
-// vanishes the moment the chest opens. We sneak it back into hotbar 0
-// (chest-window slot 36) so the client sees it stay across open/close.
-const (
-	chestSlots       = 9
-	chestTotalSlots  = chestSlots + 36
-	chestHotbarSlot0 = int16(chestSlots + 27) // = 36
-	chestHotbarSlot1 = int16(chestSlots + 28) // = 37
-)
+// vanishes the moment the chest opens. We sneak it back into the mirrored
+// hotbar so the client sees it stay across open/close.
 
-// sendChestContents fills the open chest's 9 visible slots from entries,
-// then mirrors the player's hotbar in slots 36..44 so the client keeps
-// rendering the navigator (and the arena selector in lobbies) instead
-// of treating the player inventory as empty.
-func (c *ClientConnection) sendChestContents(entries map[int16]menuEntry) error {
+// sendChestContents fills the open chest's rows*9 visible slots from entries,
+// then mirrors the player's hotbar so the client keeps rendering the navigator
+// (and the arena selector in lobbies) instead of treating the inventory as
+// empty. entries may be nil for a plain (empty) chest.
+func (c *ClientConnection) sendChestContents(rows int, entries map[int16]menuEntry) error {
+	chestSlots := int16(rows * 9)
+	total := chestSlots + 36
+	hotbarSlot0 := chestSlots + 27
+	hotbarSlot1 := chestSlots + 28
+
 	var buf bytes.Buffer
 	buf.WriteByte(menuWindowID)
 	protocol.WriteVarInt32ToBuffer(&buf, 0) // state id
-	protocol.WriteVarInt32ToBuffer(&buf, int32(chestTotalSlots))
+	protocol.WriteVarInt32ToBuffer(&buf, int32(total))
 
 	// Are we in a game lobby? If yes, include the ender pearl in the
 	// mirror so a chest-open-then-close cycle doesn't wipe it.
@@ -288,15 +368,19 @@ func (c *ClientConnection) sendChestContents(entries map[int16]menuEntry) error 
 		_, includePearl = arenasForLobby(c.instance.ID)
 	}
 
-	for s := int16(0); s < int16(chestTotalSlots); s++ {
+	for s := int16(0); s < total; s++ {
 		switch {
-		case s == chestHotbarSlot0:
+		case s == hotbarSlot0:
 			buf.Write(protocol.WriteSlotWithName(itemBlazeRod, 1, "Navigator"))
-		case s == chestHotbarSlot1 && includePearl:
+		case s == hotbarSlot1 && includePearl:
 			buf.Write(protocol.WriteSlotWithName(itemEnderPearl, 1, "Arena selector"))
 		default:
 			if e, ok := entries[s]; ok {
-				buf.Write(protocol.WriteSlotWithName(e.itemID, 1, e.name))
+				count := e.count
+				if count == 0 {
+					count = 1
+				}
+				buf.Write(protocol.WriteSlotWithName(e.itemID, count, e.name))
 			} else {
 				buf.Write(protocol.WriteEmptySlot())
 			}

@@ -244,6 +244,7 @@ func (s *Server) RemoveInstance(id string) error {
 		return fmt.Errorf("instance %s still has %d players", id, inst.Players.Count())
 	}
 	delete(s.instances, id)
+	delete(s.arenas, id) // clear arena tracking if this was a created arena
 	s.mu.Unlock()
 
 	inst.Stop()

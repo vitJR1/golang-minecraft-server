@@ -89,3 +89,9 @@ type EntityProvider interface {
 type BlockEntityProvider interface {
 	BlockEntities() map[Position]string
 }
+
+// BiomeProvider is implemented by worlds that carry a (uniform) biome, so the
+// chunk streamer can paint chunks with the map's biome instead of a default.
+type BiomeProvider interface {
+	Biome() string
+}

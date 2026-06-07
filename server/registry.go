@@ -2,6 +2,7 @@ package server
 
 import (
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"minecraft-server/nbt"
 	"sync"
@@ -61,4 +62,52 @@ func RegistryCodec() []byte {
 		registryBytes = nbt.Marshal(root)
 	})
 	return registryBytes
+}
+
+// DefaultBiome is the fallback biome name when a world doesn't specify one (or
+// names an unknown biome). Plains is a sensible neutral overworld biome.
+const DefaultBiome = "minecraft:plains"
+
+var (
+	biomeOnce sync.Once
+	biomeIDs  map[string]int32
+)
+
+// BiomeID returns the registry index of a namespaced biome name (the value the
+// chunk-data biome container expects), and whether it's known. Parsed once
+// from the embedded registry codec's minecraft:worldgen/biome registry.
+func BiomeID(name string) (int32, bool) {
+	biomeOnce.Do(func() {
+		biomeIDs = map[string]int32{}
+		var codec struct {
+			Biome struct {
+				Value []struct {
+					Name string `json:"name"`
+					ID   int32  `json:"id"`
+				} `json:"value"`
+			} `json:"minecraft:worldgen/biome"`
+		}
+		if err := json.Unmarshal(registryJSON, &codec); err == nil {
+			for _, b := range codec.Biome.Value {
+				biomeIDs[b.Name] = b.ID
+			}
+		}
+	})
+	id, ok := biomeIDs[name]
+	return id, ok
+}
+
+// biomeIDOrDefault resolves name to its registry index, falling back to the
+// default biome (and then 0) when name is empty or unknown.
+func biomeIDOrDefault(name string) int32 {
+	if name == "" {
+		name = DefaultBiome
+	}
+	if id, ok := BiomeID(name); ok {
+		return id
+	}
+	if id, ok := BiomeID(DefaultBiome); ok {
+		return id
+	}
+	return 0
 }

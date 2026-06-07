@@ -48,34 +48,6 @@ func Register(d *Definition) {
 	registry[d.ID] = d
 }
 
-// TryRegister adds a definition at runtime (e.g. a dynamically-created
-// arena), returning an error instead of panicking on a duplicate ID or
-// missing fields. Use this for user-driven registration; Register stays the
-// fail-loud path for static init().
-func TryRegister(d *Definition) error {
-	if d == nil || d.ID == "" {
-		return fmt.Errorf("game: invalid definition")
-	}
-	if d.New == nil {
-		return fmt.Errorf("game: %q has nil New factory", d.ID)
-	}
-	registryMu.Lock()
-	defer registryMu.Unlock()
-	if _, exists := registry[d.ID]; exists {
-		return fmt.Errorf("game: %q already registered", d.ID)
-	}
-	registry[d.ID] = d
-	return nil
-}
-
-// Unregister removes a definition by ID (e.g. tearing down an arena). No-op
-// if absent.
-func Unregister(id string) {
-	registryMu.Lock()
-	delete(registry, id)
-	registryMu.Unlock()
-}
-
 // GetDef returns the definition with this ID, if registered.
 func GetDef(id string) (*Definition, bool) {
 	registryMu.RLock()

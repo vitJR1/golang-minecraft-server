@@ -33,9 +33,10 @@ const airStateID int32 = 0
 // blocksPerSection state IDs in YZX order (index = y*256 + z*16 + x, all
 // local 0..15). Extra/short slices are tolerated (missing cells = air).
 //
-// Biomes are emitted as a single-valued container (plains/0) per section, the
-// same as the empty chunk — biome painting isn't modelled yet.
-func BuildChunkData(sections [][]int32) []byte {
+// Biomes are emitted as a single-valued container (biomeID) per section — one
+// biome for the whole column, which covers uniform maps. biomeID is the biome's
+// registry index (see server.BiomeID), e.g. 39 = minecraft:plains.
+func BuildChunkData(sections [][]int32, biomeID int32) []byte {
 	data := make([]byte, 0, SectionCount*64)
 	for i := 0; i < SectionCount; i++ {
 		var states []int32
@@ -43,7 +44,7 @@ func BuildChunkData(sections [][]int32) []byte {
 			states = sections[i]
 		}
 		data = appendBlockStates(data, states)
-		data = appendSingleBiome(data)
+		data = appendSingleBiome(data, biomeID)
 	}
 	return data
 }
@@ -117,13 +118,12 @@ func appendDirect(buf []byte, states []int32) []byte {
 	return buf
 }
 
-// appendSingleBiome writes a single-valued biome container (value 0). Matches
-// BuildEmptyChunkData so the wire layout is identical where biomes are
-// concerned.
-func appendSingleBiome(buf []byte) []byte {
-	buf = append(buf, 0)                            // bitsPerEntry = 0
-	buf = append(buf, protocol.WriteVarInt32(0)...) // single biome value
-	buf = append(buf, protocol.WriteVarInt32(0)...) // data array length
+// appendSingleBiome writes a single-valued biome container set to biomeID
+// (a biome registry index). bitsPerEntry 0 = the whole section is one biome.
+func appendSingleBiome(buf []byte, biomeID int32) []byte {
+	buf = append(buf, 0)                                  // bitsPerEntry = 0
+	buf = append(buf, protocol.WriteVarInt32(biomeID)...) // single biome value
+	buf = append(buf, protocol.WriteVarInt32(0)...)       // data array length
 	return buf
 }
 

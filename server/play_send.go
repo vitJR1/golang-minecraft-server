@@ -79,28 +79,35 @@ func (c *ClientConnection) sendAckBlockChange(sequence int32) error {
 	return c.safeWrite(CbPlayAckBlockChange, protocol.WriteVarInt32(sequence))
 }
 
-// sendRespawn drives a dimension swap on the client: clears its world,
-// despawns entities, and switches the player's reference frame. Server
-// follows up with chunks, Sync Position, and (via JoinAndAnnounce) the
-// fresh tab list + Spawn Player packets.
-//
-// We use it for cross-instance teleport even when source and destination
-// are nominally the same dimension type — the client only knows that its
-// world got reset, which is what we need.
+// sendRespawn fully resets the client's view: it sends TWO Respawn packets,
+// hopping through a different dimension (the_end) before landing back in the
+// overworld. A single same-dimension Respawn often leaves "ghost" entities and
+// blocks behind — the vanilla client only guarantees a full unload+reload when
+// the dimension actually changes between respawns. The intermediate hop loads
+// no chunks (a brief loading flash) and the caller re-streams the world after.
+// Used for cross-instance teleport (MovePlayer) and respawn.
 func (c *ClientConnection) sendRespawn() error {
+	if err := c.sendRespawnTo("minecraft:the_end"); err != nil {
+		return err
+	}
+	return c.sendRespawnTo("minecraft:overworld")
+}
+
+// sendRespawnTo writes one Respawn (0x41) into the given dimension type/name.
+func (c *ClientConnection) sendRespawnTo(dimension string) error {
 	gm := c.player.Snapshot().Gamemode
 
 	var buf bytes.Buffer
-	buf.Write(protocol.WriteString("minecraft:overworld")) // dimension type
-	buf.Write(protocol.WriteString("minecraft:overworld")) // dimension name
-	buf.Write(protocol.WriteLong(0))                       // hashed seed
-	buf.WriteByte(byte(gm))                                // current game mode
-	buf.WriteByte(0xFF)                                    // previous game mode = -1 (none)
-	buf.WriteByte(0)                                       // is debug
-	buf.WriteByte(0)                                       // is flat
-	buf.WriteByte(0x03)                                    // copy metadata: keep status + equipment
-	buf.WriteByte(0)                                       // has death location = false
-	protocol.WriteVarInt32ToBuffer(&buf, 0)                // portal cooldown
+	buf.Write(protocol.WriteString(dimension)) // dimension type
+	buf.Write(protocol.WriteString(dimension)) // dimension name
+	buf.Write(protocol.WriteLong(0))           // hashed seed
+	buf.WriteByte(byte(gm))                    // current game mode
+	buf.WriteByte(0xFF)                        // previous game mode = -1 (none)
+	buf.WriteByte(0)                           // is debug
+	buf.WriteByte(0)                           // is flat
+	buf.WriteByte(0x03)                        // copy metadata: keep status + equipment
+	buf.WriteByte(0)                           // has death location = false
+	protocol.WriteVarInt32ToBuffer(&buf, 0)    // portal cooldown
 	return c.safeWrite(CbPlayRespawn, buf.Bytes())
 }
 
@@ -245,12 +252,19 @@ func (c *ClientConnection) sendWorldChunks() error {
 		}
 	}
 
-	empty := chunk.BuildEmptyChunkData()
+	// Biome painted across the whole column, taken from the instance world
+	// (set from the schematic), falling back to plains.
+	biomeID := biomeIDOrDefault("")
+	if bp, ok := c.instance.World.(world.BiomeProvider); ok {
+		biomeID = biomeIDOrDefault(bp.Biome())
+	}
+
+	empty := chunk.BuildEmptyChunkData(biomeID)
 	for cx := minCx; cx <= maxCx; cx++ {
 		for cz := minCz; cz <= maxCz; cz++ {
 			data := empty
 			if col := cols[colKey{cx, cz}]; col != nil {
-				data = chunk.BuildChunkData(col)
+				data = chunk.BuildChunkData(col, biomeID)
 			}
 			if err := c.sendChunkColumn(cx, cz, data, beByCol[colKey{cx, cz}]); err != nil {
 				return err

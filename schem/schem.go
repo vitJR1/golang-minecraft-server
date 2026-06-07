@@ -58,6 +58,11 @@ type Schematic struct {
 	// by schematic-local position → block-entity type name. The client needs
 	// these to render BlockEntityRenderer blocks.
 	BlockEntities map[world.Position]string
+
+	// Biome is the schematic's dominant biome name ("minecraft:plains"), or ""
+	// if none is stored. We model a single biome per map (uniform), which
+	// covers typical hand-built arenas.
+	Biome string
 }
 
 // LoadFile reads a .schem from disk and parses it.
@@ -169,7 +174,68 @@ func Parse(data []byte) (*Schematic, error) {
 		s.BlockEntities = parseBlockEntities(bes)
 	}
 
+	s.Biome = parseDominantBiome(inner)
+
 	return s, nil
+}
+
+// parseDominantBiome returns the most common biome name in the schematic, or
+// "" if biomes aren't stored. Handles both the v2 flat layout (BiomePalette +
+// BiomeData) and the v3 nested one (Biomes{Palette,Data}). BiomeData is a
+// VarInt stream of palette indices (2D per-column in v2); we only need the
+// dominant entry since we model one biome per map.
+func parseDominantBiome(inner nbt.Compound) string {
+	palette, _ := inner["BiomePalette"].(nbt.Compound)
+	data, _ := inner["BiomeData"].(nbt.ByteArray)
+	if biomes, ok := inner["Biomes"].(nbt.Compound); ok {
+		if p, ok := biomes["Palette"].(nbt.Compound); ok {
+			palette = p
+		}
+		if d, ok := biomes["Data"].(nbt.ByteArray); ok {
+			data = d
+		}
+	}
+	if len(palette) == 0 {
+		return ""
+	}
+
+	// index → biome name
+	names := map[int32]string{}
+	for name, v := range palette {
+		if id, ok := v.(nbt.Int); ok {
+			names[int32(id)] = name
+		}
+	}
+	// Single-entry palette: that's the biome, no need to scan the data.
+	if len(palette) == 1 {
+		for _, name := range names {
+			return name
+		}
+	}
+
+	// Tally palette indices across the data stream and pick the most common.
+	counts := map[int32]int{}
+	var val uint32
+	var shift uint
+	for _, b := range data {
+		val |= uint32(b&0x7F) << shift
+		if b&0x80 == 0 {
+			counts[int32(val)]++
+			val, shift = 0, 0
+			continue
+		}
+		shift += 7
+		if shift >= 32 {
+			return "" // malformed
+		}
+	}
+	best, bestN := int32(0), -1
+	for id, n := range counts {
+		if n > bestN {
+			best, bestN = id, n
+		}
+	}
+	return names[best]
 }
 
 // parseBlockEntities reads the Sponge "BlockEntities" list into a
@@ -373,6 +439,9 @@ func (s *Schematic) ToTemplateAt(originX, originY, originZ int) *world.Template 
 	}
 	for p, typeName := range s.BlockEntities {
 		t.AddBlockEntity(world.Position{X: originX + p.X, Y: originY + p.Y, Z: originZ + p.Z}, typeName)
+	}
+	if s.Biome != "" {
+		t.SetBiome(s.Biome)
 	}
 	return t
 }

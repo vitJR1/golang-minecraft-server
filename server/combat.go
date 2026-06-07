@@ -218,49 +218,11 @@ func (c *ClientConnection) respawn() error {
 		return nil
 	}
 	sp := c.instance.SpawnPoint
-	c.player.Respawn()
+	c.player.Respawn() // full health, clear dead flag
 	c.player.MoveTo(sp.X, sp.Y, sp.Z, false)
-
-	// 1. Respawn packet — client clears its world and every entity it knew.
-	if err := c.sendRespawn(); err != nil {
-		return fmt.Errorf("respawn packet: %w", err)
-	}
-	// 2. Re-stream spawn triplet → baked world chunks → position.
-	if err := c.sendSetDefaultSpawnPosition(int(sp.X), int(sp.Y), int(sp.Z), 0); err != nil {
-		return fmt.Errorf("respawn spawn pos: %w", err)
-	}
-	if err := c.sendSetCenterChunk(0, 0); err != nil {
-		return fmt.Errorf("respawn center chunk: %w", err)
-	}
-	if err := c.sendStartWaitingForChunks(); err != nil {
-		return fmt.Errorf("respawn start waiting: %w", err)
-	}
-	if err := c.sendWorldChunks(); err != nil {
-		return fmt.Errorf("respawn chunks: %w", err)
-	}
-	if err := c.sendSyncPlayerPosition(sp.X, sp.Y, sp.Z, 1); err != nil {
-		return fmt.Errorf("respawn sync pos: %w", err)
-	}
-	// 3. Hearts back to full on the HUD; re-send the cooldown-bar attribute
-	//    (the Respawn packet reset it on the client).
-	_ = c.sendSetHealth(player.MaxHealth)
-	_ = c.sendCombatAttributes()
-	_ = c.sendWorldEntities() // Respawn wiped client entities — re-spawn frames
-
-	// 4. Rebuild this client's view of everyone else (its Respawn wiped them).
-	others := c.instance.Players.snapshot()
-	if payload := playerInfoAddPayload(others); payload != nil {
-		_ = c.safeWrite(CbPlayPlayerInfoUpdate, payload)
-	}
-	for _, other := range others {
-		if other == c {
-			continue
-		}
-		_ = c.safeWrite(CbPlaySpawnPlayer, spawnPlayerPayload(other.player))
-	}
-	// 5. Move this player's existing entity to spawn for everyone else.
-	c.broadcastEntityTeleport()
-	return nil
+	// resyncView rebuilds the whole client view from the (now reset) player
+	// state + current instance, sending the restored hearts as part of it.
+	return c.resyncView()
 }
 
 // combatTick runs natural health regeneration once per RegenIntervalTicks:

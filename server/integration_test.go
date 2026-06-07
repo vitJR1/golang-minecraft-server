@@ -852,7 +852,8 @@ func TestMovePlayerSwitchesInstances(t *testing.T) {
 	drainExpect(t, ch, "move pre-chunks",
 		append([]int{
 			CbPlayPlayerInfoRemove, // clear hub tab list
-			CbPlayRespawn,          // tell client to wipe world + entities
+			CbPlayRespawn,          // two-hop dimension change (the_end →
+			CbPlayRespawn,          // overworld) to fully wipe the client
 		}, joinPrelude()...)...,
 	)
 	drainExpect(t, ch, "move chunks", loginChunks()...)
@@ -919,6 +920,7 @@ func TestMovePlayerNotifiesStayers(t *testing.T) {
 		append([]int{
 			CbPlayPlayerInfoRemove,
 			CbPlayRespawn,
+			CbPlayRespawn,
 		}, joinPrelude()...)...,
 	)
 	drainExpect(t, leaverCh, "Leaver move chunks", loginChunks()...)
@@ -967,6 +969,7 @@ func TestInstanceCreateAndJoin(t *testing.T) {
 	drainExpect(t, ch, "join pre-chunks",
 		append([]int{
 			CbPlayPlayerInfoRemove,
+			CbPlayRespawn,
 			CbPlayRespawn,
 		}, joinPrelude()...)...,
 	)
@@ -1058,7 +1061,7 @@ func TestInstanceDeleteSelfMovesToHub(t *testing.T) {
 	// Move to arena.
 	cli.write(t, SbPlayChatCommand, protocol.WriteString("instance join arena"))
 	drainExpect(t, ch, "join arena pre-chunks",
-		append([]int{CbPlayPlayerInfoRemove, CbPlayRespawn}, joinPrelude()...)...)
+		append([]int{CbPlayPlayerInfoRemove, CbPlayRespawn, CbPlayRespawn}, joinPrelude()...)...)
 	drainExpect(t, ch, "join arena chunks", loginChunks()...)
 	drainExpect(t, ch, "join arena post-chunks",
 		CbPlaySyncPos, CbPlayUpdateAttributes, CbPlayPlayerInfoUpdate, CbPlaySystemChat)
@@ -1066,7 +1069,7 @@ func TestInstanceDeleteSelfMovesToHub(t *testing.T) {
 	// Delete arena while inside it: server should evac caller to hub, then delete.
 	cli.write(t, SbPlayChatCommand, protocol.WriteString("instance delete arena"))
 	drainExpect(t, ch, "evac + delete pre-chunks",
-		append([]int{CbPlayPlayerInfoRemove, CbPlayRespawn}, joinPrelude()...)...)
+		append([]int{CbPlayPlayerInfoRemove, CbPlayRespawn, CbPlayRespawn}, joinPrelude()...)...)
 	drainExpect(t, ch, "evac + delete chunks", loginChunks()...)
 	drainExpect(t, ch, "evac + delete post-chunks",
 		CbPlaySyncPos,

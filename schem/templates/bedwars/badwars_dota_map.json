@@ -20,7 +20,8 @@
           "z": -54
         }
       ],
-      "villagers": [
+      "villagers":
+      [
         {
           "type": "item",
           "x": 1,

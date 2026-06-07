@@ -114,7 +114,7 @@ func TestBuildChunkDataRoundTrip(t *testing.T) {
 		setBlock(sections, p[0], p[1], p[2], s)
 	}
 
-	data := BuildChunkData(sections)
+	data := BuildChunkData(sections, 0)
 
 	// Decode section 0 and verify the planted blocks survive the round-trip.
 	states, _ := decodeSection(t, data)
@@ -137,11 +137,11 @@ func TestBuildChunkDataRoundTrip(t *testing.T) {
 }
 
 func TestAllAirSectionsAreSingleValued(t *testing.T) {
-	empty := BuildChunkData(make([][]int32, SectionCount))
+	empty := BuildChunkData(make([][]int32, SectionCount), 0)
 	// An all-air chunk must be byte-identical to BuildEmptyChunkData: every
 	// section single-valued air. This guarantees we didn't regress the empty
 	// path that the hub relies on.
-	if !bytes.Equal(empty, BuildEmptyChunkData()) {
+	if !bytes.Equal(empty, BuildEmptyChunkData(0)) {
 		t.Error("all-air BuildChunkData differs from BuildEmptyChunkData")
 	}
 }
@@ -162,7 +162,7 @@ func TestDirectPaletteForManyStates(t *testing.T) {
 	for i := 0; i < blocksPerSection; i++ {
 		sections[0][i] = int32(i%300 + 1) // 300 distinct non-air states
 	}
-	data := BuildChunkData(sections)
+	data := BuildChunkData(sections, 0)
 	states, _ := decodeSection(t, data)
 	for i := 0; i < blocksPerSection; i++ {
 		if want := int32(i%300 + 1); states[i] != want {

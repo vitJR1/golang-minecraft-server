@@ -23,6 +23,7 @@ type Template struct {
 	spawnPoints   []SpawnPoint
 	entities      []Entity
 	blockEntities map[Position]string
+	biome         string // namespaced biome painted across the whole world
 }
 
 // NewTemplate creates an empty template with no blocks and no spawn points.
@@ -77,6 +78,12 @@ func (t *Template) AddBlockEntity(p Position, typeName string) {
 	t.blockEntities[p] = typeName
 }
 
+// SetBiome sets the template's (uniform) biome, e.g. "minecraft:plains".
+func (t *Template) SetBiome(name string) { t.biome = name }
+
+// Biome returns the template's biome name (or "").
+func (t *Template) Biome() string { return t.biome }
+
 // BlockCount reports how many non-Air blocks the template carries. Useful
 // for sanity checks and for sizing hints.
 func (t *Template) BlockCount() int {
@@ -97,6 +104,7 @@ func (t *Template) Instantiate() *MemoryWorld {
 	for p, typeName := range t.blockEntities {
 		w.AddBlockEntity(p, typeName)
 	}
+	w.SetBiome(t.biome)
 	return w
 }
 
@@ -109,6 +117,7 @@ func (t *Template) Clone() *Template {
 	c.spawnPoints = append(c.spawnPoints, t.spawnPoints...)
 	c.entities = append(c.entities, t.entities...)
 	maps.Copy(c.blockEntities, t.blockEntities)
+	c.biome = t.biome
 	return c
 }
 

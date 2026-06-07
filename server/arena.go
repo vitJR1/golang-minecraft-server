@@ -16,10 +16,12 @@ import (
 // game Definition the matchmaker can queue (under the arena's name). The
 // server tracks name → kind so /play <game> <arena> can validate.
 
-// CreateArena builds and registers a playable arena of kind from templateName,
-// reading the layout config at <TemplateDir>/<templateName>.json. An empty
-// name auto-generates one ("bw-<n>" for bedwars, "<kind>-<n>" otherwise).
-// Returns the final arena name.
+// CreateArena builds an arena of kind from templateName (reading the layout
+// config at <TemplateDir>/<templateName>.json) and spins up a running Instance
+// for it right away — named after the arena — that players join directly via
+// /play <kind> <arena> (or /instance join <arena>) and where they see each
+// other. An empty name auto-generates one ("bw-<n>" for bedwars). Returns the
+// final arena name.
 func (s *Server) CreateArena(kind, templateName, name string) (string, error) {
 	builder, ok := game.GetArenaBuilder(kind)
 	if !ok {
@@ -39,17 +41,24 @@ func (s *Server) CreateArena(kind, templateName, name string) (string, error) {
 	if name == "" {
 		name = s.nextArenaName(kind)
 	}
-	if _, exists := game.GetDef(name); exists {
-		return "", fmt.Errorf("name %q already in use", name)
+	if s.GetInstance(name) != nil {
+		return "", fmt.Errorf("instance %q already exists", name)
 	}
 
 	def, err := builder(name, name, tmpl, config)
 	if err != nil {
 		return "", err
 	}
-	if err := game.TryRegister(def); err != nil {
-		return "", err
+	logic := def.New()
+	if logic == nil {
+		return "", fmt.Errorf("arena builder for %q returned nil logic", kind)
 	}
+
+	// Spin up the running instance now: one shared world per arena, so every
+	// joiner lands in the same instance and is mutually visible.
+	inst := NewInstance(name, s, def.Template.Instantiate())
+	s.AddInstance(inst)
+	s.AttachLogic(inst, logic)
 
 	s.mu.Lock()
 	s.arenas[name] = kind
@@ -66,7 +75,7 @@ func (s *Server) nextArenaName(kind string) string {
 	}
 	for {
 		name := fmt.Sprintf("%s-%d", prefix, s.arenaSerial.Add(1))
-		if _, exists := game.GetDef(name); !exists {
+		if s.GetInstance(name) == nil {
 			return name
 		}
 	}

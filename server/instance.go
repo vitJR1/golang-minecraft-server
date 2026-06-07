@@ -137,6 +137,17 @@ type Instance struct {
 	entitiesMu    sync.Mutex
 	worldEntities []instanceEntity
 
+	// chests holds the stored contents of opened chests, keyed by block
+	// position (27 slots each). Populated lazily on first interaction;
+	// guarded by chestsMu (multiple players may open chests concurrently).
+	chestsMu sync.Mutex
+	chests   map[world.Position]*chestInventory
+
+	// projectiles are in-flight thrown items (egg/snowball/ender pearl),
+	// simulated on the tick loop. Guarded by projMu.
+	projMu      sync.Mutex
+	projectiles []*projectile
+
 	// joinMu serializes registration + visibility announcements per
 	// instance, so one player's join can't observe another mid-join inside
 	// the same instance.
@@ -197,6 +208,7 @@ func NewInstance(id string, srv *Server, w world.World) *Instance {
 	i.combatEnabled.Store(true) // instances default to PvP on (hub turns it off)
 	i.loadWorldEntities()
 	i.OnTick(i.combatTick)
+	i.OnTick(i.projectileTick)
 	go i.tickLoop()
 	return i
 }

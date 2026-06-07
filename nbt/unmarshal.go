@@ -39,6 +39,25 @@ func Unmarshal(data []byte) (Compound, error) {
 	return readCompoundPayload(r)
 }
 
+// SkipTag reads and discards one tag from r. Used to consume the optional NBT
+// trailing a network "Slot": a single 0x00 byte (TagEnd) means "no NBT" and is
+// consumed as-is; any other tag is a type byte + name + payload (the empty-name
+// compound items use). Lets a slot reader advance past item NBT it doesn't need.
+func SkipTag(r *bytes.Reader) error {
+	tagID, err := r.ReadByte()
+	if err != nil {
+		return err
+	}
+	if Tag(tagID) == TagEnd {
+		return nil
+	}
+	if _, err := readUTF(r); err != nil {
+		return err
+	}
+	_, err = readPayload(r, Tag(tagID))
+	return err
+}
+
 // autoDecompress sniffs the magic bytes and routes through the right
 // decoder. Returns the original slice when the data looks like raw NBT.
 func autoDecompress(data []byte) ([]byte, error) {

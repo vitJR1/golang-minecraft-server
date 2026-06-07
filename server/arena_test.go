@@ -43,35 +43,41 @@ func TestCreateArena(t *testing.T) {
 		t.Error("expected missing-config error")
 	}
 
-	// Explicit name registers a playable def + marks the arena.
+	// Explicit name: marks the arena AND spins up a running instance.
 	name, err := s.CreateArena("arenatest", "maps/test", "myarena")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { game.Unregister("myarena") })
+	t.Cleanup(func() { _ = s.RemoveInstance("myarena") })
 	if name != "myarena" || !s.IsArena("myarena") {
 		t.Fatalf("name=%q isArena=%v", name, s.IsArena("myarena"))
 	}
-	if _, ok := game.GetDef("myarena"); !ok {
-		t.Error("definition not registered for arena")
+	if s.GetInstance("myarena") == nil {
+		t.Error("arena instance not created")
 	}
 
-	// Duplicate name rejected.
+	// Duplicate name rejected (instance already exists).
 	if _, err := s.CreateArena("arenatest", "maps/test", "myarena"); err == nil {
 		t.Error("expected duplicate-name error")
 	}
 
-	// Auto name uses the kind prefix and is registered.
+	// Auto name uses the kind prefix and creates an instance.
 	auto, err := s.CreateArena("arenatest", "maps/test", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { game.Unregister(auto) })
+	t.Cleanup(func() { _ = s.RemoveInstance(auto) })
 	if !strings.HasPrefix(auto, "arenatest-") {
 		t.Errorf("auto name %q should start with kind prefix", auto)
 	}
-	if !s.IsArena(auto) {
-		t.Errorf("auto arena %q not tracked", auto)
+	if !s.IsArena(auto) || s.GetInstance(auto) == nil {
+		t.Errorf("auto arena %q not tracked/running", auto)
+	}
+
+	// Removing the instance clears arena tracking.
+	_ = s.RemoveInstance("myarena")
+	if s.IsArena("myarena") {
+		t.Error("arena tracking should be cleared after RemoveInstance")
 	}
 }
 

@@ -163,6 +163,13 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		// Acknowledge the client's prediction first so it doesn't roll back.
 		_ = c.sendAckBlockChange(int32(seq))
 
+		// Right-clicking a chest opens it instead of placing a block.
+		clickedPos := world.Position{X: bx, Y: by, Z: bz}
+		if isChestBlock(c.instance.World.GetBlock(clickedPos)) {
+			c.openBlockChest(clickedPos)
+			break
+		}
+
 		placePos := offsetByFace(world.Position{X: bx, Y: by, Z: bz}, face)
 		held := c.heldItemName()
 
@@ -310,6 +317,16 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		// Other slots / instances no-op.
 		_, _ = protocol.ReadVarInt(packet) // hand
 		_, _ = protocol.ReadVarInt(packet) // sequence
+		// Throwable items (egg / snowball / ender pearl) take priority — a
+		// creative-placed throwable in any slot is thrown. Server-given menu
+		// items (blaze rod, arena-selector pearl) aren't creative-tracked, so
+		// they fall through to the slot-based menu dispatch below.
+		if held := c.heldItemName(); held != "" {
+			if _, ok := throwableEntityID(held); ok {
+				c.throwProjectile(held)
+				break
+			}
+		}
 		switch c.heldSlot.Load() {
 		case 0:
 			if c.instance == c.server.Hub {
@@ -320,7 +337,11 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 				c.openHubMainMenu()
 			}
 		case 1:
-			if arenas, ok := arenasForLobby(c.instance.ID); ok {
+			// BedWars lobby gets the live DOTA arena browser (create/join);
+			// other lobbies keep the placeholder arena list for now.
+			if c.instance.ID == LobbyBedWars {
+				c.openBedwarsArenaMenu()
+			} else if arenas, ok := arenasForLobby(c.instance.ID); ok {
 				c.openArenaMenu(c.instance.ID, arenas)
 			}
 		}
@@ -363,11 +384,17 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		// handler might if it doesn't get drained first.
 		_, _ = packet.ReadByte()           // button
 		_, _ = protocol.ReadVarInt(packet) // mode
-		// Don't bother parsing changed-slots array or carried item;
-		// the buffer is discarded after this handler returns.
 		if m := c.menu.Load(); m != nil && winID == menuWindowID {
-			if entry, ok := m.entries[slot]; ok && m.onClick != nil {
-				m.onClick(c, entry)
+			switch {
+			case m.kind == "chest":
+				// Persist the client's computed slot changes to the chest.
+				c.applyChestClick(packet, m.chestPos)
+			default:
+				// Navigation menu: dispatch the clicked icon. The rest of the
+				// packet (changed slots, carried item) is discarded.
+				if entry, ok := m.entries[slot]; ok && m.onClick != nil {
+					m.onClick(c, entry)
+				}
 			}
 		}
 
@@ -398,6 +425,13 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			"length", packet.Len())
 	}
 	return nil
+}
+
+// isChestBlock reports whether b is a chest the player can open
+// (chest / trapped_chest / ender_chest). Matched by name suffix so all
+// chest variants count.
+func isChestBlock(b world.Block) bool {
+	return strings.HasSuffix(b.Name, "chest")
 }
 
 // offsetByFace returns the neighbor block position on the given face of p.
