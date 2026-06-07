@@ -43,6 +43,11 @@ encryption/    AES-128 CFB8 cipher + net.Conn wrapper.
 mojang/        sessionserver.mojang.com client (hasJoined endpoint).
 ban/           Ban list loader (reads banlist.json with reload support).
 cfg/           Runtime config vars (ServerId, OnlineMode).
+templates/     Schematic-template locations + canonical names. The single
+               source of truth for the templates Root, the name constants
+               (Spawn, BedwarsDotaMap, *Lobby), and OS-independent path
+               helpers (SchemFile/ConfigFile/Name) — names are forward-slash,
+               disk paths use the OS separator (fixes Windows lookups).
 db/            PostgreSQL connection layer (pgx/v5 pool; config from env,
                ping, graceful close).
 redisc/        Redis connection layer (go-redis/v9; config from env, ping,

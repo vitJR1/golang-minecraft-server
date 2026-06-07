@@ -7,6 +7,7 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/templates"
 	"minecraft-server/world"
 	"path/filepath"
 	"sort"
@@ -608,7 +609,7 @@ func cmdHub(c *ClientConnection, args []string) {
 // templatesRoot is where /template list scans. Kept as a var so tests
 // or future config can point it elsewhere; production stays at the
 // project-relative default that ships with the repo.
-var templatesRoot = "schem/templates"
+var templatesRoot = templates.Root
 
 // cmdTemplate dispatches the /template subcommands. Only `list` exists
 // today — there's room for `/template load <name>` once we wire that
@@ -659,17 +660,12 @@ func scanTemplates(root string) ([]string, error) {
 			}
 			return err
 		}
-		if d.IsDir() {
+		if d.IsDir() || !templates.IsSchem(path) {
 			return nil
 		}
-		if !strings.EqualFold(filepath.Ext(d.Name()), ".schem") {
-			return nil
+		if name, ok := templates.Name(root, path); ok {
+			names = append(names, name)
 		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		names = append(names, strings.TrimSuffix(rel, filepath.Ext(rel)))
 		return nil
 	})
 	if err != nil {

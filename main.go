@@ -15,6 +15,7 @@ import (
 	"minecraft-server/schem"
 	"minecraft-server/server"
 	"minecraft-server/store"
+	"minecraft-server/templates"
 	"net"
 	"os"
 	"path/filepath"
@@ -31,9 +32,9 @@ import (
 )
 
 const (
-	templatesRoot   = "schem/templates"
+	templatesRoot   = templates.Root
 	templateBaseY   = 64 // bottom of every imported schematic in world coords
-	hubTemplateName = "spawn"
+	hubTemplateName = templates.Spawn
 )
 
 func main() {
@@ -97,10 +98,7 @@ func loadTemplates(srv *server.Server) {
 			}
 			return err
 		}
-		if d.IsDir() {
-			return nil
-		}
-		if !strings.EqualFold(filepath.Ext(d.Name()), ".schem") {
+		if d.IsDir() || !templates.IsSchem(path) {
 			return nil
 		}
 
@@ -109,8 +107,12 @@ func loadTemplates(srv *server.Server) {
 			slog.Warn("template load failed", "path", path, "err", err)
 			return nil // skip this one, continue walking
 		}
-		rel, _ := filepath.Rel(templatesRoot, path)
-		name := strings.TrimSuffix(rel, filepath.Ext(rel))
+		// Canonical forward-slash name, OS-independent (Windows filepath.Rel
+		// would otherwise give backslash names that lookups can't match).
+		name, ok := templates.Name(templatesRoot, path)
+		if !ok {
+			return nil
+		}
 
 		originX := -int(sch.Width) / 2
 		originZ := -int(sch.Length) / 2

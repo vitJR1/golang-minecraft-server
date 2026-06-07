@@ -13,6 +13,7 @@ import (
 	"minecraft-server/protocol"
 	"minecraft-server/redisc"
 	"minecraft-server/store"
+	"minecraft-server/templates"
 	"minecraft-server/world"
 	"net"
 	"sync"
@@ -111,7 +112,7 @@ func New() *Server {
 		instances:   make(map[string]*Instance),
 		templates:   make(map[string]*world.Template),
 		arenas:      make(map[string]string),
-		TemplateDir: "schem/templates",
+		TemplateDir: templates.Root,
 	}
 	s.Hub = NewInstance("hub", s, world.NewMemoryWorld())
 	// The hub is a safe lobby — no PvP. Game instances keep the default
@@ -471,11 +472,12 @@ type ClientConnection struct {
 	// the right-click should fire (blaze rod vs ender pearl, etc.).
 	heldSlot atomic.Int32
 
-	// heldItems maps inventory slot index → namespaced item id, fed by the
-	// creative Set Creative Mode Slot packet. Used by UseItemOnBlock to place
-	// the item the player is actually holding (block or item frame) instead of
-	// always-stone. Touched only on the readLoop goroutine, so no lock.
-	heldItems map[int16]string
+	// inv is the player's inventory (window-0 layout: hotbar 36..44, main
+	// 9..35, etc.), fed by Set Creative Mode Slot, give helpers, and container
+	// clicks. UseItemOnBlock / throwing read the held slot from it, so a block
+	// is only placed when one is actually held. Touched only on the readLoop
+	// goroutine, so no lock.
+	inv playerInventory
 
 	// sprinting tracks whether the client is currently sprinting, fed by the
 	// Player Command packet (start/stop sprinting actions). The combat code

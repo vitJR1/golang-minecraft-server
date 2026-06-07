@@ -1,6 +1,10 @@
 package bedwars
 
-import "fmt"
+import (
+	"fmt"
+
+	"minecraft-server/templates"
+)
 
 // Mode is a registerable BedWars preset: how many teams, how big each team
 // is, and how few players can start a round. One Mode → one entry in the
@@ -59,9 +63,9 @@ func (m Mode) validate() error {
 
 // defaultModes is the set registered at startup. Add a line here to ship a
 // new variant; nothing else needs to change.
-// defaultMapPath is the shipped 4-team map, relative to the server's working
-// directory (the repo root, same base as templatesRoot in main.go).
-const defaultMapPath = "schem/templates/bedwars/badwars_dota_map.schem"
+// defaultMapPath is the shipped 4-team map's .schem path, built from the
+// templates module so the location lives in one place (and is OS-correct).
+var defaultMapPath = templates.SchemFile(templates.Root, templates.BedwarsDotaMap)
 
 var defaultModes = []Mode{
 	// MinStart:2 keeps the flagship mode testable with just two clients;

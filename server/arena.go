@@ -3,11 +3,11 @@ package server
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
 	"minecraft-server/game"
+	"minecraft-server/templates"
 )
 
 // arena.go wires runtime arena creation: /arena create takes a game kind, a
@@ -32,7 +32,7 @@ func (s *Server) CreateArena(kind, templateName, name string) (string, error) {
 		return "", fmt.Errorf("unknown template %q", templateName)
 	}
 
-	configPath := filepath.Join(s.TemplateDir, templateName+".json")
+	configPath := templates.ConfigFile(s.TemplateDir, templateName)
 	config, err := os.ReadFile(configPath)
 	if err != nil {
 		return "", fmt.Errorf("read arena config %s: %w", configPath, err)

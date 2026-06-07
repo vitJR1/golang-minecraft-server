@@ -2,6 +2,7 @@ package server
 
 import (
 	"log/slog"
+	"minecraft-server/templates"
 	"minecraft-server/world"
 )
 
@@ -19,9 +20,9 @@ const (
 // schem/templates/<game>/<file>.schem. Keep in sync with the on-disk
 // layout — renaming a file means renaming this map.
 var lobbyTemplateNames = map[string]string{
-	LobbyFFA:     "ffa/ffa_lobby",
-	LobbyBedWars: "bedwars/bedwars_lobby",
-	LobbySkyWars: "skywars/skywars_lobby",
+	LobbyFFA:     templates.FFALobby,
+	LobbyBedWars: templates.BedwarsLobby,
+	LobbySkyWars: templates.SkywarsLobby,
 }
 
 // lobbyIDs is the iteration order at startup. Keep stable — the order

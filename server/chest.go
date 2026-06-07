@@ -131,8 +131,13 @@ func (c *ClientConnection) applyChestClick(packet *bytes.Buffer, pos world.Posit
 		if !ok {
 			return // malformed slot — stop, leave what we have
 		}
-		if slot >= 0 && slot < chestSlotCount {
+		switch {
+		case slot >= 0 && slot < chestSlotCount:
 			c.instance.setChestSlot(pos, int(slot), st)
+		case slot >= chestSlotCount:
+			// Player-inventory side of the chest window: slot chestSlotCount+i
+			// maps to window-0 slot mainInvStart+i — keep the held item in sync.
+			c.inv.set(slot-chestSlotCount+mainInvStart, st)
 		}
 	}
 	// Trailing carried item (cursor) — read to keep parsing consistent; unused.

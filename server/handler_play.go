@@ -190,14 +190,18 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			break
 		}
 
-		// Otherwise place a block: the held block when we know it (creative),
-		// falling back to Stone when the held item is unknown (no inventory in
-		// survival games — keeps the old build-with-stone behavior).
-		block := world.Stone
-		if held != "" {
-			if b, ok := world.BlockByName(held); ok {
-				block = b
-			}
+		// Beds are two blocks (foot + head with a facing) — handled specially.
+		if bed, ok := bedFromItem(held); ok {
+			c.placeBed(placePos, bed)
+			break
+		}
+
+		// Place a block ONLY if the held item is a real block. No block in
+		// hand (empty slot, or a non-block item like a sword) → nothing
+		// happens; the always-place-stone fallback is gone.
+		block, ok := world.BlockByName(held)
+		if !ok || block == world.Air {
+			break
 		}
 		if hook := c.instance.OnBlockPlace; hook != nil {
 			if !hook(c, placePos, block) {

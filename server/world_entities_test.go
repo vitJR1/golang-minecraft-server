@@ -123,20 +123,18 @@ func TestCreativeSlotHeldItem(t *testing.T) {
 	}
 
 	var b bytes.Buffer
-	b.Write(protocol.WriteShort(hotbarSlotBase)) // slot 36
-	b.WriteByte(1)                               // present
-	b.Write(protocol.WriteVarInt32(frameID))
-	b.WriteByte(1) // count
+	b.Write(protocol.WriteShort(hotbarStart)) // slot 36
+	b.Write(protocol.WriteSlot(frameID, 1))   // present item (with NBT terminator)
 	c.onSetCreativeSlot(&b)
 
 	if got := c.heldItemName(); got != "minecraft:item_frame" {
 		t.Errorf("heldItemName = %q, want minecraft:item_frame", got)
 	}
 
-	// Clearing the slot (present=false) drops the held item.
+	// Clearing the slot (empty slot) drops the held item.
 	var empty bytes.Buffer
-	empty.Write(protocol.WriteShort(hotbarSlotBase))
-	empty.WriteByte(0) // not present
+	empty.Write(protocol.WriteShort(hotbarStart))
+	empty.Write(protocol.WriteEmptySlot())
 	c.onSetCreativeSlot(&empty)
 	if got := c.heldItemName(); got != "" {
 		t.Errorf("after clear: heldItemName = %q, want empty", got)

@@ -12,49 +12,6 @@ import (
 // instance construction (loadWorldEntities) so every viewer shares it, then
 // sent to each client on join / move / respawn via sendWorldEntities.
 
-// hotbarSlotBase is the player-inventory slot index of hotbar slot 0; hotbar
-// slots 0..8 map to inventory slots 36..44.
-const hotbarSlotBase = 36
-
-// onSetCreativeSlot records the item a creative player put in a slot, so
-// UseItemOnBlock can place what they're holding. Reads Short slot + Slot(item);
-// any trailing item NBT is left unread (the per-packet buffer is discarded).
-func (c *ClientConnection) onSetCreativeSlot(packet *bytes.Buffer) {
-	raw, err := protocol.ReadUShortFromBuf(packet)
-	if err != nil {
-		return
-	}
-	slot := int16(raw)
-
-	present, err := protocol.ReadBool(packet)
-	if err != nil {
-		return
-	}
-	if c.heldItems == nil {
-		c.heldItems = make(map[int16]string)
-	}
-	if !present {
-		delete(c.heldItems, slot)
-		return
-	}
-	itemID, err := protocol.ReadVarInt(packet)
-	if err != nil {
-		return
-	}
-	_, _ = packet.ReadByte() // count (NBT, if any, follows but we don't need it)
-	if name, ok := world.ItemName(int32(itemID)); ok {
-		c.heldItems[slot] = name
-	} else {
-		delete(c.heldItems, slot)
-	}
-}
-
-// heldItemName returns the namespaced id of the item in the player's selected
-// hotbar slot, or "" if unknown (no creative-slot info yet).
-func (c *ClientConnection) heldItemName() string {
-	return c.heldItems[int16(hotbarSlotBase+c.heldSlot.Load())]
-}
-
 // instanceEntity is a world entity with its assigned runtime identity.
 type instanceEntity struct {
 	eid  int32

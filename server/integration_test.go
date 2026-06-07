@@ -112,6 +112,21 @@ func (tc *testClient) read(t *testing.T) (id int, payload *bytes.Buffer) {
 	return id, buf
 }
 
+// giveHeldItem puts itemName in the player's selected hotbar slot (window-0
+// slot 36) via a Set Creative Mode Slot packet, so a subsequent block place
+// has something in hand (placement no longer falls back to stone).
+func giveHeldItem(t *testing.T, cli *testClient, itemName string) {
+	t.Helper()
+	id, ok := world.ItemByName(itemName)
+	if !ok {
+		t.Fatalf("unknown item %q", itemName)
+	}
+	var p bytes.Buffer
+	p.Write(protocol.WriteShort(36)) // hotbar slot 0 in window 0
+	p.Write(protocol.WriteSlot(id, 1))
+	cli.write(t, SbPlaySetCreativeSlot, p.Bytes())
+}
+
 func buildHandshake(protoVer int32, addr string, port uint16, nextState int32) []byte {
 	var buf bytes.Buffer
 	buf.Write(protocol.WriteVarInt32(protoVer))
@@ -537,7 +552,8 @@ func TestBlockPlaceBroadcastsAndAcks(t *testing.T) {
 	drainExpect(t, bobCh, "Watcher pre-place", CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer)
 
 	// Placer right-clicks the top face of block (0, 63, 0) → server places
-	// at (0, 64, 0).
+	// at (0, 64, 0). They must be holding a block first.
+	giveHeldItem(t, cli1, "minecraft:stone")
 	var p bytes.Buffer
 	protocol.WriteVarInt32ToBuffer(&p, 0)     // hand
 	p.Write(protocol.WritePosition(0, 63, 0)) // clicked block
@@ -686,6 +702,7 @@ func TestOnBlockPlaceVetoRollsBack(t *testing.T) {
 	ch := cli.startDrain()
 	drainExpect(t, ch, "Placer solo", CbPlayPlayerInfoUpdate)
 
+	giveHeldItem(t, cli, "minecraft:stone")
 	var p bytes.Buffer
 	protocol.WriteVarInt32ToBuffer(&p, 0)
 	p.Write(protocol.WritePosition(0, 63, 0))

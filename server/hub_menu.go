@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"minecraft-server/protocol"
+	"minecraft-server/templates"
 	"minecraft-server/world"
 	"strings"
 )
@@ -215,10 +216,6 @@ func arenaOnClick(c *ClientConnection, e menuEntry) {
 	c.menu.Store(nil)
 }
 
-// bedwarsDotaTemplate is the registered template name for the DOTA bedwars map
-// (schem/templates/bedwars/badwars_dota_map.schem + sibling .json config).
-const bedwarsDotaTemplate = "bedwars/badwars_dota_map"
-
 // openBedwarsArenaMenu shows the live DOTA arena browser: a "create new arena"
 // compass plus one compass per running bedwars arena that already has players
 // (its stack size = player count). Clicking creates-and-joins or joins.
@@ -266,7 +263,7 @@ func bedwarsArenaOnClick(c *ClientConnection, e menuEntry) {
 	c.menu.Store(nil)
 	name := e.key
 	if name == "create" {
-		created, err := c.server.CreateArena("bedwars", bedwarsDotaTemplate, "")
+		created, err := c.server.CreateArena("bedwars", templates.BedwarsDotaMap, "")
 		if err != nil {
 			_ = c.sendSystemMessage("Couldn't create arena: " + err.Error())
 			slog.Warn("bedwars arena create failed", "player", c.playerName, "err", err)
