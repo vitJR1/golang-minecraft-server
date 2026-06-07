@@ -1,5 +1,7 @@
 package world
 
+import "maps"
+
 // SpawnPoint is one starting position (and orientation) a game can pick
 // from when placing a freshly-joined player. Yaw is in degrees [0..360),
 // Pitch in [-90..90].
@@ -96,6 +98,18 @@ func (t *Template) Instantiate() *MemoryWorld {
 		w.AddBlockEntity(p, typeName)
 	}
 	return w
+}
+
+// Clone returns a deep copy of the template — blocks, spawn points, entities,
+// and block entities — so callers can mutate it (e.g. recolour beds for a
+// team) without disturbing the shared registered template.
+func (t *Template) Clone() *Template {
+	c := NewTemplate()
+	maps.Copy(c.blocks, t.blocks)
+	c.spawnPoints = append(c.spawnPoints, t.spawnPoints...)
+	c.entities = append(c.entities, t.entities...)
+	maps.Copy(c.blockEntities, t.blockEntities)
+	return c
 }
 
 // CloneFromWorld captures a snapshot of src's non-Air blocks into a fresh

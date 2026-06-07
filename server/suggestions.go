@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"minecraft-server/game"
 	"minecraft-server/protocol"
 	"sort"
 	"strings"
@@ -115,6 +116,27 @@ func (s *Server) Suggestions(c *ClientConnection, text string) (start, length in
 			if len(parts) >= 2 && strings.ToLower(parts[1]) == "set" {
 				candidates = s.InstanceIDs()
 			}
+		}
+	case cmd == "arena":
+		switch argIdx {
+		case 1:
+			candidates = []string{"create", "list"}
+		case 2:
+			// create <game> / list <game> → arena-capable game kinds.
+			candidates = game.ArenaKinds()
+		case 3:
+			// create <game> <template> → template names.
+			if len(parts) >= 2 && strings.EqualFold(parts[1], "create") {
+				candidates = s.TemplateNames()
+			}
+		}
+	case cmd == "play" || cmd == "queue" || cmd == "q":
+		switch argIdx {
+		case 1:
+			candidates = append([]string{"leave", "list", "status"}, s.baseGameIDs()...)
+		case 2:
+			// /play <game> <arena> → arenas of that kind.
+			candidates = s.ArenasOfKind(strings.ToLower(parts[1]))
 		}
 	}
 

@@ -78,13 +78,22 @@ type Server struct {
 
 	nextEntityID       atomic.Int32
 	instanceSerialNext atomic.Uint64
+	arenaSerial        atomic.Uint64
+
+	// TemplateDir is where map .schem files (and their sibling <name>.json
+	// arena configs) live. Default "schem/templates"; /arena create resolves
+	// a template name to its config file under here.
+	TemplateDir string
 
 	// instances is the registry of all live instances (including Hub).
 	// templates is the registry of read-only world snapshots that
-	// /instance create can clone from.
+	// /instance create can clone from. arenas maps a created arena's name to
+	// its game kind ("bedwars"); the playable Definition itself lives in the
+	// game registry under the same name.
 	mu        sync.RWMutex
 	instances map[string]*Instance
 	templates map[string]*world.Template
+	arenas    map[string]string
 }
 
 // nextInstanceSerial allocates a unique monotonic uint64 used by
@@ -97,10 +106,12 @@ func (s *Server) nextInstanceSerial() uint64 {
 // from cfg.InitialOps.
 func New() *Server {
 	s := &Server{
-		Ops:       NewOpSet(cfg.InitialOps),
-		Mutes:     NewMuteSet(),
-		instances: make(map[string]*Instance),
-		templates: make(map[string]*world.Template),
+		Ops:         NewOpSet(cfg.InitialOps),
+		Mutes:       NewMuteSet(),
+		instances:   make(map[string]*Instance),
+		templates:   make(map[string]*world.Template),
+		arenas:      make(map[string]string),
+		TemplateDir: "schem/templates",
 	}
 	s.Hub = NewInstance("hub", s, world.NewMemoryWorld())
 	// The hub is a safe lobby — no PvP. Game instances keep the default

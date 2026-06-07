@@ -142,3 +142,44 @@ func TestCreativeSlotHeldItem(t *testing.T) {
 		t.Errorf("after clear: heldItemName = %q, want empty", got)
 	}
 }
+
+func TestFrameInteractInsertAndRotate(t *testing.T) {
+	s := New()
+	w := world.NewMemoryWorld()
+	w.AddEntity(world.Entity{Type: "minecraft:item_frame", Frame: &world.FrameData{}})
+	inst := NewInstance("frames-interact", s, w)
+	t.Cleanup(inst.Stop)
+	eid := inst.worldEntities[0].eid
+	frame := inst.worldEntities[0].e.Frame
+
+	// Empty held → no change.
+	inst.FrameInteract(eid, "")
+	if frame.Item != "" {
+		t.Fatalf("empty hand should not fill frame: %q", frame.Item)
+	}
+	// Unknown item → rejected.
+	inst.FrameInteract(eid, "minecraft:not_an_item")
+	if frame.Item != "" {
+		t.Fatalf("unknown item should be rejected: %q", frame.Item)
+	}
+	// Known item → inserted.
+	inst.FrameInteract(eid, "minecraft:diamond")
+	if frame.Item != "minecraft:diamond" || frame.Rotation != 0 {
+		t.Fatalf("insert failed: %+v", frame)
+	}
+	// Full frame → right-click rotates, item unchanged.
+	inst.FrameInteract(eid, "minecraft:stone")
+	if frame.Rotation != 1 || frame.Item != "minecraft:diamond" {
+		t.Errorf("rotate failed: %+v", frame)
+	}
+	// Rotation wraps 0..7.
+	for range 7 {
+		inst.FrameInteract(eid, "")
+	}
+	if frame.Rotation != 0 {
+		t.Errorf("rotation should wrap to 0, got %d", frame.Rotation)
+	}
+
+	// Unknown eid is a no-op (no panic).
+	inst.FrameInteract(999999, "minecraft:diamond")
+}

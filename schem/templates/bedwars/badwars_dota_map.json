@@ -1,0 +1,210 @@
+{
+  "teams": [
+    {
+      "name": "Red",
+      "spawn": {
+        "x": 0,
+        "y": 69,
+        "z": -57,
+        "yaw": 0.26282284
+      },
+      "beds": [
+        {
+          "x": 0,
+          "y": 69,
+          "z": -55
+        },
+        {
+          "x": 0,
+          "y": 69,
+          "z": -54
+        }
+      ],
+      "villagers": [
+        {
+          "type": "item",
+          "x": 1,
+          "y": 69,
+          "z": -57,
+          "yaw": 0.26282284
+        },
+        {
+          "type": "upgrade",
+          "x": -1,
+          "y": 69,
+          "z": -57,
+          "yaw": 0.26282284
+        }
+      ]
+    },
+    {
+      "name": "Blue",
+      "spawn": {
+        "x": 58,
+        "y": 69,
+        "z": 0,
+        "yaw": 90
+      },
+      "beds": [
+        {
+          "x": 54,
+          "y": 69,
+          "z": 0
+        },
+        {
+          "x": 55,
+          "y": 69,
+          "z": 0
+        }
+      ],
+      "villagers": [
+        {
+          "type": "item",
+          "x": 59,
+          "y": 69,
+          "z": 0,
+          "yaw": 90
+        },
+        {
+          "type": "upgrade",
+          "x": 57,
+          "y": 69,
+          "z": 0,
+          "yaw": 90
+        }
+      ]
+    },
+    {
+      "name": "Green",
+      "spawn": {
+        "x": 0,
+        "y": 69,
+        "z": 57,
+        "yaw": 179.73718
+      },
+      "beds": [
+        {
+          "x": 0,
+          "y": 69,
+          "z": 54
+        },
+        {
+          "x": 0,
+          "y": 69,
+          "z": 55
+        }
+      ],
+      "villagers": [
+        {
+          "type": "item",
+          "x": 1,
+          "y": 69,
+          "z": 57,
+          "yaw": 179.73718
+        },
+        {
+          "type": "upgrade",
+          "x": -1,
+          "y": 69,
+          "z": 57,
+          "yaw": 179.73718
+        }
+      ]
+    },
+    {
+      "name": "Yellow",
+      "spawn": {
+        "x": -59,
+        "y": 69,
+        "z": 0,
+        "yaw": -90
+      },
+      "beds": [
+        {
+          "x": -56,
+          "y": 69,
+          "z": 0
+        },
+        {
+          "x": -55,
+          "y": 69,
+          "z": 0
+        }
+      ],
+      "villagers": [
+        {
+          "type": "item",
+          "x": -58,
+          "y": 69,
+          "z": 0,
+          "yaw": -90
+        },
+        {
+          "type": "upgrade",
+          "x": -60,
+          "y": 69,
+          "z": 0,
+          "yaw": -90
+        }
+      ]
+    }
+  ],
+  "generators": [
+    {
+      "resource": "iron",
+      "x": 0,
+      "y": 69,
+      "z": -57,
+      "intervalTicks": 60,
+      "team": 0
+    },
+    {
+      "resource": "iron",
+      "x": 58,
+      "y": 69,
+      "z": 0,
+      "intervalTicks": 60,
+      "team": 1
+    },
+    {
+      "resource": "iron",
+      "x": 0,
+      "y": 69,
+      "z": 57,
+      "intervalTicks": 60,
+      "team": 2
+    },
+    {
+      "resource": "iron",
+      "x": -59,
+      "y": 69,
+      "z": 0,
+      "intervalTicks": 60,
+      "team": 3
+    },
+    {
+      "resource": "emerald",
+      "x": 15,
+      "y": 72,
+      "z": -15,
+      "intervalTicks": 900,
+      "team": null
+    },
+    {
+      "resource": "emerald",
+      "x": -14,
+      "y": 72,
+      "z": 14,
+      "intervalTicks": 900,
+      "team": null
+    },
+    {
+      "resource": "diamond",
+      "x": 0,
+      "y": 69,
+      "z": 0,
+      "intervalTicks": 600,
+      "team": null
+    }
+  ]
+}

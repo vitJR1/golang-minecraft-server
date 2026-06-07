@@ -105,6 +105,12 @@ The RSA keypair is process-global, generated in `server.init()` via `NewEncrypti
 
 CFB8 in `encryption/cfb8.go` is a hand-optimized ring-buffer variant. The wrapping `Write` in `encryption/encrypt_connection.go` chunks at 4 KiB and guarantees full writes — **do not collapse to a single `XORKeyStream + Write`**; a partial write desyncs the cipher permanently.
 
+### Games, arenas, matchmaker
+
+Games register a `game.Definition` (ID, Min/Max players, `Template`, `New` Logic factory) in `init()`. `/play <game>` queues via `Matchmaker`; when MinPlayers is reached, `Server.StartGame` clones the Definition's template into a fresh Instance and attaches the Logic.
+
+**Named arenas** are created at runtime: `/arena create <game> <template> [name]` (op). Each game kind that supports arenas registers a `game.ArenaBuilder` (`game/arena.go`); bedwars' is in `games/bedwars/arena_config.go`. The builder takes the loaded map template + the bytes of a sibling JSON config (`<TemplateDir>/<template>.json`, default `schem/templates/...`) and returns a playable Definition registered under the arena name (auto-named `bw-<n>` for bedwars). `Server.arenas` tracks name→kind; `/play <game> <arena>` queues that arena's Definition. The arena JSON defines the layout in world coordinates — the map supplies only blocks. Each team carries its own spawn, bed blocks, and shop villager NPCs (`teams[].villagers`); generators are a top-level list (per-team or neutral). See `schem/templates/bedwars/badwars_dota_map.json`; regenerate a starter from auto-detect with `GENCFG=1 go test ./games/bedwars -run TestGenSampleConfig`.
+
 ### Packet IDs
 
 `server/packet_ids.go` is split into state-scoped const blocks (`Sb*` serverbound, `Cb*` clientbound, with `Handshake`/`Status`/`Login`/`Play` prefixes). Many IDs collide at `0x00` across states; that's correct because dispatch is state-keyed. Source of truth: wiki.vg for protocol 763.

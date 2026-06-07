@@ -29,7 +29,23 @@ type FrameData struct {
 const (
 	ItemFrameEntityID     int32 = 56
 	GlowItemFrameEntityID int32 = 43
+	VillagerEntityID      int32 = 108
 )
+
+// entityTypeIDs maps namespaced entity ids to their protocol type id, for the
+// entity kinds the server spawns from worlds (item frames, villagers, …).
+var entityTypeIDs = map[string]int32{
+	"minecraft:item_frame":      ItemFrameEntityID,
+	"minecraft:glow_item_frame": GlowItemFrameEntityID,
+	"minecraft:villager":        VillagerEntityID,
+}
+
+// EntityTypeID returns the protocol type id for a namespaced entity id, and
+// whether it's a kind the server knows how to spawn.
+func EntityTypeID(name string) (int32, bool) {
+	id, ok := entityTypeIDs[name]
+	return id, ok
+}
 
 // Item-frame facing values (the entity's Facing byte / spawn object data).
 const (

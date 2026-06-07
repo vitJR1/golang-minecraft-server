@@ -244,9 +244,8 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		if err != nil {
 			return fmt.Errorf("interact type: %w", err)
 		}
-		// Only "attack" (1) is wired up so far. interact / interact_at go
-		// to entity gameplay we haven't built (right-click NPCs, etc.).
-		if atype == 1 {
+		switch atype {
+		case 1: // attack
 			if victim, ok := c.instance.Players.Get(int32(target)); ok && victim != c {
 				// The game logic hook gets first refusal: returning false
 				// vetoes the hit (no damage), so a game can implement teams,
@@ -259,6 +258,10 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 					c.handleAttack(victim)
 				}
 			}
+		case 0: // interact (right-click). Only "interact" (not interact_at, 2)
+			// drives the action so a single right-click isn't processed twice.
+			// Item frames: insert the held item, or rotate the existing one.
+			c.instance.FrameInteract(int32(target), c.heldItemName())
 		}
 
 	case SbPlayPlayerAbilities:

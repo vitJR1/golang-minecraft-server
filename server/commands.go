@@ -83,8 +83,14 @@ func init() {
 		Name:    "play",
 		Aliases: []string{"queue", "q"},
 		NeedsOp: false,
-		Help:    "/play <game> | /play leave | /play list — matchmaker",
+		Help:    "/play <game> [arena] | /play leave | /play list — matchmaker",
 		Run:     cmdPlay,
+	})
+	registerCommand(&Command{
+		Name:    "arena",
+		NeedsOp: true,
+		Help:    "/arena create <game> <template> [name] | /arena list [game]",
+		Run:     cmdArena,
 	})
 	registerCommand(&Command{
 		Name:    "hub",
@@ -513,7 +519,13 @@ func cmdPlay(c *ClientConnection, args []string) {
 		c.server.Matchmaker.Dequeue(c)
 		_ = c.sendSystemMessage("Left matchmaker queue")
 	case "list", "ls":
-		defs := game.All()
+		// Base games only; created arenas are listed via /arena list.
+		var defs []*game.Definition
+		for _, d := range game.All() {
+			if !c.server.IsArena(d.ID) {
+				defs = append(defs, d)
+			}
+		}
 		if len(defs) == 0 {
 			_ = c.sendSystemMessage("No games registered.")
 			return
@@ -532,13 +544,24 @@ func cmdPlay(c *ClientConnection, args []string) {
 			_ = c.sendSystemMessage("Not in any matchmaker queue")
 		}
 	default:
-		// Treat as a game ID.
-		if err := c.server.Matchmaker.Queue(c, sub); err != nil {
+		// /play <game> [arena]: with an arena name, queue that specific arena
+		// (its Definition is registered under the arena name); otherwise queue
+		// the base game.
+		gameID := sub
+		if len(args) >= 2 {
+			arena := args[1]
+			if !c.server.IsArena(arena) {
+				_ = c.sendSystemMessage("Unknown arena: " + arena + " (see /arena list " + sub + ")")
+				return
+			}
+			gameID = arena
+		}
+		if err := c.server.Matchmaker.Queue(c, gameID); err != nil {
 			_ = c.sendSystemMessage("Queue failed: " + err.Error())
 			return
 		}
-		_ = c.sendSystemMessage("Queued for " + sub +
-			" (" + strconv.Itoa(c.server.Matchmaker.QueueSize(sub)) + " waiting)")
+		_ = c.sendSystemMessage("Queued for " + gameID +
+			" (" + strconv.Itoa(c.server.Matchmaker.QueueSize(gameID)) + " waiting)")
 	}
 }
 

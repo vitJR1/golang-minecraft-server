@@ -75,6 +75,9 @@ func (i *Instance) loadWorldEntities() {
 	}
 	i.entitiesMu.Lock()
 	for _, e := range ep.Entities() {
+		if _, ok := world.EntityTypeID(e.Type); !ok {
+			continue // unknown entity kind — can't spawn it
+		}
 		eid := i.Server.nextEntityID.Add(1)
 		i.worldEntities = append(i.worldEntities, instanceEntity{
 			eid:  eid,
@@ -97,10 +100,12 @@ func (i *Instance) AddWorldEntity(e world.Entity) {
 
 	i.entitiesMu.Lock()
 	i.worldEntities = append(i.worldEntities, ie)
+	spawn := spawnEntityPayload(ie)
+	meta := frameMetadataPayload(ie)
 	i.entitiesMu.Unlock()
 
-	i.Players.Broadcast(CbPlaySpawnEntity, spawnEntityPayload(ie), -1)
-	if meta := frameMetadataPayload(ie); meta != nil {
+	i.Players.Broadcast(CbPlaySpawnEntity, spawn, -1)
+	if meta != nil {
 		i.Players.Broadcast(CbPlaySetEntityMetadata, meta, -1)
 	}
 }
@@ -119,33 +124,83 @@ func entityUUID(eid int32) [16]byte {
 // join and after any Respawn (which wipes client-side entities). A no-op for
 // instances without entities, so the hub and plain arenas cost nothing.
 func (c *ClientConnection) sendWorldEntities() error {
+	// Build all payloads under the lock — frameMetadataPayload reads mutable
+	// FrameData (item/rotation), which FrameInteract can change concurrently.
+	type outPkt struct {
+		id      int32
+		payload []byte
+	}
 	c.instance.entitiesMu.Lock()
-	frames := make([]instanceEntity, len(c.instance.worldEntities))
-	copy(frames, c.instance.worldEntities)
-	c.instance.entitiesMu.Unlock()
-	for _, ie := range frames {
-		if err := c.safeWrite(CbPlaySpawnEntity, spawnEntityPayload(ie)); err != nil {
-			return err
-		}
+	pkts := make([]outPkt, 0, len(c.instance.worldEntities))
+	for _, ie := range c.instance.worldEntities {
+		pkts = append(pkts, outPkt{CbPlaySpawnEntity, spawnEntityPayload(ie)})
 		if meta := frameMetadataPayload(ie); meta != nil {
-			if err := c.safeWrite(CbPlaySetEntityMetadata, meta); err != nil {
-				return err
-			}
+			pkts = append(pkts, outPkt{CbPlaySetEntityMetadata, meta})
+		}
+	}
+	c.instance.entitiesMu.Unlock()
+
+	for _, p := range pkts {
+		if err := c.safeWrite(p.id, p.payload); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-// spawnEntityPayload builds Spawn Entity (0x01) for an item frame. The frame's
-// facing rides the "data" field (vanilla object data), not yaw/pitch.
+// FrameInteract handles a right-click on an item-frame entity: it puts the
+// player's held item into an empty frame, or rotates the item in a full one
+// (vanilla behaviour), then broadcasts the updated metadata. No-op when eid
+// isn't a frame in this instance. Frame state is mutated under entitiesMu, and
+// the broadcast payload is built there too, so it can't race the chunk-join
+// path that also reads frame state.
+func (i *Instance) FrameInteract(eid int32, heldItem string) {
+	i.entitiesMu.Lock()
+	var meta []byte
+	for idx := range i.worldEntities {
+		ie := &i.worldEntities[idx]
+		if ie.eid != eid || ie.e.Frame == nil {
+			continue
+		}
+		f := ie.e.Frame
+		switch {
+		case f.Item == "":
+			// Insert the held item, but only if it's a real item id.
+			if heldItem == "" {
+				i.entitiesMu.Unlock()
+				return
+			}
+			if _, ok := world.ItemByName(heldItem); !ok {
+				i.entitiesMu.Unlock()
+				return
+			}
+			f.Item = heldItem
+			f.Rotation = 0
+		default:
+			// Full frame → rotate the item one of 8 steps.
+			f.Rotation = (f.Rotation + 1) % 8
+		}
+		meta = frameMetadataPayload(*ie)
+		break
+	}
+	i.entitiesMu.Unlock()
+
+	if meta != nil {
+		i.Players.Broadcast(CbPlaySetEntityMetadata, meta, -1)
+	}
+}
+
+// spawnEntityPayload builds Spawn Entity (0x01) for a world entity (item frame
+// or villager). For item frames the facing rides the "data" field (vanilla
+// object data) and yaw/pitch are 0; other entities use their stored yaw/pitch.
 func spawnEntityPayload(ie instanceEntity) []byte {
-	typeID := world.ItemFrameEntityID
-	var facing byte
+	typeID, _ := world.EntityTypeID(ie.e.Type) // 0 (unknown) is filtered at load
+	var data int32
 	if f := ie.e.Frame; f != nil {
 		if f.Glowing {
 			typeID = world.GlowItemFrameEntityID
 		}
-		facing = f.Facing
+		data = int32(f.Facing)
 	}
 
 	var buf bytes.Buffer
@@ -155,10 +210,10 @@ func spawnEntityPayload(ie instanceEntity) []byte {
 	buf.Write(protocol.WriteDouble(ie.e.X))
 	buf.Write(protocol.WriteDouble(ie.e.Y))
 	buf.Write(protocol.WriteDouble(ie.e.Z))
-	buf.WriteByte(0) // pitch (frame orientation comes from data)
-	buf.WriteByte(0) // yaw
-	buf.WriteByte(0) // head yaw
-	protocol.WriteVarInt32ToBuffer(&buf, int32(facing))
+	buf.WriteByte(protocol.AngleToByte(ie.e.Pitch))
+	buf.WriteByte(protocol.AngleToByte(ie.e.Yaw))
+	buf.WriteByte(protocol.AngleToByte(ie.e.Yaw)) // head yaw = body yaw
+	protocol.WriteVarInt32ToBuffer(&buf, data)
 	buf.Write(protocol.WriteShort(0)) // velocity x
 	buf.Write(protocol.WriteShort(0)) // velocity y
 	buf.Write(protocol.WriteShort(0)) // velocity z
