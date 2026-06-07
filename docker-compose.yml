@@ -1,0 +1,50 @@
+# Local dev backends for the Minecraft server: PostgreSQL + Redis.
+#
+#   docker compose up -d        # start both in the background
+#   docker compose ps           # check health
+#   docker compose logs -f      # tail logs
+#   docker compose down         # stop (keeps data volumes)
+#   docker compose down -v      # stop AND wipe data
+#
+# Defaults line up with db.ConfigFromEnv / redisc.ConfigFromEnv, so a server
+# started with the bundled .env connects out of the box. Override via the same
+# POSTGRES_* / REDIS_* env vars (or a .env file in this directory).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mc-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-minecraft}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-minecraft}
+      POSTGRES_DB: ${POSTGRES_DB:-minecraft}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-minecraft} -d ${POSTGRES_DB:-minecraft}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: mc-redis
+    restart: unless-stopped
+    # Append-only file = data survives restarts. Drop it for a pure cache.
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres-data:
+  redis-data:
