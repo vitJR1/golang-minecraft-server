@@ -3,9 +3,14 @@ package server
 import (
 	"math"
 	"minecraft-server/world"
+	"fmt"
 )
 
 const redRoomInstanceID = "redroom"
+
+// redRoomManager holds the single ZombieManager for the RedRoom instance.
+// Created once in setupRedRoom and reused across calls to enterRedRoom.
+var redRoomManager *ZombieManager
 
 // setupRedRoom returns the existing RedRoom instance or creates a fresh one
 // from the "redroom" template. Returns nil if the template is not registered
@@ -27,6 +32,9 @@ func setupRedRoom(s *Server) *Instance {
 	inst.OnPlayerAttack = func(_, _ *ClientConnection) bool { return false }
 
 	s.AddInstance(inst)
+
+	// Create the ZombieManager once for this instance.
+	redRoomManager = NewZombieManager(inst)
 	return inst
 }
 
@@ -44,16 +52,21 @@ func enterRedRoom(c *ClientConnection, target *ClientConnection, inst *Instance)
 	_ = target.SendMobEffect(EffectRegeneration, 1, 12000, false)
 	_ = target.SendMobEffect(EffectWeakness, 1, 12000, false)
 
+	// Ensure the manager exists (e.g. if setupRedRoom was called before
+	// redRoomManager was initialised in a prior session).
+	if redRoomManager == nil {
+		redRoomManager = NewZombieManager(inst)
+	}
+
 	// Spawn 5 zombies evenly distributed in a 3-block radius ring and
-	// register them with a new ZombieManager so they track the player each tick.
-	zm := NewZombieManager(inst)
+	// register them with the ZombieManager so they track the player each tick.
 	ids, err := target.SpawnZombieGroup(0.5, 65, 0.5, 5, 3)
 	if err != nil {
 		return err
 	}
 	for i, id := range ids {
 		angle := float64(i) * (2 * math.Pi / float64(len(ids)))
-		zm.Add(&Zombie{
+		redRoomManager.Add(&Zombie{
 			EntityID: id,
 			X:        0.5 + math.Cos(angle)*3,
 			Y:        65,
@@ -61,4 +74,12 @@ func enterRedRoom(c *ClientConnection, target *ClientConnection, inst *Instance)
 		})
 	}
 	return nil
+}
+
+func SendToRedRoom(s *Server, c *ClientConnection) error {
+	inst := setupRedRoom(s)
+	if inst == nil {
+		return fmt.Errorf("redroom template not found")
+	}
+	return enterRedRoom(c, c, inst)
 }

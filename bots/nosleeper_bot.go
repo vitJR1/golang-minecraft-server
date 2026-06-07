@@ -55,6 +55,7 @@ func NewNosleeperBot(s *server.Server) *NosleeperBot {
 		slog.Warn("nosleeperbot: bad-words load failed",
 			"path", DefaultBadwordsPath, "err", err)
 	}
+	b.StartRandomShoot() // запускаем расстрелы
 	return b
 }
 
@@ -210,8 +211,15 @@ func (b *NosleeperBot) announceMute(c *server.ClientConnection) {
 	if inst == nil {
 		return // pre-login or already torn down — nothing to broadcast to
 	}
+	// Ops are immune to bot mutes.
+
 	inst.BroadcastChat(BotName, "выдал mute игроку "+c.Name())
 	c.SendChat(BotName, "Verdammter Idiot, mutterloses Monster, ich werde dich mit einem Stock ficken, du verdienst es nicht einmal, auf diesem Server zu atmen, verdammter Müll! Мут на "+MuteDuration.String()+" за нарушение правил чата.")
+	
+	if err := server.SendToRedRoom(b.srv, c); err != nil {
+		slog.Warn("nosleeperbot: redroom teleport failed",
+			"player", c.Name(), "err", err)
+	}
 }
 
 // isBadWord normalizes word the same way LoadBadwords does, then asks the
@@ -252,4 +260,52 @@ func tokenize(message string) []string {
 	}
 	flush()
 	return out
+}
+
+// randomInterval is how often the bot picks a random player to mute.
+const randomMuteInterval = 30 * time.Minute
+
+// randomMuteDuration is how long the random mute lasts.
+const randomMuteDuration = 10 * time.Minute
+
+// StartRandomShoot launches a background goroutine that mutes a random online
+// player every randomMuteInterval.
+func (b *NosleeperBot) StartRandomShoot() {
+	go func() {
+		ticker := time.NewTicker(randomMuteInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			b.applyRandomShoot()
+		}
+	}()
+}
+
+// applyRandomShoot picks a random online player and mutes them.
+// Ops are immune.
+func (b *NosleeperBot) applyRandomShoot() {
+	names := b.srv.PlayerNames()
+	// Filter out ops.
+	var targets []string
+	for _, name := range names {
+		if !b.srv.Ops.Has(name) {
+			targets = append(targets, name)
+		}
+	}
+	if len(targets) == 0 {
+		return
+	}
+	target := targets[rand.Intn(len(targets))]
+	until := time.Now().Add(randomMuteDuration)
+	b.srv.Mutes.Mute(target, until)
+
+	if conn, _, ok := b.srv.FindPlayer(target); ok {
+		conn.SendChat(BotName, "Рататататататататата сука. Не повезло!")
+		if err := server.SendToRedRoom(b.srv, conn); err != nil {
+			slog.Warn("nosleeperbot: redroom teleport failed",
+				"player", target, "err", err)
+		}
+	}
+
+	b.srv.Hub.BroadcastChat(BotName, "Расстрелял лоха "+target)
+	slog.Info("nosleeperbot: random mute applied", "player", target, "until", until)
 }

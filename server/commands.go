@@ -303,69 +303,35 @@ func teleportConnTo(c *ClientConnection, x, y, z float64) {
 }
 
 func cmdRedRoom(c *ClientConnection, args []string) {
-
-	_ = c.sendSystemMessage("Moved to redroom instance")
-    if len(args) > 1 {
-        _ = c.sendSystemMessage("Usage: /redroom [player]")
-        return
-    }
-    target := c
-    if len(args) == 1 {
-        conn, _, ok := c.server.FindPlayer(args[0])
-        if !ok {
-            _ = c.sendSystemMessage("Player not found: " + args[0])
-            return
-        }
-        target = conn
-    }
-
-    // Берём или создаём инстанс redroom
-    inst := c.server.GetInstance("redroom")
-    if inst == nil {
-        tmpl := c.server.GetTemplate("redroom")
-        if tmpl == nil {
-            _ = c.sendSystemMessage("RedRoom template not found — положи redroom.schem в schem/templates/")
-            return
-        }
-        inst = NewInstance("redroom", c.server, tmpl.Instantiate())
-        c.server.AddInstance(inst)
-    }
-	inst.OnBlockBreak = func(c *ClientConnection, _ world.Position) bool {
-    	return false
+	if len(args) > 1 {
+		_ = c.sendSystemMessage("Usage: /redroom [player]")
+		return
 	}
-	inst.OnBlockPlace = func(c *ClientConnection, _ world.Position, _ world.Block) bool {
-		return false
+	target := c
+	if len(args) == 1 {
+		conn, _, ok := c.server.FindPlayer(args[0])
+		if !ok {
+			_ = c.sendSystemMessage("Player not found: " + args[0])
+			return
+		}
+		target = conn
 	}
-	inst.OnPlayerAttack = func(_, _ *ClientConnection) bool { return false }
-    // Телепортируем в центр комнаты
-    if err := c.server.MovePlayer(target, inst, 0.5, 65, 0.5); err != nil {
-        _ = c.sendSystemMessage("Failed to move player: " + err.Error())
-        return
-    }
 
-    // Регенерация II на 10 минут
-    if err := target.SendMobEffect(EffectRegeneration, 1, 12000, false); err != nil {
-        _ = c.sendSystemMessage("Failed to apply regeneration")
-        return
-    }
+	inst := setupRedRoom(c.server)
+	if inst == nil {
+		_ = c.sendSystemMessage("RedRoom template not found — положи redroom.schem в schem/templates/")
+		return
+	}
 
-    // Слабость II на 10 минут
-    if err := target.SendMobEffect(EffectWeakness, 1, 12000, false); err != nil {
-        _ = c.sendSystemMessage("Failed to apply weakness")
-        return
-    }
+	if err := enterRedRoom(c, target, inst); err != nil {
+		_ = c.sendSystemMessage("RedRoom failed: " + err.Error())
+		return
+	}
 
-    // Спавним 5 зомби вокруг
-    if _, err := target.SpawnZombieGroup(0.5, 65, 0.5, 5, 3); err != nil {
-        _ = c.sendSystemMessage("Failed to spawn zombies")
-        return
-    }
-
-    _ = target.sendSystemMessage("Добро пожаловать в красную комнату...")
-    if target != c {
-        _ = c.sendSystemMessage("Отправил " + target.player.Name + " в красную комнату")
-    }
-	
+	_ = target.sendSystemMessage("Добро пожаловать в красную комнату...")
+	if target != c {
+		_ = c.sendSystemMessage("Отправил " + target.player.Name + " в красную комнату")
+	}
 }
 // --- /fly ---
  
