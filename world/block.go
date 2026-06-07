@@ -121,9 +121,124 @@ var (
 	RedBed       = Block{StateID: 1915, Name: "minecraft:red_bed"}
 	BlackBed     = Block{StateID: 1931, Name: "minecraft:black_bed"}
 	BlackConcrete         = Block{StateID: 12602, Name: "minecraft:black_concrete"}
-	CryingObsidian        = Block{StateID: 19308, Name: "minecraft:crying_obsidian"}
 	RedGlazedTerracotta   = Block{StateID: 12579, Name: "minecraft:red_glazed_terracotta"}
 	BlackGlazedTerracotta = Block{StateID: 12583, Name: "minecraft:black_glazed_terracotta"}
+
+	// Blocks used by schem/templates/bedwars/badwars_dota_map.schem (and
+	// generally useful for decorated maps). default-state IDs pulled from the
+	// same minecraft-data 1.20 blocks.json as the rest of this file. The
+	// variant kinds here (stairs/slabs/walls/fences/panes/logs/clusters/…)
+	// also have property tables in states.go, so they resolve their real
+	// facing/half/type/connection state from the schematic — not just the
+	// default. Purely decorative blocks without a states.go entry still
+	// render in their default state.
+	Water                           = Block{StateID: 80, Name: "minecraft:water"}
+	Lava                            = Block{StateID: 96, Name: "minecraft:lava"}
+	CherryLog                       = Block{StateID: 146, Name: "minecraft:cherry_log"}
+	DarkOakLog                      = Block{StateID: 149, Name: "minecraft:dark_oak_log"}
+	MangroveRoots                   = Block{StateID: 155, Name: "minecraft:mangrove_roots"}
+	StrippedBambooBlock             = Block{StateID: 187, Name: "minecraft:stripped_bamboo_block"}
+	StrippedSpruceWood              = Block{StateID: 217, Name: "minecraft:stripped_spruce_wood"}
+	OakLeaves                       = Block{StateID: 264, Name: "minecraft:oak_leaves"}
+	SpruceLeaves                    = Block{StateID: 292, Name: "minecraft:spruce_leaves"}
+	CherryLeaves                    = Block{StateID: 404, Name: "minecraft:cherry_leaves"}
+	Chest                           = Block{StateID: 2955, Name: "minecraft:chest"}
+	RedstoneWire                    = Block{StateID: 4138, Name: "minecraft:redstone_wire"}
+	StonePressurePlate              = Block{StateID: 5651, Name: "minecraft:stone_pressure_plate"}
+	RedstoneWallTorch               = Block{StateID: 5740, Name: "minecraft:redstone_wall_torch"}
+	PolishedBasalt                  = Block{StateID: 5857, Name: "minecraft:polished_basalt"}
+	Glowstone                       = Block{StateID: 5864, Name: "minecraft:glowstone"}
+	LightBlueStainedGlass           = Block{StateID: 5949, Name: "minecraft:light_blue_stained_glass"}
+	CyanStainedGlass                = Block{StateID: 5955, Name: "minecraft:cyan_stained_glass"}
+	BlueStainedGlass                = Block{StateID: 5957, Name: "minecraft:blue_stained_glass"}
+	RedStainedGlass                 = Block{StateID: 5960, Name: "minecraft:red_stained_glass"}
+	StoneBricks                     = Block{StateID: 6538, Name: "minecraft:stone_bricks"}
+	MossyStoneBricks                = Block{StateID: 6539, Name: "minecraft:mossy_stone_bricks"}
+	PackedMud                       = Block{StateID: 6542, Name: "minecraft:packed_mud"}
+	MudBricks                       = Block{StateID: 6543, Name: "minecraft:mud_bricks"}
+	InfestedStone                   = Block{StateID: 6544, Name: "minecraft:infested_stone"}
+	Chain                           = Block{StateID: 6777, Name: "minecraft:chain"}
+	StoneBrickStairs                = Block{StateID: 7120, Name: "minecraft:stone_brick_stairs"}
+	NetherBrickStairs               = Block{StateID: 7316, Name: "minecraft:nether_brick_stairs"}
+	EnderChest                      = Block{StateID: 7514, Name: "minecraft:ender_chest"}
+	SpruceStairs                    = Block{StateID: 7677, Name: "minecraft:spruce_stairs"}
+	SkeletonSkull                   = Block{StateID: 8827, Name: "minecraft:skeleton_skull"}
+	LightWeightedPressurePlate      = Block{StateID: 9003, Name: "minecraft:light_weighted_pressure_plate"}
+	RedstoneBlock                   = Block{StateID: 9083, Name: "minecraft:redstone_block"}
+	QuartzBlock                     = Block{StateID: 9095, Name: "minecraft:quartz_block"}
+	QuartzStairs                    = Block{StateID: 9111, Name: "minecraft:quartz_stairs"}
+	LightBlueStainedGlassPane       = Block{StateID: 9359, Name: "minecraft:light_blue_stained_glass_pane"}
+	BambooStairs                    = Block{StateID: 10075, Name: "minecraft:bamboo_stairs"}
+	PrismarineBricks                = Block{StateID: 10323, Name: "minecraft:prismarine_bricks"}
+	PrismarineBrickStairs           = Block{StateID: 10416, Name: "minecraft:prismarine_brick_stairs"}
+	SeaLantern                      = Block{StateID: 10583, Name: "minecraft:sea_lantern"}
+	CoalBlock                       = Block{StateID: 10604, Name: "minecraft:coal_block"}
+	PackedIce                       = Block{StateID: 10605, Name: "minecraft:packed_ice"}
+	RedWallBanner                   = Block{StateID: 10930, Name: "minecraft:red_wall_banner"}
+	BlackWallBanner                 = Block{StateID: 10934, Name: "minecraft:black_wall_banner"}
+	SpruceSlab                      = Block{StateID: 11030, Name: "minecraft:spruce_slab"}
+	BambooSlab                      = Block{StateID: 11072, Name: "minecraft:bamboo_slab"}
+	SmoothStoneSlab                 = Block{StateID: 11090, Name: "minecraft:smooth_stone_slab"}
+	CutSandstoneSlab                = Block{StateID: 11102, Name: "minecraft:cut_sandstone_slab"}
+	CobblestoneSlab                 = Block{StateID: 11114, Name: "minecraft:cobblestone_slab"}
+	QuartzSlab                      = Block{StateID: 11144, Name: "minecraft:quartz_slab"}
+	SmoothStone                     = Block{StateID: 11165, Name: "minecraft:smooth_stone"}
+	SmoothSandstone                 = Block{StateID: 11166, Name: "minecraft:smooth_sandstone"}
+	SmoothQuartz                    = Block{StateID: 11167, Name: "minecraft:smooth_quartz"}
+	DarkOakFence                    = Block{StateID: 11616, Name: "minecraft:dark_oak_fence"}
+	EndRod                          = Block{StateID: 12197, Name: "minecraft:end_rod"}
+	MagmaBlock                      = Block{StateID: 12402, Name: "minecraft:magma_block"}
+	BlackGlazedTerracotta           = Block{StateID: 12583, Name: "minecraft:black_glazed_terracotta"}
+	OrangeConcrete                  = Block{StateID: 12588, Name: "minecraft:orange_concrete"}
+	YellowConcrete                  = Block{StateID: 12591, Name: "minecraft:yellow_concrete"}
+	LimeConcrete                    = Block{StateID: 12592, Name: "minecraft:lime_concrete"}
+	BlackConcrete                   = Block{StateID: 12602, Name: "minecraft:black_concrete"}
+	BlackConcretePowder             = Block{StateID: 12618, Name: "minecraft:black_concrete_powder"}
+	BlueIce                         = Block{StateID: 12800, Name: "minecraft:blue_ice"}
+	PolishedDioriteStairs           = Block{StateID: 13072, Name: "minecraft:polished_diorite_stairs"}
+	SmoothSandstoneStairs           = Block{StateID: 13392, Name: "minecraft:smooth_sandstone_stairs"}
+	SmoothQuartzStairs              = Block{StateID: 13472, Name: "minecraft:smooth_quartz_stairs"}
+	DioriteStairs                   = Block{StateID: 13872, Name: "minecraft:diorite_stairs"}
+	SmoothQuartzSlab                = Block{StateID: 13986, Name: "minecraft:smooth_quartz_slab"}
+	DioriteSlab                     = Block{StateID: 14016, Name: "minecraft:diorite_slab"}
+	MossyStoneBrickWall             = Block{StateID: 14994, Name: "minecraft:mossy_stone_brick_wall"}
+	RedNetherBrickWall              = Block{StateID: 16938, Name: "minecraft:red_nether_brick_wall"}
+	Lantern                         = Block{StateID: 18365, Name: "minecraft:lantern"}
+	SoulLantern                     = Block{StateID: 18369, Name: "minecraft:soul_lantern"}
+	Campfire                        = Block{StateID: 18373, Name: "minecraft:campfire"}
+	SoulCampfire                    = Block{StateID: 18405, Name: "minecraft:soul_campfire"}
+	WarpedTrapdoor                  = Block{StateID: 18686, Name: "minecraft:warped_trapdoor"}
+	WarpedButton                    = Block{StateID: 18992, Name: "minecraft:warped_button"}
+	CryingObsidian                  = Block{StateID: 19308, Name: "minecraft:crying_obsidian"}
+	BlackstoneStairs                = Block{StateID: 19331, Name: "minecraft:blackstone_stairs"}
+	BlackstoneWall                  = Block{StateID: 19403, Name: "minecraft:blackstone_wall"}
+	BlackstoneSlab                  = Block{StateID: 19727, Name: "minecraft:blackstone_slab"}
+	PolishedBlackstone              = Block{StateID: 19730, Name: "minecraft:polished_blackstone"}
+	CrackedPolishedBlackstoneBricks = Block{StateID: 19732, Name: "minecraft:cracked_polished_blackstone_bricks"}
+	PolishedBlackstoneBrickSlab     = Block{StateID: 19737, Name: "minecraft:polished_blackstone_brick_slab"}
+	PolishedBlackstoneBrickStairs   = Block{StateID: 19751, Name: "minecraft:polished_blackstone_brick_stairs"}
+	GildedBlackstone                = Block{StateID: 20144, Name: "minecraft:gilded_blackstone"}
+	PolishedBlackstoneStairs        = Block{StateID: 20156, Name: "minecraft:polished_blackstone_stairs"}
+	PolishedBlackstoneSlab          = Block{StateID: 20228, Name: "minecraft:polished_blackstone_slab"}
+	PolishedBlackstoneButton        = Block{StateID: 20242, Name: "minecraft:polished_blackstone_button"}
+	PolishedBlackstoneWall          = Block{StateID: 20260, Name: "minecraft:polished_blackstone_wall"}
+	ChiseledNetherBricks            = Block{StateID: 20581, Name: "minecraft:chiseled_nether_bricks"}
+	RedCandle                       = Block{StateID: 20827, Name: "minecraft:red_candle"}
+	BlackCandle                     = Block{StateID: 20843, Name: "minecraft:black_candle"}
+	AmethystCluster                 = Block{StateID: 20901, Name: "minecraft:amethyst_cluster"}
+	Mud                             = Block{StateID: 22448, Name: "minecraft:mud"}
+	CobbledDeepslate                = Block{StateID: 22452, Name: "minecraft:cobbled_deepslate"}
+	CobbledDeepslateWall            = Block{StateID: 22542, Name: "minecraft:cobbled_deepslate_wall"}
+	PolishedDeepslate               = Block{StateID: 22863, Name: "minecraft:polished_deepslate"}
+	DeepslateTiles                  = Block{StateID: 23274, Name: "minecraft:deepslate_tiles"}
+	DeepslateTileStairs             = Block{StateID: 23286, Name: "minecraft:deepslate_tile_stairs"}
+	DeepslateTileSlab               = Block{StateID: 23358, Name: "minecraft:deepslate_tile_slab"}
+	DeepslateBricks                 = Block{StateID: 23685, Name: "minecraft:deepslate_bricks"}
+	DeepslateBrickStairs            = Block{StateID: 23697, Name: "minecraft:deepslate_brick_stairs"}
+	DeepslateBrickWall              = Block{StateID: 23775, Name: "minecraft:deepslate_brick_wall"}
+	CrackedDeepslateTiles           = Block{StateID: 24098, Name: "minecraft:cracked_deepslate_tiles"}
+	SmoothBasalt                    = Block{StateID: 24102, Name: "minecraft:smooth_basalt"}
+	RawGoldBlock                    = Block{StateID: 24105, Name: "minecraft:raw_gold_block"}
 )
 
 // byName indexes the hand-rolled set above. Populated by init() so adding
@@ -150,9 +265,42 @@ func init() {
 		YellowBed, LimeBed, PinkBed, GrayBed,
 		LightGrayBed, CyanBed, PurpleBed, BlueBed,
 		BrownBed, GreenBed, RedBed, BlackBed,
+<<<<<<< HEAD
 		BlackConcrete,
 	 	CryingObsidian,
 		RedGlazedTerracotta, BlackGlazedTerracotta,
+=======
+		// badwars_dota_map.schem block kinds.
+		Water, Lava, CherryLog, DarkOakLog, MangroveRoots,
+		StrippedBambooBlock, StrippedSpruceWood, OakLeaves, SpruceLeaves,
+		CherryLeaves, Chest, RedstoneWire, StonePressurePlate,
+		RedstoneWallTorch, PolishedBasalt, Glowstone, LightBlueStainedGlass,
+		CyanStainedGlass, BlueStainedGlass, RedStainedGlass, StoneBricks,
+		MossyStoneBricks, PackedMud, MudBricks, InfestedStone, Chain,
+		StoneBrickStairs, NetherBrickStairs, EnderChest, SpruceStairs,
+		SkeletonSkull, LightWeightedPressurePlate, RedstoneBlock,
+		QuartzBlock, QuartzStairs, LightBlueStainedGlassPane, BambooStairs,
+		PrismarineBricks, PrismarineBrickStairs, SeaLantern, CoalBlock,
+		PackedIce, RedWallBanner, BlackWallBanner, SpruceSlab, BambooSlab,
+		SmoothStoneSlab, CutSandstoneSlab, CobblestoneSlab, QuartzSlab,
+		SmoothStone, SmoothSandstone, SmoothQuartz, DarkOakFence, EndRod,
+		MagmaBlock, BlackGlazedTerracotta, OrangeConcrete, YellowConcrete,
+		LimeConcrete, BlackConcrete, BlackConcretePowder, BlueIce,
+		PolishedDioriteStairs, SmoothSandstoneStairs, SmoothQuartzStairs,
+		DioriteStairs, SmoothQuartzSlab, DioriteSlab, MossyStoneBrickWall,
+		RedNetherBrickWall, Lantern, SoulLantern, Campfire, SoulCampfire,
+		WarpedTrapdoor, WarpedButton, CryingObsidian, BlackstoneStairs,
+		BlackstoneWall, BlackstoneSlab, PolishedBlackstone,
+		CrackedPolishedBlackstoneBricks, PolishedBlackstoneBrickSlab,
+		PolishedBlackstoneBrickStairs, GildedBlackstone,
+		PolishedBlackstoneStairs, PolishedBlackstoneSlab,
+		PolishedBlackstoneButton, PolishedBlackstoneWall,
+		ChiseledNetherBricks, RedCandle, BlackCandle, AmethystCluster, Mud,
+		CobbledDeepslate, CobbledDeepslateWall, PolishedDeepslate,
+		DeepslateTiles, DeepslateTileStairs, DeepslateTileSlab,
+		DeepslateBricks, DeepslateBrickStairs, DeepslateBrickWall,
+		CrackedDeepslateTiles, SmoothBasalt, RawGoldBlock,
+>>>>>>> main
 	}
 	byName = make(map[string]Block, len(all))
 	for _, b := range all {

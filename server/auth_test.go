@@ -1,14 +1,16 @@
 package server
 
 import (
-	"encoding/base64"
-	"encoding/json"
+	"context"
 	"minecraft-server/cfg"
+	"minecraft-server/db"
 	"minecraft-server/protocol"
-	"os"
+	"minecraft-server/store"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // withAuth installs a fresh auth plugin against the given Server, then
@@ -43,41 +45,26 @@ func withAuthAttempts(t *testing.T, max int, banDur time.Duration) {
 
 // --- Unit tests for the credential store ------------------------------------
 
-// TestBcryptRoundTrip: bcryptHash output verifies via verifyCred and
-// rejects a different password.
+// TestBcryptRoundTrip: bcryptHash output verifies and rejects a different
+// password.
 func TestBcryptRoundTrip(t *testing.T) {
 	hash, err := bcryptHash("secret")
 	if err != nil {
 		t.Fatal(err)
 	}
-	cred := &authCred{Hash: hash}
-	if !verifyCred(cred, "secret") {
-		t.Error("verifyCred should accept the registered password")
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte("secret")) != nil {
+		t.Error("hash should accept the registered password")
 	}
-	if verifyCred(cred, "different") {
-		t.Error("verifyCred should reject a different password")
-	}
-}
-
-// TestLegacySHAStillVerifies: a credential written in the old SHA-256
-// format (Salt + base64 hash) still authenticates via verifyCred.
-func TestLegacySHAStillVerifies(t *testing.T) {
-	salt := []byte("0123456789abcdef")
-	legacy := &authCred{
-		Salt: base64.StdEncoding.EncodeToString(salt),
-		Hash: hashLegacySHA(salt, "oldpass"),
-	}
-	if !verifyCred(legacy, "oldpass") {
-		t.Error("legacy SHA-256 entry should still verify with correct password")
-	}
-	if verifyCred(legacy, "wrong") {
-		t.Error("legacy entry should reject wrong password")
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte("different")) == nil {
+		t.Error("hash should reject a different password")
 	}
 }
 
 func TestPluginHasIsCaseInsensitive(t *testing.T) {
-	withAuth(t, New())
-	authStore.creds["alice"] = &authCred{Salt: "s", Hash: "h"}
+	withAuth(t, New()) // no DB → in-memory credential store
+	if err := authStore.creds.set(context.Background(), protocol.OfflineUUID("Alice"), "Alice", "h"); err != nil {
+		t.Fatal(err)
+	}
 	for _, n := range []string{"alice", "ALICE", "Alice"} {
 		if !authStore.has(n) {
 			t.Errorf("has(%q) should be true", n)
@@ -88,37 +75,65 @@ func TestPluginHasIsCaseInsensitive(t *testing.T) {
 	}
 }
 
-func TestSaveLoadRoundTrip(t *testing.T) {
-	s := New()
-	path := withAuth(t, s)
+// TestDBCredStore verifies the production path: register/login credentials
+// land in (and read back from) the players.password_hash column. Skipped when
+// no database is reachable.
+func TestDBCredStore(t *testing.T) {
+	ctx := context.Background()
+	d, err := db.Connect(ctx, db.ConfigFromEnv())
+	if err != nil {
+		t.Skipf("postgres unavailable: %v", err)
+	}
+	t.Cleanup(d.Close)
+	if err := store.Migrate(db.ConfigFromEnv().DSN()); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	st := store.New(d.Pool)
+	cs := dbCredStore{players: st.Players}
 
-	hash, err := bcryptHash("diskpass")
+	name := "DBAuthUser"
+	uuid := protocol.OfflineUUID(name)
+	if _, err := d.Pool.Exec(ctx, `DELETE FROM players WHERE uuid = $1::uuid`, uuid); err != nil {
+		t.Fatal(err)
+	}
+
+	// No credential before register.
+	if _, ok, err := cs.hash(ctx, uuid, name); err != nil || ok {
+		t.Fatalf("fresh lookup: ok=%v err=%v", ok, err)
+	}
+	// Register stores the hash...
+	hash, _ := bcryptHash("pw")
+	if err := cs.set(ctx, uuid, name, hash); err != nil {
+		t.Fatal(err)
+	}
+	// ...login reads it back...
+	got, ok, err := cs.hash(ctx, uuid, name)
+	if err != nil || !ok || got != hash {
+		t.Fatalf("round trip: got=%q ok=%v err=%v", got, ok, err)
+	}
+	// ...and it really lives in the players table.
+	p, err := st.Players.GetByUUID(ctx, uuid)
 	if err != nil {
 		t.Fatal(err)
 	}
-	authStore.creds["dan"] = &authCred{
-		Hash:         hash,
-		RegisteredAt: time.Now(),
+	if h, ok, _ := st.Players.PasswordHash(ctx, p.ID); !ok || h != hash {
+		t.Errorf("password_hash not persisted on players row: ok=%v", ok)
 	}
-	if err := authStore.save(); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := m["dan"]; !ok {
-		t.Errorf("dan missing from saved file: %s", data)
-	}
+}
 
-	authStore = nil
-	EnableAuth(s, path)
-	if !authStore.has("dan") {
-		t.Fatal("dan should reload from disk")
+// TestCredStoreRoundTrip: a hash written via set reads back via hash through
+// the plugin's credential store (the in-memory backend used without a DB).
+func TestCredStoreRoundTrip(t *testing.T) {
+	withAuth(t, New())
+	hash, _ := bcryptHash("diskpass")
+	ctx := context.Background()
+	uuid := protocol.OfflineUUID("dan")
+	if err := authStore.creds.set(ctx, uuid, "dan", hash); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := authStore.creds.hash(ctx, uuid, "dan")
+	if err != nil || !ok || got != hash {
+		t.Fatalf("round trip failed: got=%q ok=%v err=%v", got, ok, err)
 	}
 }
 
@@ -154,7 +169,7 @@ func TestUnauthedLandsInAuthInstance(t *testing.T) {
 // migrates the connection into Hub.
 func TestRegisterMovesPlayerToHub(t *testing.T) {
 	s := New()
-	path := withAuth(t, s)
+	withAuth(t, s)
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "alice")
 	cli.startDiscardDrain()
@@ -169,12 +184,9 @@ func TestRegisterMovesPlayerToHub(t *testing.T) {
 		return ok && inst == s.Hub
 	}, "alice to land in hub")
 
-	// File should have the entry persisted.
-	data, _ := os.ReadFile(path)
-	var m map[string]any
-	_ = json.Unmarshal(data, &m)
-	if _, ok := m["alice"]; !ok {
-		t.Errorf("alice missing from %s: %s", path, data)
+	// Credential should be persisted in the store.
+	if !authStore.has("alice") {
+		t.Error("alice missing from credential store after register")
 	}
 }
 
@@ -304,7 +316,9 @@ func TestIPBannedAfterMaxAttempts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	authStore.creds["target"] = &authCred{Hash: hash}
+	if err := authStore.creds.set(context.Background(), protocol.OfflineUUID("target"), "target", hash); err != nil {
+		t.Fatal(err)
+	}
 
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "target")
@@ -338,7 +352,9 @@ func TestSuccessfulLoginClearsFailCounter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	authStore.creds["jane"] = &authCred{Hash: hash}
+	if err := authStore.creds.set(context.Background(), protocol.OfflineUUID("jane"), "jane", hash); err != nil {
+		t.Fatal(err)
+	}
 
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "jane")

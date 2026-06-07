@@ -225,7 +225,7 @@ func (c *ClientConnection) respawn() error {
 	if err := c.sendRespawn(); err != nil {
 		return fmt.Errorf("respawn packet: %w", err)
 	}
-	// 2. Re-stream spawn triplet → chunks → blocks → position.
+	// 2. Re-stream spawn triplet → baked world chunks → position.
 	if err := c.sendSetDefaultSpawnPosition(int(sp.X), int(sp.Y), int(sp.Z), 0); err != nil {
 		return fmt.Errorf("respawn spawn pos: %w", err)
 	}
@@ -236,7 +236,7 @@ func (c *ClientConnection) respawn() error {
 		return fmt.Errorf("respawn start waiting: %w", err)
 	}
 	if err := c.sendWorldChunks(); err != nil {
-    return fmt.Errorf("respawn chunks: %w", err)
+		return fmt.Errorf("respawn chunks: %w", err)
 	}
 	if err := c.sendSyncPlayerPosition(sp.X, sp.Y, sp.Z, 1); err != nil {
 		return fmt.Errorf("respawn sync pos: %w", err)
@@ -245,6 +245,7 @@ func (c *ClientConnection) respawn() error {
 	//    (the Respawn packet reset it on the client).
 	_ = c.sendSetHealth(player.MaxHealth)
 	_ = c.sendCombatAttributes()
+	_ = c.sendWorldEntities() // Respawn wiped client entities — re-spawn frames
 
 	// 4. Rebuild this client's view of everyone else (its Respawn wiped them).
 	others := c.instance.Players.snapshot()

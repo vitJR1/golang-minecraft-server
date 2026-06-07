@@ -129,6 +129,14 @@ type Instance struct {
 	// for this instance). Defaults to the origin column.
 	SpawnPoint Spawn
 
+	// worldEntities are the non-player entities (item frames) in this
+	// instance's world. Baked ones get a stable server entity ID at
+	// construction; players can add more at runtime (AddWorldEntity). Each is
+	// sent to clients on join. Guarded by entitiesMu (runtime placement races
+	// concurrent joins).
+	entitiesMu    sync.Mutex
+	worldEntities []instanceEntity
+
 	// joinMu serializes registration + visibility announcements per
 	// instance, so one player's join can't observe another mid-join inside
 	// the same instance.
@@ -187,6 +195,7 @@ func NewInstance(id string, srv *Server, w world.World) *Instance {
 		stopTick:   make(chan struct{}),
 	}
 	i.combatEnabled.Store(true) // instances default to PvP on (hub turns it off)
+	i.loadWorldEntities()
 	i.OnTick(i.combatTick)
 	go i.tickLoop()
 	return i

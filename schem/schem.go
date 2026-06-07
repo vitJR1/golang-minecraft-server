@@ -19,11 +19,15 @@
 //   - Block names with bracketed properties ("minecraft:oak_stairs[facing=north]").
 //     Properties are stripped — we map only the base block.
 //
+// What we support (cont.):
+//   - Block properties (facing/half/type/axis/connections) via
+//     world.ResolveStateID for blocks with a variant table.
+//   - Item-frame entities (minecraft:item_frame / glow_item_frame) from the
+//     "Entities" list, with facing, item rotation, and displayed item.
+//
 // What we don't:
-//   - Block entities (chests with items, signs with text).
-//   - Entities.
-//   - Properties (orientation, half, waterlogged, etc.). Blocks always
-//     get their default state.
+//   - Block entities (chests with items, signs with text, banner patterns).
+//   - Entity kinds other than item frames (paintings, armor stands, …).
 //   - Unknown block names → silently become Air.
 package schem
 
@@ -41,13 +45,19 @@ import (
 // VarInt index; Blocks is W*H*L palette indices in YZX order (Y outermost,
 // X innermost — per Sponge spec).
 type Schematic struct {
-	Version int32
-	Width   int16
-	Height  int16
-	Length  int16
-	Offset  [3]int32 // anchor offset; many tools leave it (0,0,0)
-	Palette []string // index → namespaced name with optional [properties]
-	Blocks  []int32  // length = Width*Height*Length
+	Version  int32
+	Width    int16
+	Height   int16
+	Length   int16
+	Offset   [3]int32       // anchor offset; many tools leave it (0,0,0)
+	Palette  []string       // index → namespaced name with optional [properties]
+	Blocks   []int32        // length = Width*Height*Length
+	Entities []world.Entity // non-block objects (item frames today)
+
+	// BlockEntities are block-entity markers (bed/chest/banner/skull/…) keyed
+	// by schematic-local position → block-entity type name. The client needs
+	// these to render BlockEntityRenderer blocks.
+	BlockEntities map[world.Position]string
 }
 
 // LoadFile reads a .schem from disk and parses it.
@@ -143,7 +153,146 @@ func Parse(data []byte) (*Schematic, error) {
 			len(s.Blocks), expected)
 	}
 
+	// Entities (item frames etc.) live at inner["Entities"] in v3. Optional —
+	// most schematics have none. Unknown entity kinds are skipped.
+	if ents, ok := inner["Entities"].(nbt.List); ok {
+		s.Entities = parseEntities(ents)
+	}
+
+	// Block entities live at inner["BlockEntities"] (v3) or under
+	// inner["Blocks"]["BlockEntities"]. Optional.
+	bePath := inner
+	if blocks, ok := inner["Blocks"].(nbt.Compound); ok {
+		bePath = blocks
+	}
+	if bes, ok := bePath["BlockEntities"].(nbt.List); ok {
+		s.BlockEntities = parseBlockEntities(bes)
+	}
+
 	return s, nil
+}
+
+// parseBlockEntities reads the Sponge "BlockEntities" list into a
+// position → type-name map. Each entry has "Id" (type) + "Pos" (3-int array,
+// schematic-local). Entries without a usable id/pos are skipped.
+func parseBlockEntities(list nbt.List) map[world.Position]string {
+	out := make(map[world.Position]string)
+	for _, item := range list.Items {
+		c, ok := item.(nbt.Compound)
+		if !ok {
+			continue
+		}
+		id := nbtString(c, "Id")
+		if id == "" {
+			id = nbtString(c, "id")
+		}
+		if id == "" {
+			continue
+		}
+		x, y, z, ok := nbtIntPos(c)
+		if !ok {
+			continue
+		}
+		out[world.Position{X: x, Y: y, Z: z}] = id
+	}
+	return out
+}
+
+// nbtIntPos reads a 3-element integer "Pos" (TAG_Int_Array, or a List of Int).
+func nbtIntPos(c nbt.Compound) (x, y, z int, ok bool) {
+	if arr, ok := c["Pos"].(nbt.IntArray); ok && len(arr) == 3 {
+		return int(arr[0]), int(arr[1]), int(arr[2]), true
+	}
+	if lst, ok := c["Pos"].(nbt.List); ok && len(lst.Items) == 3 {
+		gi := func(v nbt.Value) int {
+			if iv, ok := v.(nbt.Int); ok {
+				return int(iv)
+			}
+			return 0
+		}
+		return gi(lst.Items[0]), gi(lst.Items[1]), gi(lst.Items[2]), true
+	}
+	return 0, 0, 0, false
+}
+
+// parseEntities extracts the entity kinds we render (item frames) from a
+// Sponge "Entities" list. Each entry is a Compound with "Id" + "Pos"; the
+// entity-specific NBT (Facing/ItemRotation/Item) sits either at the top level
+// or under a "Data" sub-compound depending on the exporter, so we look in
+// both. Unrecognized entity ids are skipped.
+func parseEntities(list nbt.List) []world.Entity {
+	var out []world.Entity
+	for _, item := range list.Items {
+		c, ok := item.(nbt.Compound)
+		if !ok {
+			continue
+		}
+		id := nbtString(c, "Id")
+		if id == "" {
+			id = nbtString(c, "id")
+		}
+		glow := id == "minecraft:glow_item_frame"
+		if id != "minecraft:item_frame" && !glow {
+			continue // only item frames are modelled today
+		}
+
+		x, y, z, ok := nbtPos(c)
+		if !ok {
+			continue
+		}
+		// Frame fields may be flattened into c or nested under "Data".
+		data := c
+		if d, ok := c["Data"].(nbt.Compound); ok {
+			data = d
+		}
+		frame := &world.FrameData{
+			Facing:   byte(nbtByte(data, "Facing")),
+			Rotation: byte(nbtByte(data, "ItemRotation")),
+			Item:     frameItem(data),
+			Glowing:  glow,
+		}
+		out = append(out, world.Entity{Type: id, X: x, Y: y, Z: z, Frame: frame})
+	}
+	return out
+}
+
+func nbtString(c nbt.Compound, key string) string {
+	if v, ok := c[key].(nbt.String); ok {
+		return string(v)
+	}
+	return ""
+}
+
+func nbtByte(c nbt.Compound, key string) int8 {
+	if v, ok := c[key].(nbt.Byte); ok {
+		return int8(v)
+	}
+	return 0
+}
+
+// nbtPos reads a 3-element Double "Pos" list.
+func nbtPos(c nbt.Compound) (x, y, z float64, ok bool) {
+	lst, ok := c["Pos"].(nbt.List)
+	if !ok || len(lst.Items) != 3 {
+		return 0, 0, 0, false
+	}
+	d := func(v nbt.Value) float64 {
+		if dv, ok := v.(nbt.Double); ok {
+			return float64(dv)
+		}
+		return 0
+	}
+	return d(lst.Items[0]), d(lst.Items[1]), d(lst.Items[2]), true
+}
+
+// frameItem reads the displayed item's namespaced id from an item frame's
+// "Item" compound ({id, Count}). Returns "" for an empty frame.
+func frameItem(c nbt.Compound) string {
+	item, ok := c["Item"].(nbt.Compound)
+	if !ok {
+		return ""
+	}
+	return nbtString(item, "id")
 }
 
 // decodeVarIntStream reads `expected` Java-style VarInts (7 bits/byte,
@@ -213,6 +362,17 @@ func (s *Schematic) ToTemplateAt(originX, originY, originZ int) *world.Template 
 				)
 			}
 		}
+	}
+	// Entities use schematic-local positions; shift by the same origin as
+	// blocks (the schematic Offset is intentionally ignored, matching blocks).
+	for _, e := range s.Entities {
+		e.X += float64(originX)
+		e.Y += float64(originY)
+		e.Z += float64(originZ)
+		t.AddEntity(e)
+	}
+	for p, typeName := range s.BlockEntities {
+		t.AddBlockEntity(world.Position{X: originX + p.X, Y: originY + p.Y, Z: originZ + p.Z}, typeName)
 	}
 	return t
 }

@@ -1,0 +1,13 @@
+DROP TABLE IF EXISTS ffa_ratings;
+DROP TABLE IF EXISTS skywars_ratings;
+DROP TABLE IF EXISTS bedwars_ratings;
+DROP TABLE IF EXISTS bedwars_events;
+DROP TABLE IF EXISTS ffa_players;
+DROP TABLE IF EXISTS skywars_players;
+DROP TABLE IF EXISTS bedwars_players;
+DROP TABLE IF EXISTS ffa_matches;
+DROP TABLE IF EXISTS skywars_matches;
+DROP TABLE IF EXISTS bedwars_matches;
+DROP TABLE IF EXISTS mutes;
+DROP TABLE IF EXISTS bans;
+DROP TABLE IF EXISTS players;

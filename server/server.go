@@ -8,8 +8,11 @@ import (
 	"io"
 	"log/slog"
 	"minecraft-server/cfg"
+	"minecraft-server/db"
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/redisc"
+	"minecraft-server/store"
 	"minecraft-server/world"
 	"net"
 	"sync"
@@ -60,7 +63,19 @@ type Server struct {
 	Matchmaker *Matchmaker
 	// ChatModerator, when non-nil, gets a chance to inspect every chat
 	// line before it broadcasts. See chat_moderation.go for the contract.
-	ChatModerator      ChatModerator
+	ChatModerator ChatModerator
+
+	// DB and Redis are the optional persistence/cache backends, wired up in
+	// main from the POSTGRES_* / REDIS_* env config. Either may be nil when
+	// the backend is disabled or unreachable at startup — callers must
+	// nil-check before use. Nothing in the core server depends on them yet.
+	DB    *db.DB
+	Redis *redisc.Client
+
+	// Store holds the typed repositories over DB.Pool (players, bans, mutes,
+	// per-mode matches/participation/ratings, stats). Nil when DB is nil.
+	Store *store.Store
+
 	nextEntityID       atomic.Int32
 	instanceSerialNext atomic.Uint64
 
@@ -308,6 +323,8 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 	// Respawn reset the client's attributes — re-send the cooldown-bar
 	// attribute for the destination instance's combat model.
 	_ = c.sendCombatAttributes()
+	// Respawn also wiped client-side entities — re-spawn the target's frames.
+	_ = c.sendWorldEntities()
 
 	// 7. Register in target + broadcast tab list and Spawn for everyone.
 	target.JoinAndAnnounce(c)
@@ -448,6 +465,12 @@ type ClientConnection struct {
 	// power-on default. Read by SbPlayUseItem to pick which menu item
 	// the right-click should fire (blaze rod vs ender pearl, etc.).
 	heldSlot atomic.Int32
+
+	// heldItems maps inventory slot index → namespaced item id, fed by the
+	// creative Set Creative Mode Slot packet. Used by UseItemOnBlock to place
+	// the item the player is actually holding (block or item frame) instead of
+	// always-stone. Touched only on the readLoop goroutine, so no lock.
+	heldItems map[int16]string
 
 	// sprinting tracks whether the client is currently sprinting, fed by the
 	// Player Command packet (start/stop sprinting actions). The combat code
@@ -653,6 +676,9 @@ func (c *ClientConnection) sendPlayPackets() error {
 		// Attack-speed attribute drives the client's cooldown bar for the
 		// instance's PvP model (re-sent on move/respawn since Respawn resets it).
 		{"Combat Attributes", c.sendCombatAttributes},
+		// Item frames and other baked world entities (no-op when the instance
+		// has none, e.g. the hub).
+		{"World Entities", c.sendWorldEntities},
 	}
 	for _, pkt := range packets {
 		if c.isClosed() {

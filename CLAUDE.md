@@ -31,7 +31,10 @@ nbt/           NBT tag types + Marshal (typed Compound/List values) +
                FromJSONBytes (with explicit TypeHints for Byte/Float/
                Double/Long disambiguation).
 world/         Block (StateID + namespaced name) and World interface
-               with a sparse hash-map MemoryWorld implementation.
+               with a sparse hash-map MemoryWorld implementation. Also a
+               generic Entity layer (item frames today: type + pos +
+               FrameData{facing,rotation,item,glow}) carried on
+               Template/MemoryWorld, plus item-registry IDs (item_ids.go).
 player/        Player gameplay entity (EntityID, Name, UUID, position,
                gamemode). Pure data type; no wire knowledge.
 chunk/         Chunk-level data builders (empty chunk sections,
@@ -40,10 +43,26 @@ encryption/    AES-128 CFB8 cipher + net.Conn wrapper.
 mojang/        sessionserver.mojang.com client (hasJoined endpoint).
 ban/           Ban list loader (reads banlist.json with reload support).
 cfg/           Runtime config vars (ServerId, OnlineMode).
+db/            PostgreSQL connection layer (pgx/v5 pool; config from env,
+               ping, graceful close).
+redisc/        Redis connection layer (go-redis/v9; config from env, ping,
+               graceful close).
+store/         Persistence entities + repositories over db's pgx pool:
+               players, bans, mutes, per-mode match history +
+               participation (bedwars/skywars/ffa), bedwars event log,
+               per-mode ELO ratings (rank computed at read time), and
+               cross-mode stats. Schema via golang-migrate (embedded SQL in
+               store/migrations/, applied at startup by store.Migrate).
 server/        Server struct (world + entity-ID counter), per-connection
                state machine, handlers per state, packet IDs, play-state
                senders, registry codec loader.
 ```
+
+Optional Postgres + Redis backends are deployed via `docker-compose.yml`
+(`docker compose up -d`) and connected at startup (`connectStores` in
+`main.go`). Both are best-effort: a down backend logs a warning and the
+server boots without it. Handles live on `Server.DB` / `Server.Redis`
+(nil-checked; nothing in the core depends on them yet).
 
 ## Architecture
 
@@ -94,7 +113,7 @@ CFB8 in `encryption/cfb8.go` is a hand-optimized ring-buffer variant. The wrappi
 
 After LoginSuccess + state transition to play, `sendPlayPackets` (in `server.go`) fires in order:
 1. `sendLoginPlay` (Cb 0x28) — includes the registry codec (NBT). Codec is built once via `RegistryCodec()` in `registry.go`, which embeds `registry-codec.json` and converts to NBT through `nbt.FromJSONBytes` with `registryHints`. The hints map encodes per-key NBT type overrides for the 1.20.1 codec; **if the client kicks complaining about a type mismatch, add the offending key to the relevant hint set.**
-2. `sendWorldChunks` (Cb 0x24 per column) — bakes the instance world into real chunk data. Every non-air block is bucketed by (chunkX, chunkZ) column + 16-tall section and packed into paletted sections by `chunk.BuildChunkData` (single-valued / indirect 4–8-bit palette / direct 15-bit, 1.16+ non-spanning long packing). Streams the occupied-column bounding box (plus a one-chunk pad) unioned with the spawn ring; empty columns use `chunk.BuildEmptyChunkData`. Heightmaps are still empty (`chunk.BuildEmptyHeightmaps`), block entities 0, light masks empty. Per-block Block Updates are no longer used for initial world state.
+2. `sendWorldChunks` (Cb 0x24 per column) — bakes the instance world into real chunk data. Every non-air block is bucketed by (chunkX, chunkZ) column + 16-tall section and packed into paletted sections by `chunk.BuildChunkData` (single-valued / indirect 4–8-bit palette / direct 15-bit, 1.16+ non-spanning long packing). Streams the occupied-column bounding box (plus a one-chunk pad) unioned with the spawn ring; empty columns use `chunk.BuildEmptyChunkData`. Heightmaps are still empty (`chunk.BuildEmptyHeightmaps`). Block entities ARE sent (beds/chests/banners/skulls/… from the world's `BlockEntityProvider`, with empty NBT) so BlockEntityRenderer blocks aren't invisible. Light is full daylight (`writeFullDaylight`). Per-block Block Updates are no longer used for initial world state. Item-frame and other world entities go out separately via `sendWorldEntities` (Spawn Entity 0x01 + metadata).
 3. `sendSyncPlayerPosition` (Cb 0x3C) — X/Y/Z + yaw/pitch + flags + teleport ID. Client echoes teleport ID via `SbPlayTeleportConfirm`.
 
 ## Gotchas
@@ -103,7 +122,7 @@ After LoginSuccess + state transition to play, `sendPlayPackets` (in `server.go`
 - **`ban.IsBanned` is hardcoded** (returns a stub for `"BannedPerson"`); `banlist.json` at the repo root is not read.
 - **`OfflineUUID`** (`protocol/uuid.go`) uses vanilla `MD5("OfflinePlayer:" + name)` with v3 UUID bits — match this exactly if reproducing behavior.
 - **Registry codec type hints (`server/registry.go`) are best-effort.** If the client disconnects right after LoginSuccess complaining about a wrong type, add the key to ByteKeys/FloatKeys/DoubleKeys/LongKeys.
-- **Light data is sent as four empty BitSets** in `sendChunkColumn`. The client falls back to full-bright; if a baked world renders black, fill sky-light arrays for all 26 sections (24 + 2 padding) explicitly.
+- **Light data is a full level-15 sky-light for every section** (`writeFullDaylight` in `play_send.go`): all 26 light sections (24 + 2 padding) get a 2048-byte 0xFF sky array, block light zero. This forces permanent daylight with no dark chunks. The server never sends Update Time, so the client stays at its default day time and never cycles to night — that's what keeps the bright sky-light rendering as day. If you ever add a day/night cycle, sky light alone will darken at night.
 - **Chunk baking holds the whole occupied region in memory per join.** `sendWorldChunks` ranges the (sparse) instance world once and allocates a `[4096]int32` per occupied section. Fine for current map sizes; a streaming/per-chunk-on-demand approach is the future step if maps get much larger or view distance grows.
 
 ## Conventions

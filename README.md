@@ -16,3 +16,8 @@ minDistance := radius*radius
 if distSq <= minDistance {
 // рядом
 }
+
+
+/instance create bwa1 bedwars/badwars_dota_map
+
+/instance join bwa1

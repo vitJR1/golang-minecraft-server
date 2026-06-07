@@ -17,13 +17,18 @@ type SpawnPoint struct {
 // SetBlock / AddSpawnPoint once any goroutine might be calling Instantiate
 // — the methods don't synchronize.
 type Template struct {
-	blocks      map[Position]Block
-	spawnPoints []SpawnPoint
+	blocks        map[Position]Block
+	spawnPoints   []SpawnPoint
+	entities      []Entity
+	blockEntities map[Position]string
 }
 
 // NewTemplate creates an empty template with no blocks and no spawn points.
 func NewTemplate() *Template {
-	return &Template{blocks: make(map[Position]Block)}
+	return &Template{
+		blocks:        make(map[Position]Block),
+		blockEntities: make(map[Position]string),
+	}
 }
 
 // SetBlock records a block in the template. Setting Air removes the entry
@@ -50,6 +55,26 @@ func (t *Template) SpawnPoints() []SpawnPoint {
 	return out
 }
 
+// AddEntity records a non-block entity (e.g. an item frame) in the template.
+func (t *Template) AddEntity(e Entity) {
+	t.entities = append(t.entities, e)
+}
+
+// Entities returns a copy of the template's entities.
+func (t *Template) Entities() []Entity {
+	out := make([]Entity, len(t.entities))
+	copy(out, t.entities)
+	return out
+}
+
+// AddBlockEntity records a block-entity type at p ("minecraft:bed").
+func (t *Template) AddBlockEntity(p Position, typeName string) {
+	if t.blockEntities == nil {
+		t.blockEntities = make(map[Position]string)
+	}
+	t.blockEntities[p] = typeName
+}
+
 // BlockCount reports how many non-Air blocks the template carries. Useful
 // for sanity checks and for sizing hints.
 func (t *Template) BlockCount() int {
@@ -63,6 +88,12 @@ func (t *Template) Instantiate() *MemoryWorld {
 	w := NewMemoryWorld()
 	for p, b := range t.blocks {
 		w.SetBlock(p, b)
+	}
+	for _, e := range t.entities {
+		w.AddEntity(e)
+	}
+	for p, typeName := range t.blockEntities {
+		w.AddBlockEntity(p, typeName)
 	}
 	return w
 }
