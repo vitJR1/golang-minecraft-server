@@ -60,6 +60,7 @@ var blockStates = map[string]blockStateInfo{
 	}},
 	"minecraft:red_glazed_terracotta": {MinStateID: 12579, DefaultStateID: 12579, Properties: []stateProperty{
     {Name: "facing", Values: []string{"north", "south", "west", "east"}},
+	}},
 	"minecraft:amethyst_cluster": {MinStateID: 20892, DefaultStateID: 20901, Properties: []stateProperty{
 		{Name: "facing", Values: []string{"north", "east", "south", "west", "up", "down"}},
 		{Name: "waterlogged", Values: []string{"true", "false"}},

@@ -120,9 +120,7 @@ var (
 	GreenBed     = Block{StateID: 1899, Name: "minecraft:green_bed"}
 	RedBed       = Block{StateID: 1915, Name: "minecraft:red_bed"}
 	BlackBed     = Block{StateID: 1931, Name: "minecraft:black_bed"}
-	BlackConcrete         = Block{StateID: 12602, Name: "minecraft:black_concrete"}
 	RedGlazedTerracotta   = Block{StateID: 12579, Name: "minecraft:red_glazed_terracotta"}
-	BlackGlazedTerracotta = Block{StateID: 12583, Name: "minecraft:black_glazed_terracotta"}
 
 	// Blocks used by schem/templates/bedwars/badwars_dota_map.schem (and
 	// generally useful for decorated maps). default-state IDs pulled from the
@@ -265,11 +263,8 @@ func init() {
 		YellowBed, LimeBed, PinkBed, GrayBed,
 		LightGrayBed, CyanBed, PurpleBed, BlueBed,
 		BrownBed, GreenBed, RedBed, BlackBed,
-<<<<<<< HEAD
 		BlackConcrete,
-	 	CryingObsidian,
 		RedGlazedTerracotta, BlackGlazedTerracotta,
-=======
 		// badwars_dota_map.schem block kinds.
 		Water, Lava, CherryLog, DarkOakLog, MangroveRoots,
 		StrippedBambooBlock, StrippedSpruceWood, OakLeaves, SpruceLeaves,
@@ -300,7 +295,6 @@ func init() {
 		DeepslateTiles, DeepslateTileStairs, DeepslateTileSlab,
 		DeepslateBricks, DeepslateBrickStairs, DeepslateBrickWall,
 		CrackedDeepslateTiles, SmoothBasalt, RawGoldBlock,
->>>>>>> main
 	}
 	byName = make(map[string]Block, len(all))
 	for _, b := range all {
