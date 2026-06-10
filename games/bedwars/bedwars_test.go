@@ -21,6 +21,7 @@ type fakePlayer struct {
 	x, y, z  float64
 	gamemode player.Gamemode
 	messages []string
+	given    map[string]int // namespaced item id → total count granted
 }
 
 func newFakePlayer(name string, eid int32) *fakePlayer {
@@ -50,6 +51,14 @@ func (p *fakePlayer) SetGamemode(g player.Gamemode) {
 	p.mu.Unlock()
 }
 func (p *fakePlayer) Kick(string) {}
+func (p *fakePlayer) GiveItem(itemName string, count int) {
+	p.mu.Lock()
+	if p.given == nil {
+		p.given = make(map[string]int)
+	}
+	p.given[itemName] += count
+	p.mu.Unlock()
+}
 
 // fakeInstance is a minimal game.Instance recording broadcasts and block
 // writes, with a mutable player list the logic can query.
@@ -397,5 +406,34 @@ func TestMapProtectionAndPlacedBlocks(t *testing.T) {
 	g.OnBlockPlace(ctx, p, placed, world.Stone)
 	if !g.OnBlockBreak(ctx, p, placed) {
 		t.Error("a player-placed block should be breakable")
+	}
+}
+
+// TestGeneratorGrantsResources checks that the default inventoryGranter
+// actually hands a team's iron generator output to that team's members when
+// the generator fires on its interval.
+func TestGeneratorGrantsResources(t *testing.T) {
+	g, inst, ctx := harness(t)
+	red := join(g, inst, ctx, "red", 1)
+	redTeam := g.byEntity[red.EntityID()]
+
+	// The interval of red's own team iron generator.
+	var ironInterval uint64
+	for _, gen := range g.arena.Generators {
+		if gen.Resource == Iron && gen.TeamID == redTeam {
+			ironInterval = gen.IntervalTicks
+		}
+	}
+	if ironInterval == 0 {
+		t.Fatal("no iron generator for red's team")
+	}
+
+	g.OnTick(ctx, ironInterval) // one full interval → iron generator fires once
+
+	red.mu.Lock()
+	got := red.given["minecraft:iron_ingot"]
+	red.mu.Unlock()
+	if got != 1 {
+		t.Errorf("iron granted after one interval: got %d, want 1", got)
 	}
 }

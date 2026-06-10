@@ -87,6 +87,17 @@ func (b playerBridge) SetGamemode(g player.Gamemode) {
 	_ = b.conn.sendGameModeChange(g)
 }
 
+// GiveItem resolves the namespaced item id and hands it to the connection's
+// inventory model, which stacks it and syncs the changed slots to the client.
+// An unknown id is a silent no-op.
+func (b playerBridge) GiveItem(itemName string, count int) {
+	id, ok := world.ItemByName(itemName)
+	if !ok {
+		return
+	}
+	b.conn.giveItem(id, count)
+}
+
 // Kick closes the player's connection. The reason is logged but not (yet)
 // sent on the wire as a Play Disconnect — that needs CbPlayDisconnect
 // which we haven't wired up. Client will see a generic "Connection lost".

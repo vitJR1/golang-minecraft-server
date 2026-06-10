@@ -31,6 +31,16 @@ func (r Resource) String() string {
 	}
 }
 
+// resourceItem maps each Resource to the namespaced Minecraft item handed
+// to players when a generator fires. Anything missing here is skipped by the
+// granter (no item given) rather than guessed.
+var resourceItem = map[Resource]string{
+	Iron:    "minecraft:iron_ingot",
+	Gold:    "minecraft:gold_ingot",
+	Diamond: "minecraft:diamond",
+	Emerald: "minecraft:emerald",
+}
+
 // Generator is one resource-spawn point on the map. TeamID < 0 means a
 // neutral generator (the central diamond forge); otherwise it belongs to a
 // team's island.
@@ -62,8 +72,23 @@ type ResourceGranter interface {
 	Grant(ctx *game.Ctx, g Generator, recipients []game.PlayerHandle)
 }
 
-// noopGranter is the default: generators tick but produce nothing visible.
-// Swap in a real granter via WithGranter once item-give exists.
+// noopGranter is the inert fallback: generators tick but produce nothing.
+// Kept for tests and for arenas that explicitly want a silent economy.
 type noopGranter struct{}
 
 func (noopGranter) Grant(*game.Ctx, Generator, []game.PlayerHandle) {}
+
+// inventoryGranter is the live economy: each generator tick drops one unit of
+// its resource into every recipient's inventory via PlayerHandle.GiveItem.
+// This is the default granter wired into the BedWars Definition factories.
+type inventoryGranter struct{}
+
+func (inventoryGranter) Grant(_ *game.Ctx, g Generator, recipients []game.PlayerHandle) {
+	item, ok := resourceItem[g.Resource]
+	if !ok {
+		return
+	}
+	for _, p := range recipients {
+		p.GiveItem(item, 1)
+	}
+}

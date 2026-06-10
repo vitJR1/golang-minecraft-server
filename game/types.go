@@ -186,6 +186,13 @@ type PlayerHandle interface {
 	// SetGamemode switches the player to gamemode g and tells the client.
 	SetGamemode(g player.Gamemode)
 
+	// GiveItem adds count of the namespaced item (e.g.
+	// "minecraft:iron_ingot") to the player's inventory, merging into
+	// existing stacks of the same item before filling empty main-inventory
+	// and hotbar slots. Unknown item ids and overflow past inventory
+	// capacity are silently dropped (there is no item-entity model yet).
+	GiveItem(itemName string, count int)
+
 	// Kick closes the player's connection. The reason is logged but not
 	// (yet) sent as a Disconnect message — that needs the Play Disconnect
 	// packet, which we haven't wired up.

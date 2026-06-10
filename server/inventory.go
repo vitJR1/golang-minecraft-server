@@ -7,6 +7,11 @@ import (
 	"minecraft-server/world"
 )
 
+// maxStackSize is the vanilla stack ceiling for the resource items BedWars
+// generators hand out (ingots, diamonds, emeralds). We don't model the
+// per-item max (some items cap at 16), so this is the conservative 64.
+const maxStackSize = 64
+
 // inventory.go is the per-connection player inventory model. It mirrors the
 // window-0 layout the client uses so the server knows what the player is
 // actually holding — used to place only a held block (no more always-stone)
@@ -66,6 +71,57 @@ func (c *ClientConnection) onSetCreativeSlot(packet *bytes.Buffer) {
 		return
 	}
 	c.inv.set(int16(raw), st)
+}
+
+// giveItem adds count of itemID to the player's inventory. It first tops up
+// existing partial stacks of the same item, then fills empty slots, across
+// the main-inventory + hotbar range (window-0 slots 9..44). Each slot it
+// touches is pushed to the client with Set Container Slot. Items that don't
+// fit (inventory full) are dropped — there is no item-entity model yet.
+//
+// This is the only path that mutates a Survival player's inventory server-
+// side; creative edits flow the other way via onSetCreativeSlot.
+func (c *ClientConnection) giveItem(itemID int32, count int) {
+	if count <= 0 {
+		return
+	}
+	remaining := count
+	// Pass 0 merges into existing stacks of itemID; pass 1 fills empties.
+	for pass := 0; pass < 2 && remaining > 0; pass++ {
+		for slot := int16(mainInvStart); slot < hotbarStart+9 && remaining > 0; slot++ {
+			cur := c.inv.get(slot)
+			if pass == 0 {
+				if cur.empty() || cur.ID != itemID || int(cur.Count) >= maxStackSize {
+					continue
+				}
+			} else {
+				if !cur.empty() {
+					continue
+				}
+				cur = itemStack{ID: itemID, Count: 0}
+			}
+			add := min(maxStackSize-int(cur.Count), remaining)
+			cur.Count += byte(add)
+			remaining -= add
+			c.inv.set(slot, cur)
+			_ = c.sendSetSlot(0, slot, cur)
+		}
+	}
+}
+
+// sendSetSlot writes a single inventory slot on the client (Set Container
+// Slot). windowID 0 is the player's own inventory; slot is a window-0 index.
+func (c *ClientConnection) sendSetSlot(windowID byte, slot int16, st itemStack) error {
+	var buf bytes.Buffer
+	buf.WriteByte(windowID)
+	protocol.WriteVarInt32ToBuffer(&buf, 0) // state id
+	buf.Write(protocol.WriteShort(slot))
+	if st.empty() {
+		buf.Write(protocol.WriteEmptySlot())
+	} else {
+		buf.Write(protocol.WriteSlot(st.ID, st.Count))
+	}
+	return c.safeWrite(CbPlaySetContainerSlot, buf.Bytes())
 }
 
 // heldItemName returns the namespaced id of the item in the selected hotbar

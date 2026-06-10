@@ -13,10 +13,10 @@
 //   - Last team with a living member wins; the instance then returns
 //     everyone to the hub.
 //
-// Deliberately seam-only for now (the engine doesn't expose item-give to
-// plugins): resource generators tick on a schedule but hand off to a
-// ResourceGranter (default no-op), and there is no shop yet. Both plug in
-// later without touching this file — see generator.go.
+// Resource generators tick on a schedule and hand off to a ResourceGranter
+// (default inventoryGranter, which drops the resource item into recipients'
+// inventories via PlayerHandle.GiveItem). There is no shop yet — spending
+// those resources plugs in later without touching this file. See generator.go.
 package bedwars
 
 import (
@@ -93,7 +93,7 @@ type bedWars struct {
 func newBedWars(arena *Arena, teams []Team, teamSize int) *bedWars {
 	g := &bedWars{
 		arena:    arena,
-		granter:  noopGranter{},
+		granter:  inventoryGranter{},
 		teamSize: teamSize,
 		teams:    make([]*teamState, len(teams)),
 		byEntity: make(map[int32]int),
@@ -106,7 +106,8 @@ func newBedWars(arena *Arena, teams []Team, teamSize int) *bedWars {
 }
 
 // WithGranter swaps the resource granter (Open/Closed seam for the economy).
-// Call it in the Definition's New factory once a real granter exists.
+// The constructor defaults to inventoryGranter; override for tests or a
+// custom economy (e.g. noopGranter for a silent arena).
 func (g *bedWars) WithGranter(r ResourceGranter) *bedWars {
 	g.granter = r
 	return g
