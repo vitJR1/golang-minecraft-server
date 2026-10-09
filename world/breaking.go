@@ -416,6 +416,9 @@ func BreakTicksWith(info BreakInfo, item string, ctx DigContext) int {
 // ToolDurability returns the maximum damage a tool item takes before it
 // breaks, or 0 for items that don't wear (blocks, ingots, …).
 func ToolDurability(item string) int {
+	if d := armorDurability(item); d > 0 {
+		return d
+	}
 	short := strings.TrimPrefix(item, "minecraft:")
 	if short == "shears" {
 		return 238

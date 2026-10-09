@@ -381,7 +381,7 @@ func (i *Instance) explosionPlayers(x, y, z, power float64, actor *ClientConnect
 			continue
 		}
 		damage := float32(math.Floor((impact*impact+impact)/2*7*radius + 1))
-		applied, newHealth, killed := p.ApplyDamage(damage, now, i.Combat.InvulnTicks)
+		applied, newHealth, killed := p.ApplyDamage(c.absorbDamage(damage), now, i.Combat.InvulnTicks)
 		hits[c] = explosionHit{vx: ex * impact, vy: ey * impact, vz: ez * impact}
 		if applied <= 0 {
 			continue

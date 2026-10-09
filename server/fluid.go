@@ -308,7 +308,7 @@ func (c *ClientConnection) hurtEnvironment(amount float32, invulnTicks, now uint
 	if p == nil || c.instance == nil {
 		return
 	}
-	applied, newHealth, killed := p.ApplyDamage(amount, now, invulnTicks)
+	applied, newHealth, killed := p.ApplyDamage(c.absorbDamage(amount), now, invulnTicks)
 	if applied <= 0 {
 		return
 	}

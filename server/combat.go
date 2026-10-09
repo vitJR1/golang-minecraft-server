@@ -5,6 +5,7 @@ import (
 	"math"
 	"minecraft-server/player"
 	"minecraft-server/world"
+	"sync"
 )
 
 // combat.go implements the PvP model in two flavors selected per instance:
@@ -102,7 +103,16 @@ func (c *ClientConnection) handleAttack(victim *ClientConnection) {
 	aSnap := ap.Snapshot()
 	vSnap := vp.Snapshot()
 
-	damage := scaledDamage(cfg.BaseDamage, strength)
+	// Base damage: the config's flat value, or — with weapon damage on —
+	// the held item's vanilla attack damage plus Sharpness (0.5·lvl + 0.5).
+	base := cfg.BaseDamage
+	if c.instance.WeaponDamage() {
+		base = world.AttackDamage(c.heldItemName())
+		if lvl := c.heldEnchant(EnchantSharpness); lvl > 0 {
+			base += 0.5*float32(lvl) + 0.5
+		}
+	}
+	damage := scaledDamage(base, strength)
 
 	// Critical hit: attacker airborne (1.9 additionally requires a fully
 	// charged swing). Vanilla also forbids sprinting, but we don't gate on
@@ -114,6 +124,7 @@ func (c *ClientConnection) handleAttack(victim *ClientConnection) {
 	if crit {
 		damage *= cfg.CritMultiplier
 	}
+	damage = victim.absorbDamage(damage) // armor + Protection
 
 	applied, newHealth, killed := vp.ApplyDamage(damage, now, cfg.InvulnTicks)
 	if applied <= 0 {
@@ -159,6 +170,7 @@ func (c *ClientConnection) applyKnockback(cfg CombatConfig, aSnap, vSnap player.
 	if c.sprinting.Load() {
 		strength += cfg.SprintKnockback
 	}
+	strength += 0.5 * float32(c.heldEnchant(EnchantKnockback)) // knockback stick
 	vx, vz := knockbackHoriz(aSnap.X, aSnap.Z, vSnap.X, vSnap.Z, strength)
 	c.instance.Players.Broadcast(CbPlayEntityVelocity,
 		entityVelocityPayload(vSnap.EntityID, vx, float64(cfg.VerticalKnockback), vz), -1)
@@ -246,4 +258,32 @@ func (i *Instance) combatTick(tick uint64) {
 		p.SetHealth(h + 1)
 		_ = c.sendSetHealth(p.Health())
 	})
+}
+
+// --- TEMPORARY weapon-damage switch -----------------------------------------
+// Instance.WeaponDamage / SetWeaponDamage live here until the Instance struct
+// (instance.go, owned by the BedWars session) grows an atomic field; the
+// map keeps combat.go self-contained meanwhile. Delete this block when the
+// field lands.
+
+var weaponDamageMu sync.Mutex
+var weaponDamageOn = map[*Instance]bool{}
+
+// WeaponDamage reports whether hits use the held item's vanilla damage
+// (world.AttackDamage + Sharpness) instead of Combat.BaseDamage.
+func (i *Instance) WeaponDamage() bool {
+	weaponDamageMu.Lock()
+	defer weaponDamageMu.Unlock()
+	return weaponDamageOn[i]
+}
+
+// SetWeaponDamage toggles weapon damage for this instance.
+func (i *Instance) SetWeaponDamage(on bool) {
+	weaponDamageMu.Lock()
+	defer weaponDamageMu.Unlock()
+	if on {
+		weaponDamageOn[i] = true
+	} else {
+		delete(weaponDamageOn, i)
+	}
 }

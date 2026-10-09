@@ -33,7 +33,26 @@ const (
 	EnchantEfficiency   = "minecraft:efficiency"
 	EnchantUnbreaking   = "minecraft:unbreaking"
 	EnchantAquaAffinity = "minecraft:aqua_affinity"
+	EnchantSharpness    = "minecraft:sharpness"
+	EnchantProtection   = "minecraft:protection"
+	EnchantKnockback    = "minecraft:knockback"
+	EnchantPower        = "minecraft:power"
+	EnchantPunch        = "minecraft:punch"
 )
+
+// enchantOf returns the level of enchantment on st via the server's
+// Enchantments source (0 without a server).
+func (c *ClientConnection) enchantOf(st itemStack, enchantment string) int {
+	if c.server == nil || c.server.Enchantments == nil {
+		return 0
+	}
+	return c.server.Enchantments.Level(st, enchantment)
+}
+
+// heldEnchant is enchantOf for the held hotbar stack.
+func (c *ClientConnection) heldEnchant(enchantment string) int {
+	return c.enchantOf(c.inv.held(c.heldSlot.Load()), enchantment)
+}
 
 // Enchantments answers "what level of enchantment e does this stack have".
 type Enchantments interface {
@@ -400,10 +419,8 @@ func (c *ClientConnection) damageHeldTool(n int) {
 	if maxDamage == 0 {
 		return
 	}
-	if c.server != nil {
-		if lvl := c.server.Enchantments.Level(st, EnchantUnbreaking); lvl > 0 && rand.Intn(lvl+1) > 0 {
-			return // Unbreaking: only 1/(lvl+1) of hits wear the tool
-		}
+	if lvl := c.enchantOf(st, EnchantUnbreaking); lvl > 0 && unbreakingSpares(lvl) {
+		return // Unbreaking: only 1/(lvl+1) of hits wear the tool
 	}
 	st.Damage += n
 	if st.Damage >= maxDamage {
@@ -418,3 +435,7 @@ func (c *ClientConnection) damageHeldTool(n int) {
 	_ = c.sendSetSlot(0, slot, st)
 	c.equipmentChanged()
 }
+
+// unbreakingSpares rolls the Unbreaking chance: a level-lvl item skips
+// lvl/(lvl+1) of its wear.
+func unbreakingSpares(lvl int) bool { return rand.Intn(lvl+1) > 0 }
