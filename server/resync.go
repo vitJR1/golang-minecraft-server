@@ -43,6 +43,7 @@ func (c *ClientConnection) resyncView() error {
 	//    hearts and the cooldown-bar attribute.
 	_ = c.sendSetHealth(s.Health)
 	_ = c.sendCombatAttributes()
+	_ = c.sendInventoryContents()
 	// 4. Re-spawn the instance's world entities (item frames, villagers).
 	_ = c.sendWorldEntities()
 	// 5. Rebuild the tab list + the other players' entities for this client.

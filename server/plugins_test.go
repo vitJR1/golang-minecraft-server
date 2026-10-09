@@ -110,6 +110,7 @@ func TestListenerConsumesBlockInteract(t *testing.T) {
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Digger")
 	cli.startDiscardDrain()
+	findConn(t, s, "Digger").player.SetGamemode(player.Creative) // instant breaks
 
 	dig := func(x, y, z int, action int32) {
 		var p bytes.Buffer

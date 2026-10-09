@@ -48,14 +48,10 @@ func main() {
 	loadEnv()     // ONLINE_MODE / INITIAL_OPS → cfg.*
 	logger.Init() // LOG_LEVEL / LOG_FORMAT read here
 
-	if err := ban.Load("banlist.json"); err != nil {
-		slog.Warn("failed to load banlist", "path", "banlist.json", "err", err)
-	}
-
 	srv := server.New()
 	srv.ChatModerator = bots.NewNosleeperBot(srv)
 	server.LoadFavicon(server.DefaultFaviconPath)
-	connectStores(srv) // Postgres + Redis, gated by *_ENABLED env (default on)
+	connectStores(srv) // STORAGE=postgres|memory picks the backends
 	// Auth plugin install gated by cfg.AuthEnabled (defaulted from
 	// ONLINE_MODE in loadEnv, overridable via AUTH_ENABLED env).
 	if cfg.AuthEnabled {
@@ -170,15 +166,72 @@ func loadTemplates(srv *server.Server) {
 	}
 }
 
-// connectStores opens the storage backends and stashes the handles on the
-// server. Postgres is a HARD dependency — player accounts and auth password
-// hashes live there, so a server that boots without it would let anyone
-// /register over existing names and lose every account created meanwhile.
-// Connection or migration failure aborts startup. Redis stays best-effort:
-// a down Redis is logged and the server boots without it.
+// Storage modes selected by the STORAGE env var.
+const (
+	storagePostgres = "postgres" // default: Postgres for accounts/bans/stats
+	storageMemory   = "memory"   // no database; nothing but bans persists
+)
+
+// defaultBanlistPath is the file bans go to under STORAGE=memory unless
+// BANLIST_FILE overrides it ("off" / "none" keeps bans in RAM only).
+const defaultBanlistPath = "banlist.json"
+
+// storageMode reads STORAGE, defaulting to postgres. An unknown value is a
+// config error, not something to guess around — abort.
+func storageMode() string {
+	switch v := strings.ToLower(getEnv("STORAGE", storagePostgres)); v {
+	case storagePostgres, storageMemory:
+		return v
+	default:
+		slog.Error("unknown STORAGE value", "value", v, "want", "postgres|memory")
+		os.Exit(1)
+		return ""
+	}
+}
+
+// connectStores opens the storage backends for the selected STORAGE mode
+// and stashes the handles on the server.
+//
+//   - postgres (default): Postgres is a HARD dependency — player accounts
+//     and auth password hashes live there, so a server that boots without
+//     it would let anyone /register over existing names and lose every
+//     account created meanwhile. Connection or migration failure aborts
+//     startup. Bans go to the bans table (store.BanStore).
+//   - memory: no database. Accounts/passwords live in a process map, match
+//     history and ratings aren't recorded. Bans use banlist.json
+//     (ban.FileStore) so moderation survives restarts even in dev.
+//
+// Redis stays best-effort either way: a down Redis is logged and the server
+// boots without it. It defaults on under postgres and off under memory;
+// REDIS_ENABLED overrides both.
 func connectStores(srv *server.Server) {
 	ctx := context.Background()
+	mode := storageMode()
+	slog.Info("storage mode", "storage", mode)
 
+	switch mode {
+	case storagePostgres:
+		connectPostgres(ctx, srv)
+		srv.Bans = store.NewBanStore(srv.Store.Players, srv.Store.Bans)
+		importBanlist(ctx, srv.Bans)
+	case storageMemory:
+		slog.Warn("STORAGE=memory: accounts, passwords, match history and ratings are NOT persisted")
+		srv.Bans = memoryBanStore()
+	}
+
+	if envEnabled("REDIS_ENABLED", mode == storagePostgres) {
+		rc, err := redisc.Connect(ctx, redisc.ConfigFromEnv())
+		if err != nil {
+			slog.Warn("redis connect failed; continuing without it", "err", err)
+		} else {
+			srv.Redis = rc
+			slog.Info("redis connected")
+		}
+	}
+}
+
+// connectPostgres connects, migrates and installs the repositories, or exits.
+func connectPostgres(ctx context.Context, srv *server.Server) {
 	dbCfg := db.ConfigFromEnv()
 	pg, err := db.Connect(ctx, dbCfg)
 	if err != nil {
@@ -194,16 +247,61 @@ func connectStores(srv *server.Server) {
 	}
 	srv.Store = store.New(pg.Pool)
 	slog.Info("postgres connected, migrations applied")
+}
 
-	if envEnabled("REDIS_ENABLED", true) {
-		rc, err := redisc.Connect(ctx, redisc.ConfigFromEnv())
-		if err != nil {
-			slog.Warn("redis connect failed; continuing without it", "err", err)
-		} else {
-			srv.Redis = rc
-			slog.Info("redis connected")
-		}
+// memoryBanStore builds the STORAGE=memory ban backend: banlist.json (or
+// BANLIST_FILE) when a path is configured, a pure in-memory map otherwise.
+// A corrupt file is logged and falls back to memory rather than aborting —
+// bans aren't worth refusing to boot over.
+func memoryBanStore() ban.Store {
+	path := getEnv("BANLIST_FILE", defaultBanlistPath)
+	switch strings.ToLower(path) {
+	case "off", "none":
+		slog.Info("bans: in-memory only (BANLIST_FILE=" + path + ")")
+		return ban.NewMemoryStore()
 	}
+	fs, err := ban.NewFileStore(path)
+	if err != nil {
+		slog.Warn("bans: failed to load banlist, using in-memory store", "path", path, "err", err)
+		return ban.NewMemoryStore()
+	}
+	slog.Info("bans: file-backed", "path", path)
+	return fs
+}
+
+// importBanlist is the one-shot memory→postgres migration for bans: under
+// STORAGE=postgres a leftover banlist.json (or BANLIST_FILE) is copied into
+// the bans table, then renamed to <path>.imported so the next boot doesn't
+// repeat it. Entries the database already bans are kept as-is (ban.Import).
+// A failure leaves the file in place and logs — bans aren't worth refusing
+// to boot over, and the next start retries.
+func importBanlist(ctx context.Context, dst ban.Store) {
+	path := getEnv("BANLIST_FILE", defaultBanlistPath)
+	switch strings.ToLower(path) {
+	case "off", "none":
+		return
+	}
+	entries, err := ban.ReadFile(path)
+	if err != nil {
+		slog.Warn("bans: banlist import skipped, file unreadable", "path", path, "err", err)
+		return
+	}
+	if entries == nil { // no file — nothing to migrate
+		return
+	}
+	res, err := ban.Import(ctx, dst, entries)
+	if err != nil {
+		slog.Warn("bans: banlist import failed, file left in place for retry",
+			"path", path, "added", res.Added, "err", err)
+		return
+	}
+	done := path + ".imported"
+	if err := os.Rename(path, done); err != nil {
+		slog.Warn("bans: imported banlist but could not rename it; it will be re-scanned next boot",
+			"path", path, "err", err)
+	}
+	slog.Info("bans: banlist imported into Postgres", "path", path,
+		"added", res.Added, "kept_existing", res.Kept, "expired", res.Expired, "renamed_to", done)
 }
 
 // envEnabled reads a boolean-ish env var, returning def when unset or

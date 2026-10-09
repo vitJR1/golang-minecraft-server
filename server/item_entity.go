@@ -25,6 +25,8 @@ const (
 	itemGravity        = 0.04 // subtracted from vy each tick while airborne
 	itemDrag           = 0.98 // vertical velocity retained each tick
 	itemPickupDelay    = 10   // ticks before a fresh drop can be collected (shows the hop)
+	itemThrowDelay     = 40   // ticks before a player-thrown item can be collected (vanilla: 2s)
+	itemGroundFriction = 0.6  // horizontal velocity retained per tick once resting on a block
 	itemDespawnTicks   = 6000 // 5 minutes on the ground, like vanilla
 	itemMergeRadius    = 1.0  // same-item drops within this distance merge into one stack
 	itemPickupRadiusXZ = 1.25 // horizontal reach of the pickup sweep from the player's centre
@@ -39,9 +41,11 @@ type itemEntity struct {
 	itemID   int32
 	count    int
 	x, y, z  float64
-	vy       float64
+	vx, vy   float64
+	vz       float64
 	onGround bool
 	ticks    int // age in ticks (pickup delay + despawn)
+	pickupAt int // tick age from which the item can be collected
 }
 
 // DropItem spawns count of the namespaced item at (x, y, z) as a dropped-item
@@ -51,38 +55,59 @@ type itemEntity struct {
 // grows one stack rather than littering entities. Returns false for an
 // unknown item id or a non-positive count.
 func (i *Instance) DropItem(x, y, z float64, itemName string, count int) bool {
+	itemID, ok := world.ItemByName(itemName)
+	if !ok {
+		return false
+	}
+	return i.spawnItem(itemID, count, x, y, z, 0, itemPopVelocity, 0, itemPickupDelay, true)
+}
+
+// ThrowItem spawns count of itemID flying from (x, y, z) with the given
+// velocity — a player's Q-drop or a stack dropped off the cursor. Thrown
+// items never merge into a resting stack (they're in flight) and can't be
+// collected for itemThrowDelay ticks, so the thrower doesn't vacuum it
+// straight back up.
+func (i *Instance) ThrowItem(itemID int32, count int, x, y, z, vx, vy, vz float64) bool {
+	return i.spawnItem(itemID, count, x, y, z, vx, vy, vz, itemThrowDelay, false)
+}
+
+func (i *Instance) spawnItem(itemID int32, count int, x, y, z, vx, vy, vz float64, pickupAt int, merge bool) bool {
 	if count <= 0 || i.Server == nil {
 		return false
 	}
-	itemID, ok := world.ItemByName(itemName)
-	if !ok {
+	if _, ok := world.ItemName(itemID); !ok {
 		return false
 	}
 
 	i.itemsMu.Lock()
 	// Merge into a nearby stack of the same item first (airborne or not — the
 	// distance check already bounds how far apart they can be).
-	for _, it := range i.items {
-		if it.itemID != itemID || it.count+count > maxStackSize {
-			continue
-		}
-		if distXZ(it.x, it.z, x, z) <= itemMergeRadius && math.Abs(it.y-y) <= itemMergeRadius {
-			it.count += count
-			it.ticks = 0 // a topped-up stack is "fresh" again for despawn purposes
-			meta := itemMetadataPayload(it)
-			i.itemsMu.Unlock()
-			i.Players.Broadcast(CbPlaySetEntityMetadata, meta, -1)
-			return true
+	if merge {
+		for _, it := range i.items {
+			if it.itemID != itemID || it.count+count > maxStackSize {
+				continue
+			}
+			if distXZ(it.x, it.z, x, z) <= itemMergeRadius && math.Abs(it.y-y) <= itemMergeRadius {
+				it.count += count
+				it.ticks = 0 // a topped-up stack is "fresh" again for despawn purposes
+				meta := itemMetadataPayload(it)
+				i.itemsMu.Unlock()
+				i.Players.Broadcast(CbPlaySetEntityMetadata, meta, -1)
+				return true
+			}
 		}
 	}
 	it := &itemEntity{
-		eid:    i.Server.nextEntityID.Add(1),
-		itemID: itemID,
-		count:  count,
-		x:      x,
-		y:      y,
-		z:      z,
-		vy:     itemPopVelocity,
+		eid:      i.Server.nextEntityID.Add(1),
+		itemID:   itemID,
+		count:    count,
+		x:        x,
+		y:        y,
+		z:        z,
+		vx:       vx,
+		vy:       vy,
+		vz:       vz,
+		pickupAt: pickupAt,
 	}
 	it.uuid = entityUUID(it.eid)
 	i.items = append(i.items, it)
@@ -148,17 +173,27 @@ func (i *Instance) itemTick(uint64) {
 			} else {
 				it.y = ny
 			}
+			i.slideItem(it, itemDrag)
 			moved = append(moved, it)
 			if it.y < -64 { // fell out of the world
 				removed = append(removed, it.eid)
 				continue
 			}
+		} else if it.vx != 0 || it.vz != 0 {
+			// Resting but still sliding (a throw that just landed): keep
+			// moving with ground friction until the velocity dies out, and
+			// fall again if the slide carries it off an edge.
+			i.slideItem(it, itemGroundFriction)
+			if !i.solidAt(it.x, it.y-0.01, it.z) {
+				it.onGround = false
+			}
+			moved = append(moved, it)
 		}
 		if it.ticks >= itemDespawnTicks {
 			removed = append(removed, it.eid)
 			continue
 		}
-		if it.ticks >= itemPickupDelay {
+		if it.ticks >= it.pickupAt {
 			if c := i.collectorFor(it, players); c != nil {
 				remaining := c.giveItem(it.itemID, it.count)
 				if taken := it.count - remaining; taken > 0 {
@@ -201,6 +236,26 @@ func (i *Instance) itemTick(uint64) {
 
 	for _, p := range out {
 		i.Players.Broadcast(p.id, p.payload, -1)
+	}
+}
+
+// slideItem advances the item horizontally by its velocity, stopping dead
+// against a solid block, then applies the per-tick drag. Velocities below
+// a hair are zeroed so a resting item stops generating Teleport packets.
+func (i *Instance) slideItem(it *itemEntity, drag float64) {
+	if it.vx == 0 && it.vz == 0 {
+		return
+	}
+	nx, nz := it.x+it.vx, it.z+it.vz
+	if i.solidAt(nx, it.y+0.1, nz) {
+		it.vx, it.vz = 0, 0
+		return
+	}
+	it.x, it.z = nx, nz
+	it.vx *= drag
+	it.vz *= drag
+	if math.Abs(it.vx) < 0.003 && math.Abs(it.vz) < 0.003 {
+		it.vx, it.vz = 0, 0
 	}
 }
 
@@ -270,9 +325,9 @@ func spawnItemPayload(it *itemEntity) []byte {
 	buf.WriteByte(0)                        // yaw
 	buf.WriteByte(0)                        // head yaw
 	protocol.WriteVarInt32ToBuffer(&buf, 0) // data (unused for items)
-	buf.Write(protocol.WriteShort(0))
+	buf.Write(protocol.WriteShort(velocityShort(it.vx)))
 	buf.Write(protocol.WriteShort(velocityShort(it.vy)))
-	buf.Write(protocol.WriteShort(0))
+	buf.Write(protocol.WriteShort(velocityShort(it.vz)))
 	return buf.Bytes()
 }
 

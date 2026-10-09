@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"sort"
 
 	"minecraft-server/nbt"
 	"minecraft-server/protocol"
@@ -26,9 +27,95 @@ const chestRows = 3
 type itemStack struct {
 	ID    int32
 	Count byte
+	// Name is an optional custom display name (server-given UI items such as
+	// the "Navigator" blaze rod).
+	Name string
+	// Damage is the wear on a tool (NBT "Damage"); the item breaks when it
+	// reaches world.ToolDurability.
+	Damage int
+	// Enchantments maps enchantment id ("minecraft:efficiency") → level,
+	// from the item's NBT "Enchantments" list. Only read, never granted.
+	Enchantments map[string]int
 }
 
 func (s itemStack) empty() bool { return s.Count == 0 }
+
+// enchantLevel returns the level of an enchantment on the stack (0 = none).
+func (s itemStack) enchantLevel(id string) int { return s.Enchantments[id] }
+
+// tag rebuilds the stack's NBT (name, damage, enchantments); nil when plain.
+func (s itemStack) tag() nbt.Compound {
+	var tag nbt.Compound
+	set := func(k string, v nbt.Value) {
+		if tag == nil {
+			tag = nbt.Compound{}
+		}
+		tag[k] = v
+	}
+	if s.Name != "" {
+		set("display", protocol.DisplayNameTag(s.Name))
+	}
+	if s.Damage > 0 {
+		set("Damage", nbt.Int(int32(s.Damage)))
+	}
+	if len(s.Enchantments) > 0 {
+		ids := make([]string, 0, len(s.Enchantments))
+		for id := range s.Enchantments {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		list := nbt.List{ElemTag: nbt.TagCompound}
+		for _, id := range ids {
+			list.Items = append(list.Items, nbt.Compound{"id": nbt.String(id), "lvl": nbt.Short(int16(s.Enchantments[id]))})
+		}
+		set("Enchantments", list)
+	}
+	return tag
+}
+
+// writeStack appends the wire Slot for st (empty, plain, or tagged).
+func writeStack(buf *bytes.Buffer, st itemStack) {
+	if st.empty() {
+		buf.Write(protocol.WriteEmptySlot())
+		return
+	}
+	buf.Write(protocol.WriteSlotTagged(st.ID, st.Count, st.tag()))
+}
+
+// stackFromTag fills Damage/Enchantments/Name from a slot's NBT compound.
+func stackFromTag(st itemStack, tag nbt.Compound) itemStack {
+	if d, ok := tag["Damage"].(nbt.Int); ok {
+		st.Damage = int(d)
+	}
+	if list, ok := tag["Enchantments"].(nbt.List); ok {
+		for _, item := range list.Items {
+			ench, ok := item.(nbt.Compound)
+			if !ok {
+				continue
+			}
+			id, _ := ench["id"].(nbt.String)
+			if id == "" {
+				continue
+			}
+			lvl := 0
+			switch v := ench["lvl"].(type) {
+			case nbt.Short:
+				lvl = int(v)
+			case nbt.Int:
+				lvl = int(v)
+			case nbt.Byte:
+				lvl = int(v)
+			}
+			if lvl > 0 {
+				if st.Enchantments == nil {
+					st.Enchantments = map[string]int{}
+				}
+				st.Enchantments[string(id)] = lvl
+			}
+		}
+	}
+	return st
+}
 
 // chestInventory is one chest's stored slots.
 type chestInventory struct {
@@ -74,38 +161,17 @@ func (c *ClientConnection) openBlockChest(pos world.Position) {
 }
 
 // sendChestInventory streams a chest's contents (Set Container Content): the 27
-// chest slots from `slots`, then the player-inventory mirror (so the hotbar
-// items don't vanish), then the empty cursor.
+// chest slots from `slots`, then the player's real inventory (main + hotbar
+// mirror from c.inv), then the empty cursor.
 func (c *ClientConnection) sendChestInventory(slots [chestSlotCount]itemStack) error {
-	total := int16(chestSlotCount + 36)
-	hotbarSlot0 := int16(chestSlotCount + 27)
-	hotbarSlot1 := int16(chestSlotCount + 28)
-
-	includePearl := false
-	if c.instance != nil {
-		_, includePearl = arenasForLobby(c.instance.ID)
-	}
-
 	var buf bytes.Buffer
 	buf.WriteByte(menuWindowID)
 	protocol.WriteVarInt32ToBuffer(&buf, 0) // state id
-	protocol.WriteVarInt32ToBuffer(&buf, int32(total))
-	for s := int16(0); s < total; s++ {
-		switch {
-		case s < chestSlotCount:
-			if st := slots[s]; !st.empty() {
-				buf.Write(protocol.WriteSlot(st.ID, st.Count))
-			} else {
-				buf.Write(protocol.WriteEmptySlot())
-			}
-		case s == hotbarSlot0:
-			buf.Write(protocol.WriteSlotWithName(itemBlazeRod, 1, "Navigator"))
-		case s == hotbarSlot1 && includePearl:
-			buf.Write(protocol.WriteSlotWithName(itemEnderPearl, 1, "Arena selector"))
-		default:
-			buf.Write(protocol.WriteEmptySlot())
-		}
+	protocol.WriteVarInt32ToBuffer(&buf, int32(chestSlotCount+36))
+	for s := 0; s < chestSlotCount; s++ {
+		writeStack(&buf, slots[s])
 	}
+	c.writeInventoryMirror(&buf)
 	buf.Write(protocol.WriteEmptySlot()) // cursor
 	return c.safeWrite(CbPlaySetContainerContent, buf.Bytes())
 }
@@ -116,20 +182,23 @@ func (c *ClientConnection) sendChestInventory(slots [chestSlotCount]itemStack) e
 // inventory range are ignored (we don't model the player inventory). The
 // client computes the result of every click mode, so trusting its array gives
 // correct chest contents without re-implementing inventory logic.
-func (c *ClientConnection) applyChestClick(packet *bytes.Buffer, pos world.Position) {
+//
+// Returns the carried (cursor) stack the client reports after the click, so
+// the caller can track what the player is holding between clicks.
+func (c *ClientConnection) applyChestClick(packet *bytes.Buffer, pos world.Position) itemStack {
 	count, err := protocol.ReadVarInt(packet)
 	if err != nil || count < 0 {
-		return
+		return c.cursor
 	}
 	for n := 0; n < count; n++ {
 		raw, err := protocol.ReadUShortFromBuf(packet)
 		if err != nil {
-			return
+			return c.cursor
 		}
 		slot := int16(raw)
 		st, ok := readSlot(packet)
 		if !ok {
-			return // malformed slot — stop, leave what we have
+			return c.cursor // malformed slot — stop, leave what we have
 		}
 		switch {
 		case slot >= 0 && slot < chestSlotCount:
@@ -137,11 +206,14 @@ func (c *ClientConnection) applyChestClick(packet *bytes.Buffer, pos world.Posit
 		case slot >= chestSlotCount:
 			// Player-inventory side of the chest window: slot chestSlotCount+i
 			// maps to window-0 slot mainInvStart+i — keep the held item in sync.
-			c.inv.set(slot-chestSlotCount+mainInvStart, st)
+			c.inv.set(slot-chestSlotCount+mainInvStart, c.inv.withKnownName(st))
 		}
 	}
-	// Trailing carried item (cursor) — read to keep parsing consistent; unused.
-	_, _ = readSlot(packet)
+	cursor, ok := readSlot(packet)
+	if !ok {
+		return c.cursor
+	}
+	return cursor
 }
 
 // readSlot reads one wire Slot from buf: present bool, then (item id, count,
@@ -163,12 +235,20 @@ func readSlot(buf *bytes.Buffer) (itemStack, bool) {
 	if err != nil {
 		return itemStack{}, false
 	}
-	// Skip the item's optional NBT so the next slot parses correctly.
+	// Measure the item's optional NBT, then decode it for the fields we
+	// model (Damage, Enchantments); the custom name is re-attached by the
+	// inventory model (withKnownName) for server-given items.
 	r := bytes.NewReader(buf.Bytes())
 	before := r.Len()
 	if err := nbt.SkipTag(r); err != nil {
 		return itemStack{}, false
 	}
-	buf.Next(before - r.Len())
-	return itemStack{ID: int32(id), Count: count}, true
+	raw := buf.Next(before - r.Len())
+	st := itemStack{ID: int32(id), Count: count}
+	if len(raw) > 1 {
+		if tag, err := nbt.Unmarshal(raw); err == nil {
+			st = stackFromTag(st, tag)
+		}
+	}
+	return st, true
 }

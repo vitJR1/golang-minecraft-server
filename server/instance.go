@@ -213,6 +213,10 @@ type Instance struct {
 	// (see game.BlockInteraction).
 	OnBlockInteract func(c *ClientConnection, click game.BlockInteraction) bool
 
+	// OnEntityInteract fires for a right-click on a world entity. false =
+	// consume (the core's item-frame default doesn't run).
+	OnEntityInteract func(c *ClientConnection, ei game.EntityInteraction) bool
+
 	// OnStop fires once when the instance is being torn down (via
 	// Server.RemoveInstance or Instance.Stop). Use for game cleanup;
 	// the tick loop is still running when this fires.

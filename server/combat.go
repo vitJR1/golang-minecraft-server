@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"minecraft-server/player"
+	"minecraft-server/world"
 )
 
 // combat.go implements the PvP model in two flavors selected per instance:
@@ -117,6 +118,12 @@ func (c *ClientConnection) handleAttack(victim *ClientConnection) {
 	applied, newHealth, killed := vp.ApplyDamage(damage, now, cfg.InvulnTicks)
 	if applied <= 0 {
 		return // swallowed by i-frames
+	}
+	// Weapons wear on a landed hit: swords one point, other tools two.
+	if t := world.ToolFromItem(c.heldItemName()); t.Type == world.Sword {
+		c.damageHeldTool(1)
+	} else if t.Type != world.NoTool {
+		c.damageHeldTool(2)
 	}
 
 	c.applyKnockback(cfg, aSnap, vSnap)

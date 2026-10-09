@@ -90,6 +90,26 @@ type playerBridge struct {
 }
 
 func (b playerBridge) Name() string { return b.conn.player.Name }
+func (b playerBridge) CountItem(itemName string) int {
+	id, ok := world.ItemByName(itemName)
+	if !ok {
+		return 0
+	}
+	return b.conn.countItem(id)
+}
+
+func (b playerBridge) TakeItem(itemName string, count int) bool {
+	id, ok := world.ItemByName(itemName)
+	if !ok {
+		return false
+	}
+	return b.conn.takeItem(id, count)
+}
+
+func (b playerBridge) OpenMenu(title string, rows int, items []game.MenuItem, onClick func(slot int)) {
+	b.conn.openPluginMenu(title, rows, items, onClick)
+}
+
 func (b playerBridge) IsOp() bool {
 	return b.conn.server != nil && b.conn.server.Ops.Has(b.conn.playerName)
 }
@@ -157,6 +177,9 @@ func (s *Server) AttachLogic(inst *Instance, logic game.Logic) *game.Ctx {
 	}
 	inst.OnBlockInteract = func(c *ClientConnection, click game.BlockInteraction) bool {
 		return logic.OnBlockInteract(ctx, playerBridge{conn: c}, click)
+	}
+	inst.OnEntityInteract = func(c *ClientConnection, ei game.EntityInteraction) bool {
+		return logic.OnEntityInteract(ctx, playerBridge{conn: c}, ei)
 	}
 	inst.OnChat = func(c *ClientConnection, msg string) (string, bool) {
 		return logic.OnChat(ctx, playerBridge{conn: c}, msg)

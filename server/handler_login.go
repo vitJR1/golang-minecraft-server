@@ -2,12 +2,12 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"crypto/aes"
 	"crypto/rand"
 	"crypto/rsa"
 	"fmt"
 	"log/slog"
-	"minecraft-server/ban"
 	"minecraft-server/cfg"
 	"minecraft-server/encryption"
 	"minecraft-server/mojang"
@@ -48,7 +48,14 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 		}
 	}
 
-	if banned := ban.IsBanned(c.playerName); banned != nil {
+	banned, err := c.server.Bans.IsBanned(context.Background(), c.playerName)
+	if err != nil {
+		// Backend hiccup (Postgres timeout etc.). Fail open: the ban list is
+		// a moderation aid, not an auth gate, and refusing every login while
+		// the DB blips would be worse. Logged so it's not silent.
+		slog.Warn("ban lookup failed, allowing login", "player", c.playerName, "err", err)
+	}
+	if banned != nil {
 		msg := []byte(`{"text":"You are banned from this server.\nReason: ` + banned.Reason +
 			`. Expires: ` + banned.ExpiresAt.Format(time.RFC1123) + `"}`)
 		if err := c.safeWrite(CbLoginDisconnect, protocol.WriteString(string(msg))); err != nil {

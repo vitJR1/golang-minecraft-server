@@ -229,6 +229,11 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		if !ok || block == world.Air {
 			break
 		}
+		// Not into anyone's hitbox (including the placer's own).
+		if c.instance.blockedByPlayer(placePos) {
+			_ = c.sendBlockUpdate(placePos, c.instance.World.GetBlock(placePos))
+			break
+		}
 		if !c.instance.allowBlockPlace(c, placePos, block) {
 			// Veto: replay the existing block back to the client to
 			// roll back its placement prediction.
@@ -270,9 +275,10 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 				break
 			}
 			c.consumedDig = nil
-			c.breakBlock(pos)
+			c.startDig(pos)
 		case 1:
 			c.consumedDig = nil
+			c.cancelDig()
 		case 2:
 			if c.consumedDig != nil && *c.consumedDig == pos {
 				c.consumedDig = nil
@@ -280,7 +286,11 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 				break
 			}
 			c.consumedDig = nil
-			c.breakBlock(pos)
+			c.finishDig(pos)
+		case 3: // ctrl+Q: drop the whole held stack
+			c.dropHeld(true)
+		case 4: // Q: drop one unit of the held stack
+			c.dropHeld(false)
 		}
 
 	case SbPlayInteract:
@@ -306,8 +316,17 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			}
 		case 0: // interact (right-click). Only "interact" (not interact_at, 2)
 			// drives the action so a single right-click isn't processed twice.
+			held := c.heldItemName()
+			if e, ok := c.instance.worldEntity(int32(target)); ok {
+				// Game logic / plugins first (shop NPCs); a consumed click
+				// skips the item-frame default.
+				ei := game.EntityInteraction{EntityID: int32(target), Type: e.Type, X: e.X, Y: e.Y, Z: e.Z, Item: held}
+				if !c.instance.allowEntityInteract(c, ei) {
+					break
+				}
+			}
 			// Item frames: insert the held item, or rotate the existing one.
-			c.instance.FrameInteract(int32(target), c.heldItemName())
+			c.instance.FrameInteract(int32(target), held)
 		}
 
 	case SbPlayPlayerAbilities:
@@ -356,32 +375,30 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		// Other slots / instances no-op.
 		_, _ = protocol.ReadVarInt(packet) // hand
 		_, _ = protocol.ReadVarInt(packet) // sequence
-		// Throwable items (egg / snowball / ender pearl) take priority — a
-		// creative-placed throwable in any slot is thrown. Server-given menu
-		// items (blaze rod, arena-selector pearl) aren't creative-tracked, so
-		// they fall through to the slot-based menu dispatch below.
-		if held := c.heldItemName(); held != "" {
-			if _, ok := throwableEntityID(held); ok {
-				c.throwProjectile(held)
-				break
-			}
-		}
-		switch c.heldSlot.Load() {
-		case 0:
-			if c.instance == c.server.Hub {
-				c.openHubMainMenu()
-				break
-			}
-			if _, ok := arenasForLobby(c.instance.ID); ok {
+		// Server-given menu items are recognised by their custom name in the
+		// inventory model (wherever the player moved them), so a plain ender
+		// pearl is still throwable while the "Arena selector" opens a menu.
+		held := c.inv.held(c.heldSlot.Load())
+		_, inLobby := arenasForLobby(c.instance.ID)
+		switch {
+		case held.Name == navigatorName:
+			if c.instance == c.server.Hub || inLobby {
 				c.openHubMainMenu()
 			}
-		case 1:
+		case held.Name == selectorName:
 			// BedWars lobby gets the live DOTA arena browser (create/join);
 			// other lobbies keep the placeholder arena list for now.
 			if c.instance.ID == LobbyBedWars {
 				c.openBedwarsArenaMenu()
 			} else if arenas, ok := arenasForLobby(c.instance.ID); ok {
 				c.openArenaMenu(c.instance.ID, arenas)
+			}
+		default:
+			// Throwable items (egg / snowball / ender pearl) in any slot.
+			if name := c.heldItemName(); name != "" {
+				if _, ok := throwableEntityID(name); ok {
+					c.throwProjectile(name)
+				}
 			}
 		}
 
@@ -423,11 +440,33 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		// handler might if it doesn't get drained first.
 		_, _ = packet.ReadByte()           // button
 		_, _ = protocol.ReadVarInt(packet) // mode
+		if winID == 0 {
+			// The player's own inventory screen: keep the model in step, and
+			// whatever left the slots+cursor was dropped (click outside the
+			// window, drop key over a slot).
+			before := c.itemTotals(nil)
+			c.cursor = c.applyInventoryClick(packet)
+			c.dropDeficit(before, c.itemTotals(nil))
+			break
+		}
 		if m := c.menu.Load(); m != nil && winID == menuWindowID {
 			switch {
 			case m.kind == "chest":
-				// Persist the client's computed slot changes to the chest.
-				c.applyChestClick(packet, m.chestPos)
+				// Persist the client's computed slot changes to the chest;
+				// anything that left chest+inventory+cursor was dropped.
+				before := c.itemTotals(&m.chestPos)
+				c.cursor = c.applyChestClick(packet, m.chestPos)
+				c.dropDeficit(before, c.itemTotals(&m.chestPos))
+			case m.kind == menuKindPlugin:
+				// Plugin GUI (shops): dispatch, then re-send the whole window
+				// so the client's ghost pickup / local inventory moves are
+				// undone and the menu stays open for the next click.
+				if entry, ok := m.entries[slot]; ok && m.onClick != nil {
+					m.onClick(c, entry)
+				}
+				if c.menu.Load() == m {
+					_ = c.sendChestContents(m.rows, m.entries)
+				}
 			default:
 				// Navigation menu: dispatch the clicked icon. The rest of the
 				// packet (changed slots, carried item) is discarded.
@@ -439,22 +478,19 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 
 	case SbPlayCloseContainer:
 		// Window ID(UByte). Clear our menu state if it matches AND re-send
-		// the blaze rod — opening a chest temporarily wipes the client's
-		// view of the player inventory, and even with the mirror trick a
-		// stray ghost-click on a menu icon could leave the cursor holding
-		// air. Re-stamping the hotbar slot is cheap and idempotent.
+		// the whole player inventory from the model — a stray ghost-click
+		// on a menu icon can leave the client's cursor/slots out of step,
+		// and the full Set Container Content puts every slot back.
 		winID, err := packet.ReadByte()
 		if err != nil {
 			return fmt.Errorf("close container: window id: %w", err)
 		}
+		// Closing any window (the inventory screen is window 0) with a stack
+		// still on the cursor drops it, like vanilla.
+		c.dropCursor()
 		if winID == menuWindowID {
 			c.menu.Store(nil)
-			giveBlazeRod(c)
-			if c.instance != nil {
-				if _, ok := arenasForLobby(c.instance.ID); ok {
-					giveArenaSelector(c)
-				}
-			}
+			_ = c.sendInventoryContents()
 		}
 
 	default:
@@ -492,14 +528,4 @@ func offsetByFace(p world.Position, face int) world.Position {
 		return world.Position{X: p.X + 1, Y: p.Y, Z: p.Z}
 	}
 	return p
-}
-
-// breakBlock runs the block-break veto chain (listeners, then the instance
-// hook) and either air-fills the block or rolls the client back.
-func (c *ClientConnection) breakBlock(pos world.Position) {
-	if !c.instance.allowBlockBreak(c, pos) {
-		_ = c.sendBlockUpdate(pos, c.instance.World.GetBlock(pos))
-		return
-	}
-	c.instance.SetBlock(pos, world.Air)
 }

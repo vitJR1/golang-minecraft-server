@@ -1,7 +1,7 @@
 package server
 
 import (
-	"minecraft-server/ban"
+	"context"
 	"minecraft-server/protocol"
 	"testing"
 	"time"
@@ -54,11 +54,9 @@ func TestCmdKickDisconnectsTarget(t *testing.T) {
 	}, "Victim to be removed from PlayerList")
 }
 
-// TestCmdBanAddsEntryAndKicks: /ban inserts a ban that ban.IsBanned can
-// see, and the target is dropped from the server.
+// TestCmdBanAddsEntryAndKicks: /ban inserts a ban that s.Bans can see
+// (with the issuer recorded), and the target is dropped from the server.
 func TestCmdBanAddsEntryAndKicks(t *testing.T) {
-	t.Cleanup(func() { ban.Remove("Spammer") })
-
 	s := New()
 	s.Ops.Add("Mod")
 	mod := pipeClientOn(t, s)
@@ -72,9 +70,11 @@ func TestCmdBanAddsEntryAndKicks(t *testing.T) {
 	mod.write(t, SbPlayChatCommand, protocol.WriteString("ban Spammer 1h flooding"))
 
 	waitFor(t, 2*time.Second, func() bool {
-		return ban.IsBanned("Spammer") != nil
+		info, _ := s.Bans.IsBanned(context.Background(), "Spammer")
+		return info != nil
 	}, "ban entry to land")
-	if info := ban.IsBanned("Spammer"); info == nil || info.Reason != "flooding" {
+	info, _ := s.Bans.IsBanned(context.Background(), "Spammer")
+	if info == nil || info.Reason != "flooding" || info.IssuedBy != "Mod" {
 		t.Errorf("ban info: %+v", info)
 	}
 	waitFor(t, 2*time.Second, func() bool {
@@ -151,7 +151,7 @@ func TestCmdBanRejectsBadDuration(t *testing.T) {
 	mod.write(t, SbPlayChatCommand, protocol.WriteString("ban Nobody 5x bogus"))
 	drainExpect(t, ch, "bad duration reply", CbPlaySystemChat)
 
-	if ban.IsBanned("Nobody") != nil {
+	if info, _ := s.Bans.IsBanned(context.Background(), "Nobody"); info != nil {
 		t.Error("malformed /ban should not have created an entry")
 	}
 }

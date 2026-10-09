@@ -93,6 +93,12 @@ type Logic interface {
 	// wands and other tool items.
 	OnBlockInteract(*Ctx, PlayerHandle, BlockInteraction) bool
 
+	// OnEntityInteract fires when a player right-clicks a world entity
+	// (villager NPC, item frame, …). Return false to consume the click so
+	// the core's default (item-frame insert/rotate) doesn't run — this is
+	// where shop NPCs open their menu.
+	OnEntityInteract(*Ctx, PlayerHandle, EntityInteraction) bool
+
 	// OnChat may rewrite the outgoing text and/or veto delivery. Return
 	// (msg, true) for unchanged + allow, ("", false) for drop.
 	OnChat(*Ctx, PlayerHandle, string) (string, bool)
@@ -237,6 +243,21 @@ type PlayerHandle interface {
 
 	// IsOp reports whether the player is a server operator.
 	IsOp() bool
+
+	// CountItem returns how many units of the namespaced item the player
+	// carries (main inventory + hotbar).
+	CountItem(itemName string) int
+
+	// TakeItem removes count units of the item from the player's inventory
+	// and syncs the changed slots. Returns false — and removes nothing — if
+	// the player has fewer than count.
+	TakeItem(itemName string, count int) bool
+
+	// OpenMenu shows a chest-style GUI of rows×9 slots titled title. items
+	// fill the slots; onClick fires with the clicked slot index (only for
+	// slots that hold an item) and the menu stays open with its contents
+	// re-sent, so a shop can sell repeatedly. Closing is up to the player.
+	OpenMenu(title string, rows int, items []MenuItem, onClick func(slot int))
 
 	// Kick closes the player's connection. The reason is logged but not
 	// (yet) sent as a Disconnect message — that needs the Play Disconnect

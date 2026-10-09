@@ -125,6 +125,21 @@ func (i *Instance) allowBlockInteract(c *ClientConnection, click game.BlockInter
 	return true
 }
 
+// allowEntityInteract fires OnEntityInteract for a right-click on a world
+// entity. false = consumed.
+func (i *Instance) allowEntityInteract(c *ClientConnection, ei game.EntityInteraction) bool {
+	ctx, p := i.pluginCtx(), playerBridge{conn: c}
+	for _, l := range i.listeners {
+		if !safeVeto(i, "listener "+l.Name+" OnEntityInteract", func() bool { return l.Logic.OnEntityInteract(ctx, p, ei) }) {
+			return false
+		}
+	}
+	if hook := i.OnEntityInteract; hook != nil {
+		return hook(c, ei)
+	}
+	return true
+}
+
 func (i *Instance) allowAttack(attacker, target *ClientConnection) bool {
 	ctx := i.pluginCtx()
 	a, t := playerBridge{conn: attacker}, playerBridge{conn: target}

@@ -52,6 +52,26 @@ func WriteSlotWithName(itemID int32, count byte, displayName string) []byte {
 	return out
 }
 
+// WriteSlotTagged encodes a present item carrying an arbitrary NBT compound
+// (display name, Damage, Enchantments, …). A nil/empty tag writes TAG_End.
+func WriteSlotTagged(itemID int32, count byte, tag nbt.Compound) []byte {
+	if len(tag) == 0 {
+		return WriteSlot(itemID, count)
+	}
+	nbtBytes := nbt.Marshal(tag)
+	out := make([]byte, 0, 16+len(nbtBytes))
+	out = append(out, 0x01)
+	out = append(out, WriteVarInt32(itemID)...)
+	out = append(out, count)
+	out = append(out, nbtBytes...)
+	return out
+}
+
+// DisplayNameTag builds the {display:{Name:…}} compound for a custom name.
+func DisplayNameTag(displayName string) nbt.Compound {
+	return nbt.Compound{"Name": nbt.String(`{"text":"` + escapeJSON(displayName) + `"}`)}
+}
+
 // escapeJSON escapes the minimum set of characters that would otherwise
 // break a JSON string literal. Sufficient for our menu labels (ASCII +
 // occasional double-quote); not a general-purpose JSON encoder.

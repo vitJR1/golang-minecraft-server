@@ -94,6 +94,8 @@ const (
 	CbPlayPlayerInfoUpdate    = 0x3A
 	CbPlaySyncPos             = 0x3C
 	CbPlayRemoveEntities      = 0x3E // NOT 0x3B (= Look At for 1.20.1)
+	CbPlayRemoveEntityEffect  = 0x3F // "remove_entity_effect": entity + effect id
+	CbPlayEntityEffect        = 0x6C // "entity_effect": apply a potion effect (after 0x6B Feature Flags)
 	CbPlayRespawn             = 0x41
 	CbPlayHeadRotation        = 0x42 // body yaw rides Teleport Entity; head needs its own packet
 	CbPlayUpdateSectionBlocks = 0x43 // "multi_block_change": many blocks in one 16³ section (Instance.SetBlocks)

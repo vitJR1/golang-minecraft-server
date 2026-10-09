@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"minecraft-server/ban"
 	"minecraft-server/cfg"
 	"minecraft-server/db"
 	"minecraft-server/player"
@@ -74,12 +75,25 @@ type Server struct {
 	Redis *redisc.Client
 
 	// Store holds the typed repositories over DB.Pool (players, bans, mutes,
-	// per-mode matches/participation/ratings, stats). Nil when DB is nil.
+	// per-mode matches/participation/ratings, stats). Nil when DB is nil
+	// (STORAGE=memory) — auth then falls back to an in-memory credential map.
 	Store *store.Store
+
+	// Bans is the player-ban backend the login handler and /ban //unban use.
+	// New() installs an in-memory store; main swaps in store.BanStore
+	// (Postgres) or ban.FileStore (banlist.json) depending on STORAGE.
+	Bans ban.Store
 
 	nextEntityID       atomic.Int32
 	instanceSerialNext atomic.Uint64
 	arenaSerial        atomic.Uint64
+
+	// Enchantments / Effects supply dig and durability modifiers
+	// (modifiers.go). Defaults read item NBT and the /effect table; swap for
+	// a richer implementation.
+	Enchantments Enchantments
+	Effects      Effects
+	effects      *effectTable
 
 	// TemplateDir is where map .schem files (and their sibling <name>.json
 	// arena configs) live. Default "schem/templates"; /arena create resolves
@@ -123,6 +137,7 @@ func New() *Server {
 	s := &Server{
 		Ops:         NewOpSet(cfg.InitialOps),
 		Mutes:       NewMuteSet(),
+		Bans:        ban.NewMemoryStore(),
 		instances:   make(map[string]*Instance),
 		templates:   make(map[string]*world.Template),
 		arenas:      make(map[string]string),
@@ -131,6 +146,9 @@ func New() *Server {
 		janitorStop: make(chan struct{}),
 		startTime:   time.Now(),
 	}
+	s.effects = newEffectTable()
+	s.Enchantments = nbtEnchantments{}
+	s.Effects = s.effects
 	s.Hub = NewInstance("hub", s, world.NewMemoryWorld())
 	// The hub is a safe lobby — no PvP. Game instances keep the default
 	// (combat enabled); they can re-tune or disable via SetPvP.
@@ -354,6 +372,13 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 	_ = c.sendCombatAttributes()
 	// Respawn also wiped client-side entities — re-spawn the target's frames.
 	_ = c.sendWorldEntities()
+	// Hub UI items don't follow the player into a game instance (its hotbar
+	// is the game's economy); hub/lobby joins hand them out again. Then push
+	// the inventory model so the client shows what the server has.
+	if _, lobby := arenasForLobby(target.ID); target != s.Hub && !lobby {
+		c.stripNavigatorItems()
+	}
+	_ = c.sendInventoryContents()
 
 	// 7. Register in target + broadcast tab list and Spawn for everyone.
 	target.JoinAndAnnounce(c)
@@ -497,6 +522,19 @@ type ClientConnection struct {
 	// "finished digging" is swallowed instead of breaking the block. Only
 	// touched from the readLoop goroutine.
 	consumedDig *world.Position
+
+	// digPos / digStartTick track the survival dig in progress (dig.go):
+	// where "started digging" landed and the instance tick it began on, so
+	// "finished digging" can be checked against the block's break time.
+	digPos       *world.Position
+	digStartTick uint64
+
+	// cursor is the stack the client is carrying on its mouse cursor inside
+	// an inventory/chest window, as reported by its last Click Container.
+	// Whatever leaves the modelled slots without reaching the cursor (or
+	// leaves the cursor without reaching a slot) was dropped and becomes an
+	// item entity — see drop.go. Only touched from the readLoop goroutine.
+	cursor itemStack
 
 	// authed gates the connection through the offline-mode auth plugin.
 	// True = player has run /register or /login successfully (or auth

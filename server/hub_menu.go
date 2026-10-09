@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"minecraft-server/game"
 	"minecraft-server/protocol"
 	"minecraft-server/templates"
 	"minecraft-server/world"
@@ -63,6 +64,54 @@ type openMenu struct {
 	// chestPos is the block position of the open chest when kind == "chest",
 	// so Click Container changes persist to the right chest.
 	chestPos world.Position
+
+	// rows is the window height, kept so a plugin menu can be re-sent
+	// after each click.
+	rows int
+}
+
+// menuKindPlugin marks a GUI opened through game.PlayerHandle.OpenMenu.
+const menuKindPlugin = "plugin"
+
+// openPluginMenu implements PlayerHandle.OpenMenu: a rows×9 chest window
+// whose slots come from items and whose clicks go to onClick(slot).
+func (c *ClientConnection) openPluginMenu(title string, rows int, items []game.MenuItem, onClick func(slot int)) {
+	if rows < 1 {
+		rows = 1
+	}
+	if rows > 6 {
+		rows = 6
+	}
+	entries := map[int16]menuEntry{}
+	for _, it := range items {
+		if it.Slot < 0 || it.Slot >= rows*9 {
+			continue
+		}
+		id, ok := world.ItemByName(it.Item)
+		if !ok {
+			continue
+		}
+		count := it.Count
+		if count < 1 {
+			count = 1
+		}
+		if count > 64 {
+			count = 64
+		}
+		entries[int16(it.Slot)] = menuEntry{slot: int16(it.Slot), itemID: id, count: byte(count), name: it.Name, key: it.Name}
+	}
+	c.menu.Store(&openMenu{
+		kind:    menuKindPlugin,
+		rows:    rows,
+		entries: entries,
+		onClick: func(_ *ClientConnection, e menuEntry) {
+			if onClick != nil {
+				onClick(int(e.slot))
+			}
+		},
+	})
+	_ = c.sendOpenScreen(title, rows)
+	_ = c.sendChestContents(rows, entries)
 }
 
 type menuEntry struct {
@@ -143,26 +192,35 @@ func SetupHubMenu(s *Server) {
 // slot 0. Used by hub + lobby OnPlayerJoin so it's always available.
 // State ID 0 is fine for a first write — vanilla's State ID checks
 // only kick in after the server sends Set Container Content.
+// Display names of the server-given hub UI items; SbPlayUseItem dispatches
+// on them (not on the slot index), and stripNavigatorItems removes them.
+const (
+	navigatorName = "Navigator"
+	selectorName  = "Arena selector"
+)
+
 func giveBlazeRod(c *ClientConnection) {
-	giveHotbarItem(c, hotbarSlot0, itemBlazeRod, "Navigator")
+	giveHotbarItem(c, hotbarSlot0, itemBlazeRod, navigatorName)
 }
 
 // giveArenaSelector puts an "Arena selector" ender pearl into hotbar
 // slot 1. Lobbies call this so the player can press `2` and right-click
 // to open the per-game arena picker.
 func giveArenaSelector(c *ClientConnection) {
-	giveHotbarItem(c, hotbarSlot1, itemEnderPearl, "Arena selector")
+	giveHotbarItem(c, hotbarSlot1, itemEnderPearl, selectorName)
 }
 
-// giveHotbarItem is the underlying wire push used by giveBlazeRod /
-// giveArenaSelector. Pushes a single Set Container Slot at window 0
-// (player inventory).
+// giveHotbarItem is the underlying push used by giveBlazeRod /
+// giveArenaSelector: records the named item in the inventory model and
+// sends a single Set Container Slot at window 0 (player inventory).
 func giveHotbarItem(c *ClientConnection, slot int16, itemID int32, name string) {
+	st := itemStack{ID: itemID, Count: 1, Name: name}
+	c.inv.set(slot, st)
 	var buf bytes.Buffer
 	buf.WriteByte(0)                        // window id 0 = player inventory
 	protocol.WriteVarInt32ToBuffer(&buf, 0) // state id
 	buf.Write(protocol.WriteShort(slot))
-	buf.Write(protocol.WriteSlotWithName(itemID, 1, name))
+	writeStack(&buf, st)
 	if err := c.safeWrite(CbPlaySetContainerSlot, buf.Bytes()); err != nil {
 		slog.Warn("give hotbar item failed",
 			"player", c.playerName, "item", name, "err", err)
@@ -376,45 +434,29 @@ func (c *ClientConnection) sendOpenScreen(title string, rows int) error {
 // hotbar so the client sees it stay across open/close.
 
 // sendChestContents fills the open chest's rows*9 visible slots from entries,
-// then mirrors the player's hotbar so the client keeps rendering the navigator
-// (and the arena selector in lobbies) instead of treating the inventory as
-// empty. entries may be nil for a plain (empty) chest.
+// then mirrors the player's real inventory (from the server-side model) so
+// the client keeps rendering their items — navigator, resources, blocks —
+// instead of treating the inventory as empty. entries may be nil for a plain
+// (empty) chest.
 func (c *ClientConnection) sendChestContents(rows int, entries map[int16]menuEntry) error {
 	chestSlots := int16(rows * 9)
-	total := chestSlots + 36
-	hotbarSlot0 := chestSlots + 27
-	hotbarSlot1 := chestSlots + 28
 
 	var buf bytes.Buffer
 	buf.WriteByte(menuWindowID)
 	protocol.WriteVarInt32ToBuffer(&buf, 0) // state id
-	protocol.WriteVarInt32ToBuffer(&buf, int32(total))
-
-	// Are we in a game lobby? If yes, include the ender pearl in the
-	// mirror so a chest-open-then-close cycle doesn't wipe it.
-	includePearl := false
-	if c.instance != nil {
-		_, includePearl = arenasForLobby(c.instance.ID)
-	}
-
-	for s := int16(0); s < total; s++ {
-		switch {
-		case s == hotbarSlot0:
-			buf.Write(protocol.WriteSlotWithName(itemBlazeRod, 1, "Navigator"))
-		case s == hotbarSlot1 && includePearl:
-			buf.Write(protocol.WriteSlotWithName(itemEnderPearl, 1, "Arena selector"))
-		default:
-			if e, ok := entries[s]; ok {
-				count := e.count
-				if count == 0 {
-					count = 1
-				}
-				buf.Write(protocol.WriteSlotWithName(e.itemID, count, e.name))
-			} else {
-				buf.Write(protocol.WriteEmptySlot())
+	protocol.WriteVarInt32ToBuffer(&buf, int32(chestSlots+36))
+	for s := int16(0); s < chestSlots; s++ {
+		if e, ok := entries[s]; ok {
+			count := e.count
+			if count == 0 {
+				count = 1
 			}
+			buf.Write(protocol.WriteSlotWithName(e.itemID, count, e.name))
+		} else {
+			buf.Write(protocol.WriteEmptySlot())
 		}
 	}
+	c.writeInventoryMirror(&buf)
 	buf.Write(protocol.WriteEmptySlot()) // carried item (cursor)
 
 	return c.safeWrite(CbPlaySetContainerContent, buf.Bytes())

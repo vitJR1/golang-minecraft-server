@@ -1,9 +1,10 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
-	"minecraft-server/ban"
+	"log/slog"
 	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/protocol"
@@ -62,6 +63,12 @@ func init() {
 		NeedsOp: true,
 		Help:    "/gamemode <survival|creative|adventure|spectator> [player]",
 		Run:     cmdGamemode,
+	})
+	registerCommand(&Command{
+		Name:    "effect",
+		NeedsOp: true,
+		Help:    "/effect <player> <haste|mining_fatigue> [level] [seconds] | /effect <player> clear",
+		Run:     cmdEffect,
 	})
 	registerCommand(&Command{
 		Name:    "tp",
@@ -689,13 +696,10 @@ func scanTemplates(root string) ([]string, error) {
 
 // cmdBan: /ban <player> <duration> [reason words…]
 //
-// Adds an in-memory ban entry expiring at now+duration and, if the player
-// is currently online, kicks them with a Play Disconnect carrying the
-// reason. Duration uses our compact format: 30s / 5m / 2h / 7d / 1w.
-//
-// banlist.json on disk is left untouched — Load is read-only at boot.
-// To persist, call ban.Save("banlist.json") from main; we don't auto-
-// persist here to keep the moderator workflow predictable.
+// Writes a ban expiring at now+duration to the server's ban.Store
+// (Postgres or banlist.json depending on STORAGE) and, if the player is
+// currently online, kicks them with a Play Disconnect carrying the reason.
+// Duration uses our compact format: 30s / 5m / 2h / 7d / 1w.
 func cmdBan(c *ClientConnection, args []string) {
 	if len(args) < 2 {
 		_ = c.sendSystemMessage("Usage: /ban <player> <duration> [reason]")
@@ -712,7 +716,11 @@ func cmdBan(c *ClientConnection, args []string) {
 		reason = strings.Join(args[2:], " ")
 	}
 	until := time.Now().Add(dur)
-	ban.Add(target, reason, until)
+	if err := c.server.Bans.Add(context.Background(), target, reason, c.playerName, until); err != nil {
+		slog.Error("ban store write failed", "target", target, "err", err)
+		_ = c.sendSystemMessage("Ban failed (storage error): " + err.Error())
+		return
+	}
 
 	_ = c.sendSystemMessage(fmt.Sprintf("Banned %s until %s — %s",
 		target, until.Format("2006-01-02 15:04:05"), reason))
@@ -729,7 +737,11 @@ func cmdUnban(c *ClientConnection, args []string) {
 		_ = c.sendSystemMessage("Usage: /unban <player>")
 		return
 	}
-	ban.Remove(args[0])
+	if err := c.server.Bans.Remove(context.Background(), args[0]); err != nil {
+		slog.Error("ban store remove failed", "target", args[0], "err", err)
+		_ = c.sendSystemMessage("Unban failed (storage error): " + err.Error())
+		return
+	}
 	_ = c.sendSystemMessage("Unbanned " + args[0])
 }
 
@@ -818,4 +830,51 @@ func (c *ClientConnection) sendGameModeChange(mode player.Gamemode) error {
 	payload = append(payload, 3) // event id: Change Game Mode
 	payload = append(payload, protocol.WriteFloat(float32(mode))...)
 	return c.safeWrite(CbPlayGameEvent, payload)
+}
+
+// --- /effect ---
+
+// cmdEffect grants or clears a potion effect on a player (modifiers.go).
+//
+//	/effect <player> <effect> [level=1] [seconds=30]
+//	/effect <player> clear
+func cmdEffect(c *ClientConnection, args []string) {
+	if len(args) < 2 {
+		_ = c.sendSystemMessage("Usage: /effect <player> <haste|mining_fatigue> [level] [seconds] | /effect <player> clear")
+		return
+	}
+	target, _, ok := c.server.FindPlayer(args[0])
+	if !ok {
+		_ = c.sendSystemMessage("Player not online: " + args[0])
+		return
+	}
+	if strings.EqualFold(args[1], "clear") {
+		c.server.effects.remove(target, nil)
+		_ = c.sendSystemMessage("Cleared effects on " + target.playerName)
+		return
+	}
+	effect, ok := knownEffects[strings.ToLower(args[1])]
+	if !ok {
+		_ = c.sendSystemMessage("Unknown effect: " + args[1] + " (haste, mining_fatigue)")
+		return
+	}
+	level, seconds := 1, 30
+	if len(args) >= 3 {
+		if v, err := strconv.Atoi(args[2]); err == nil && v >= 1 && v <= 255 {
+			level = v
+		} else {
+			_ = c.sendSystemMessage("Level must be 1..255")
+			return
+		}
+	}
+	if len(args) >= 4 {
+		if v, err := strconv.Atoi(args[3]); err == nil && v >= 1 {
+			seconds = v
+		} else {
+			_ = c.sendSystemMessage("Seconds must be ≥1")
+			return
+		}
+	}
+	c.server.effects.apply(target, effect, level, time.Duration(seconds)*time.Second)
+	_ = c.sendSystemMessage(fmt.Sprintf("Gave %s %s %d for %ds", target.playerName, effect.Name, level, seconds))
 }

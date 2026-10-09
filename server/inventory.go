@@ -58,6 +58,90 @@ func (inv *playerInventory) held(heldSlot int32) itemStack {
 	return inv.get(int16(hotbarStart) + int16(heldSlot))
 }
 
+// withKnownName re-attaches the custom display name of a server-given UI item
+// to a stack the client reported back (the wire reader drops item NBT, so a
+// moved "Navigator" rod would otherwise come back nameless and stop opening
+// the menu). Only IDs that currently carry a name in the inventory qualify.
+func (inv *playerInventory) withKnownName(st itemStack) itemStack {
+	if st.empty() || st.Name != "" {
+		return st
+	}
+	for _, cur := range inv.slots {
+		if cur.ID == st.ID && !cur.empty() && cur.Name != "" {
+			st.Name = cur.Name
+			break
+		}
+	}
+	return st
+}
+
+// writeInventoryMirror appends the 36 player-inventory slots (main 9..35 then
+// hotbar 36..44) of a container window, from the server-side model, so an
+// open chest/menu shows the player's real items instead of blanks.
+func (c *ClientConnection) writeInventoryMirror(buf *bytes.Buffer) {
+	for slot := int16(mainInvStart); slot < hotbarStart+9; slot++ {
+		writeStack(buf, c.inv.get(slot))
+	}
+}
+
+// sendInventoryContents pushes the whole window-0 inventory (Set Container
+// Content) from the model: after a Respawn, a cross-instance move, or a
+// closed menu window, so the client's view matches the server again.
+func (c *ClientConnection) sendInventoryContents() error {
+	var buf bytes.Buffer
+	buf.WriteByte(0)                        // window 0 = player inventory
+	protocol.WriteVarInt32ToBuffer(&buf, 0) // state id
+	protocol.WriteVarInt32ToBuffer(&buf, int32(playerInvSize))
+	for slot := int16(0); slot < playerInvSize; slot++ {
+		writeStack(&buf, c.inv.get(slot))
+	}
+	buf.Write(protocol.WriteEmptySlot()) // cursor
+	return c.safeWrite(CbPlaySetContainerContent, buf.Bytes())
+}
+
+// applyInventoryClick applies a window-0 Click Container (the player moving
+// stacks around their own inventory: pick up, place, merge, shift-click) to
+// the model by trusting the client's changed-slots array, exactly like chest
+// windows. packet is positioned after the window/state/slot/button/mode
+// header. Without this the model drifts from the client as soon as a stack
+// is moved, and the next server-side give would overwrite the wrong slot.
+//
+// Returns the carried (cursor) stack the client reports after the click.
+func (c *ClientConnection) applyInventoryClick(packet *bytes.Buffer) itemStack {
+	count, err := protocol.ReadVarInt(packet)
+	if err != nil || count < 0 {
+		return c.cursor
+	}
+	for n := 0; n < count; n++ {
+		raw, err := protocol.ReadUShortFromBuf(packet)
+		if err != nil {
+			return c.cursor
+		}
+		st, ok := readSlot(packet)
+		if !ok {
+			return c.cursor
+		}
+		c.inv.set(int16(raw), c.inv.withKnownName(st))
+	}
+	cursor, ok := readSlot(packet)
+	if !ok {
+		return c.cursor
+	}
+	return cursor
+}
+
+// stripNavigatorItems removes the server-given hub UI items (navigator rod,
+// arena selector) from the inventory. Called when the player enters a game
+// instance, where those slots belong to the game's economy.
+func (c *ClientConnection) stripNavigatorItems() {
+	for slot := int16(mainInvStart); slot < hotbarStart+9; slot++ {
+		st := c.inv.get(slot)
+		if st.Name == navigatorName || st.Name == selectorName {
+			c.inv.set(slot, itemStack{})
+		}
+	}
+}
+
 // onSetCreativeSlot records the item a creative player put in a slot. Reads
 // Short slot + Slot(item); creative is where inventory edits are synced (the
 // client is authoritative in creative), so this keeps the held item accurate.
@@ -113,6 +197,46 @@ func (c *ClientConnection) giveItem(itemID int32, count int) int {
 		}
 	}
 	return remaining
+}
+
+// countItem sums the units of itemID across the main inventory + hotbar.
+func (c *ClientConnection) countItem(itemID int32) int {
+	n := 0
+	for _, slot := range giveSlotOrder {
+		if st := c.inv.get(slot); !st.empty() && st.ID == itemID {
+			n += int(st.Count)
+		}
+	}
+	return n
+}
+
+// takeItem removes count units of itemID, main inventory first so the
+// hotbar keeps its stacks longest, syncing every changed slot. Removes
+// nothing and returns false when the player holds fewer than count.
+func (c *ClientConnection) takeItem(itemID int32, count int) bool {
+	if count <= 0 {
+		return true
+	}
+	if c.countItem(itemID) < count {
+		return false
+	}
+	remaining := count
+	for idx := len(giveSlotOrder) - 1; idx >= 0 && remaining > 0; idx-- {
+		slot := giveSlotOrder[idx]
+		st := c.inv.get(slot)
+		if st.empty() || st.ID != itemID {
+			continue
+		}
+		take := min(int(st.Count), remaining)
+		st.Count -= byte(take)
+		remaining -= take
+		if st.Count == 0 {
+			st = itemStack{}
+		}
+		c.inv.set(slot, st)
+		_ = c.sendSetSlot(0, slot, st)
+	}
+	return true
 }
 
 // giveSlotOrder is the slot visiting order for giveItem: the 9 hotbar slots

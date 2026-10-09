@@ -22,7 +22,11 @@ type fakePlayer struct {
 	x, y, z  float64
 	gamemode player.Gamemode
 	messages []string
-	given    map[string]int // namespaced item id → total count granted
+	given    map[string]int // namespaced item id → total count granted (= inventory)
+
+	menuTitle string
+	menuItems []game.MenuItem
+	menuClick func(int)
 }
 
 func newFakePlayer(name string, eid int32) *fakePlayer {
@@ -53,6 +57,25 @@ func (p *fakePlayer) SetGamemode(g player.Gamemode) {
 }
 func (p *fakePlayer) Kick(string) {}
 func (p *fakePlayer) IsOp() bool  { return false }
+func (p *fakePlayer) CountItem(item string) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.given[item]
+}
+func (p *fakePlayer) TakeItem(item string, n int) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.given[item] < n {
+		return false
+	}
+	p.given[item] -= n
+	return true
+}
+func (p *fakePlayer) OpenMenu(title string, _ int, items []game.MenuItem, onClick func(int)) {
+	p.mu.Lock()
+	p.menuTitle, p.menuItems, p.menuClick = title, items, onClick
+	p.mu.Unlock()
+}
 func (p *fakePlayer) GiveItem(itemName string, count int) {
 	p.mu.Lock()
 	if p.given == nil {

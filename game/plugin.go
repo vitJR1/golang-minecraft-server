@@ -203,3 +203,20 @@ func (b BlockInteraction) Target() world.Position {
 	}
 	return p
 }
+
+// EntityInteraction is the payload of Logic.OnEntityInteract: a right-click
+// on a world entity (the instance's baked/added entities, not players).
+type EntityInteraction struct {
+	EntityID int32
+	Type     string  // namespaced entity type, e.g. "minecraft:villager"
+	X, Y, Z  float64 // entity position
+	Item     string  // namespaced id of the held item ("" = empty hand)
+}
+
+// MenuItem is one slot of a PlayerHandle.OpenMenu GUI.
+type MenuItem struct {
+	Slot  int    // 0 .. rows*9-1
+	Item  string // namespaced item id shown in the slot
+	Count int    // stack size shown (0 → 1)
+	Name  string // hover label
+}

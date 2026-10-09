@@ -116,6 +116,19 @@ func (c *ClientConnection) sendWorldEntities() error {
 // isn't a frame in this instance. Frame state is mutated under entitiesMu, and
 // the broadcast payload is built there too, so it can't race the chunk-join
 // path that also reads frame state.
+// worldEntity returns the instance's world entity with this server entity
+// ID, if any (players and dropped items aren't world entities).
+func (i *Instance) worldEntity(eid int32) (world.Entity, bool) {
+	i.entitiesMu.Lock()
+	defer i.entitiesMu.Unlock()
+	for _, ie := range i.worldEntities {
+		if ie.eid == eid {
+			return ie.e, true
+		}
+	}
+	return world.Entity{}, false
+}
+
 func (i *Instance) FrameInteract(eid int32, heldItem string) {
 	i.entitiesMu.Lock()
 	var meta []byte

@@ -34,8 +34,11 @@ func (p *fakePlayer) GiveItem(item string, n int) {
 	}
 	p.given[item] += n
 }
-func (p *fakePlayer) Kick(string) {}
-func (p *fakePlayer) IsOp() bool  { return p.op }
+func (p *fakePlayer) Kick(string)                                      {}
+func (p *fakePlayer) IsOp() bool                                       { return p.op }
+func (p *fakePlayer) CountItem(string) int                             { return 0 }
+func (p *fakePlayer) TakeItem(string, int) bool                        { return false }
+func (p *fakePlayer) OpenMenu(string, int, []game.MenuItem, func(int)) {}
 
 type fakeInstance struct {
 	mu     sync.Mutex

@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/world"
 	"net"
@@ -586,6 +587,9 @@ func TestBlockBreakClearsAndAcks(t *testing.T) {
 
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Breaker")
+	// Creative: "started digging" breaks at once (survival timing is
+	// covered in dig_test.go).
+	findConn(t, s, "Breaker").player.SetGamemode(player.Creative)
 	ch := cli.startDrain()
 	// World-state replay (Block Update for the pre-seeded stone) is now
 	// drained inside completeOfflineLogin since it lands before SyncPos.
@@ -736,6 +740,7 @@ func TestOnBlockBreakVetoRollsBack(t *testing.T) {
 
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Breaker")
+	findConn(t, s, "Breaker").player.SetGamemode(player.Creative)
 	ch := cli.startDrain()
 	drainExpect(t, ch, "Breaker bootstrap", CbPlayPlayerInfoUpdate)
 
@@ -875,10 +880,11 @@ func TestMovePlayerSwitchesInstances(t *testing.T) {
 	)
 	drainExpect(t, ch, "move chunks", loginChunks()...)
 	drainExpect(t, ch, "move post-chunks",
-		CbPlaySyncPos,          // arena spawn point
-		CbPlayUpdateAttributes, // cooldown-bar attribute for the arena
-		CbPlayPlayerInfoUpdate, // arena tab list (just Mover)
-		CbPlaySystemChat,       // "Moved to arena"
+		CbPlaySyncPos,             // arena spawn point
+		CbPlayUpdateAttributes,    // cooldown-bar attribute for the arena
+		CbPlaySetContainerContent, // inventory model re-sent after the move
+		CbPlayPlayerInfoUpdate,    // arena tab list (just Mover)
+		CbPlaySystemChat,          // "Moved to arena"
 	)
 
 	// Server-side: player is now in arena.
@@ -944,6 +950,7 @@ func TestMovePlayerNotifiesStayers(t *testing.T) {
 	drainExpect(t, leaverCh, "Leaver move post-chunks",
 		CbPlaySyncPos,
 		CbPlayUpdateAttributes,
+		CbPlaySetContainerContent,
 		CbPlayPlayerInfoUpdate,
 		CbPlaySystemChat,
 	)
@@ -994,6 +1001,7 @@ func TestInstanceCreateAndJoin(t *testing.T) {
 	drainExpect(t, ch, "join post-chunks",
 		CbPlaySyncPos,
 		CbPlayUpdateAttributes,
+		CbPlaySetContainerContent,
 		CbPlayPlayerInfoUpdate,
 		CbPlaySystemChat,
 	)
@@ -1081,7 +1089,7 @@ func TestInstanceDeleteSelfMovesToHub(t *testing.T) {
 		append([]int{CbPlayPlayerInfoRemove, CbPlayRespawn, CbPlayRespawn}, joinPrelude()...)...)
 	drainExpect(t, ch, "join arena chunks", loginChunks()...)
 	drainExpect(t, ch, "join arena post-chunks",
-		CbPlaySyncPos, CbPlayUpdateAttributes, CbPlayPlayerInfoUpdate, CbPlaySystemChat)
+		CbPlaySyncPos, CbPlayUpdateAttributes, CbPlaySetContainerContent, CbPlayPlayerInfoUpdate, CbPlaySystemChat)
 
 	// Delete arena while inside it: server should evac caller to hub, then delete.
 	cli.write(t, SbPlayChatCommand, protocol.WriteString("instance delete arena"))
@@ -1090,9 +1098,10 @@ func TestInstanceDeleteSelfMovesToHub(t *testing.T) {
 	drainExpect(t, ch, "evac + delete chunks", loginChunks()...)
 	drainExpect(t, ch, "evac + delete post-chunks",
 		CbPlaySyncPos,
-		CbPlayUpdateAttributes, // cooldown-bar attribute for the hub
-		CbPlayPlayerInfoUpdate, // hub tab list bootstrap
-		CbPlaySystemChat,       // "Deleted instance arena"
+		CbPlayUpdateAttributes,    // cooldown-bar attribute for the hub
+		CbPlaySetContainerContent, // inventory model re-sent after the move
+		CbPlayPlayerInfoUpdate,    // hub tab list bootstrap
+		CbPlaySystemChat,          // "Deleted instance arena"
 	)
 
 	if s.GetInstance("arena") != nil {
