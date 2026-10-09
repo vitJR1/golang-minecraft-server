@@ -401,11 +401,18 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 				c.openArenaMenu(c.instance.ID, arenas)
 			}
 		default:
+			name := c.heldItemName()
+			if name == "" {
+				break
+			}
+			// Buckets: the client sends a plain Use Item for them, with no
+			// target — the server ray-casts for the fluid / placement spot.
+			if c.useBucket(name) {
+				break
+			}
 			// Throwable items (egg / snowball / ender pearl) in any slot.
-			if name := c.heldItemName(); name != "" {
-				if _, ok := throwableEntityID(name); ok {
-					c.throwProjectile(name)
-				}
+			if _, ok := throwableEntityID(name); ok {
+				c.throwProjectile(name)
 			}
 		}
 

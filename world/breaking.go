@@ -59,6 +59,8 @@ var exactBreakInfo = map[string]BreakInfo{
 	"minecraft:barrier":          Unbreakable,
 	"minecraft:end_portal_frame": Unbreakable,
 	"minecraft:command_block":    Unbreakable,
+	"minecraft:water":            Unbreakable, // fluids can't be dug out
+	"minecraft:lava":             Unbreakable,
 
 	"minecraft:obsidian":          {Hardness: 50, Tool: Pickaxe, MinTier: TierDiamond, RequiresTool: true},
 	"minecraft:crying_obsidian":   {Hardness: 50, Tool: Pickaxe, MinTier: TierDiamond, RequiresTool: true},

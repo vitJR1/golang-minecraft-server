@@ -31,6 +31,10 @@ const digAcceptFraction = 0.7
 // startDig handles "started digging" at pos for this player.
 func (c *ClientConnection) startDig(pos world.Position) {
 	c.digPos = nil
+	if _, _, fluid := fluidOf(c.instance.World.GetBlock(pos)); fluid {
+		_ = c.sendBlockUpdate(pos, c.instance.World.GetBlock(pos)) // can't punch water away
+		return
+	}
 	if c.gamemode() == player.Creative {
 		c.breakBlock(pos, false)
 		return
@@ -57,6 +61,11 @@ func (c *ClientConnection) cancelDig() { c.digPos = nil }
 
 // finishDig handles "finished digging": break if the dig was long enough.
 func (c *ClientConnection) finishDig(pos world.Position) {
+	if _, _, fluid := fluidOf(c.instance.World.GetBlock(pos)); fluid {
+		c.digPos = nil
+		_ = c.sendBlockUpdate(pos, c.instance.World.GetBlock(pos))
+		return
+	}
 	if c.gamemode() == player.Creative {
 		c.breakBlock(pos, false)
 		return

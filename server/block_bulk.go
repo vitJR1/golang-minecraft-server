@@ -28,6 +28,7 @@ func (i *Instance) SetBlocks(changes []world.BlockChange) {
 	}
 	for _, ch := range changes {
 		i.World.SetBlock(ch.Pos, ch.Block)
+		i.scheduleFluid(ch.Pos)
 	}
 	for _, payload := range sectionBlocksPayloads(changes) {
 		i.Players.Broadcast(CbPlayUpdateSectionBlocks, payload, -1)

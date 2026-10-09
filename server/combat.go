@@ -170,6 +170,7 @@ func (c *ClientConnection) applyKnockback(cfg CombatConfig, aSnap, vSnap player.
 // (no death screen), otherwise the vanilla death screen is shown and the
 // client respawns on click (handled by SbPlayClientCommand → respawn()).
 func (c *ClientConnection) die(killer *ClientConnection) {
+	c.extinguish() // death puts the fire out
 	s := c.player.Snapshot()
 	c.instance.playSound("minecraft:entity.player.death", soundCategoryPlayer, s.X, s.Y, s.Z, 1, 1)
 

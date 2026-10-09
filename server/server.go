@@ -539,6 +539,10 @@ type ClientConnection struct {
 	digPos       *world.Position
 	digStartTick uint64
 
+	// fireTicks is how long the player keeps burning (fluid.go burnTick);
+	// 0 = not on fire. Atomic: written by the tick loop, cleared on death.
+	fireTicks atomic.Int32
+
 	// cursor is the stack the client is carrying on its mouse cursor inside
 	// an inventory/chest window, as reported by its last Click Container.
 	// Whatever leaves the modelled slots without reaching the cursor (or
@@ -739,7 +743,7 @@ func (c *ClientConnection) sendPlayPackets() error {
 	// even after a perfectly valid SyncPos lands.
 	//
 	// Wire sequence:
-	//   1. Login (Play)
+	//   1. Login (Play), then Update Tags
 	//   2. Set Default Spawn Position    ← compass + respawn target
 	//   3. Set Center Chunk              ← "you live at (0,0)"
 	//   4. Game Event 13                 ← "begin waiting for chunks"
@@ -750,6 +754,9 @@ func (c *ClientConnection) sendPlayPackets() error {
 		f    func() error
 	}{
 		{"Login (Play)", c.sendLoginPlay},
+		// Registry tags right after Login, like vanilla: the client needs
+		// them to render lava as lava and to swim (tags.go).
+		{"Update Tags", c.sendUpdateTags},
 		{"Set Default Spawn Position", func() error {
 			return c.sendSetDefaultSpawnPosition(int(spawn.X), int(spawn.Y), int(spawn.Z), 0)
 		}},

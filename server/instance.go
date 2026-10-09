@@ -169,6 +169,11 @@ type Instance struct {
 	holoMu    sync.Mutex
 	holograms []*hologram
 
+	// fluidPending holds block positions whose fluid state must be
+	// re-evaluated on the next due tick (fluid.go). Guarded by fluidMu.
+	fluidMu      sync.Mutex
+	fluidPending map[world.Position]struct{}
+
 	// joinMu serializes registration + visibility announcements per
 	// instance, so one player's join can't observe another mid-join inside
 	// the same instance.
@@ -251,6 +256,8 @@ func NewInstance(id string, srv *Server, w world.World) *Instance {
 	i.loadWorldEntities()
 	i.OnTick(i.combatTick)
 	i.OnTick(i.projectileTick)
+	i.OnTick(i.fluidTick)
+	i.OnTick(i.burnTick)
 	i.OnTick(i.itemTick)
 	i.OnTick(i.tntTick)
 	i.initListeners()
@@ -422,6 +429,7 @@ func safeHook(i *Instance, name string, fn func()) {
 // every player here. Players in other instances see nothing.
 func (i *Instance) SetBlock(p world.Position, b world.Block) {
 	i.World.SetBlock(p, b)
+	i.scheduleFluid(p)
 
 	var buf bytes.Buffer
 	buf.Write(protocol.WritePosition(p.X, p.Y, p.Z))
