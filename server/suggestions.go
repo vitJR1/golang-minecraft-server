@@ -72,6 +72,10 @@ func (s *Server) Suggestions(c *ClientConnection, text string) (start, length in
 		}
 	case takesPlayerName(cmd, argIdx):
 		candidates = s.PlayerNames()
+	case cmd == "bwgive":
+		if argIdx == 1 {
+			candidates = []string{"iron", "gold", "diamond", "emerald"}
+		}
 	case cmd == "effect":
 		switch argIdx {
 		case 1:

@@ -3,18 +3,14 @@ package server
 import (
 	"bytes"
 	"testing"
-	"time"
 
-	"minecraft-server/protocol"
+	"minecraft-server/player"
 	"minecraft-server/world"
 )
 
 func TestGiveItemFillsHotbarBeforeMainInventory(t *testing.T) {
-	s := New()
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Picker")
-	cli.startDiscardDrain()
-	c := findConn(t, s, "Picker")
+	inst := bareInstance(New(), world.NewMemoryWorld())
+	c := offlineConn(inst, "Picker", player.Survival, 0, 64, 0)
 
 	iron, _ := world.ItemByName("minecraft:iron_ingot")
 	sword, _ := world.ItemByName("minecraft:iron_sword")
@@ -62,11 +58,8 @@ func TestGiveItemFillsHotbarBeforeMainInventory(t *testing.T) {
 }
 
 func TestCountAndTakeItem(t *testing.T) {
-	s := New()
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Buyer")
-	cli.startDiscardDrain()
-	c := findConn(t, s, "Buyer")
+	inst := bareInstance(New(), world.NewMemoryWorld())
+	c := offlineConn(inst, "Buyer", player.Survival, 0, 64, 0)
 
 	iron, _ := world.ItemByName("minecraft:iron_ingot")
 	c.inv.set(hotbarStart, itemStack{ID: iron, Count: 10})
@@ -102,12 +95,10 @@ func TestNavigatorStrippedOnGameJoinAndKeptInHub(t *testing.T) {
 	t.Cleanup(arena.Stop)
 	s.AddInstance(arena)
 
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Gamer")
-	cli.startDiscardDrain()
-	c := findConn(t, s, "Gamer")
-	waitFor(t, time.Second, func() bool { return c.inv.get(hotbarStart).Name == navigatorName },
-		"hub join to hand out the navigator")
+	c := offlineHub(s, "Gamer")
+	if c.inv.get(hotbarStart).Name != navigatorName {
+		t.Fatal("hub join should hand out the navigator")
+	}
 
 	iron, _ := world.ItemByName("minecraft:iron_ingot")
 	c.giveItem(iron, 5) // lands in hotbar slot 1 (slot 0 holds the rod)
@@ -115,6 +106,7 @@ func TestNavigatorStrippedOnGameJoinAndKeptInHub(t *testing.T) {
 	if err := s.MovePlayer(c, arena, 0, 80, 0); err != nil {
 		t.Fatal(err)
 	}
+	drain(c)
 	if st := c.inv.get(hotbarStart); !st.empty() {
 		t.Errorf("navigator should be stripped in a game instance, got %+v", st)
 	}
@@ -126,19 +118,18 @@ func TestNavigatorStrippedOnGameJoinAndKeptInHub(t *testing.T) {
 	if err := s.MovePlayer(c, s.Hub, 0, 80, 0); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, time.Second, func() bool { return c.inv.get(hotbarStart).Name == navigatorName },
-		"hub join to hand out the navigator again")
+	drain(c)
+	if c.inv.get(hotbarStart).Name != navigatorName {
+		t.Error("hub join should hand out the navigator again")
+	}
 	if st := c.inv.get(hotbarStart + 1); st.ID != iron {
 		t.Errorf("iron lost on return to hub: %+v", st)
 	}
 }
 
 func TestWindowZeroClickUpdatesModel(t *testing.T) {
-	s := New()
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Mover")
-	cli.startDiscardDrain()
-	c := findConn(t, s, "Mover")
+	inst := bareInstance(New(), world.NewMemoryWorld())
+	c := offlineConn(inst, "Mover", player.Survival, 0, 64, 0)
 
 	iron, _ := world.ItemByName("minecraft:iron_ingot")
 	c.inv.set(hotbarStart, itemStack{ID: iron, Count: 1})
@@ -146,34 +137,19 @@ func TestWindowZeroClickUpdatesModel(t *testing.T) {
 
 	// Client merged slot 36 into slot 37: window 0, changed slots
 	// {36: empty, 37: 64 iron}, empty cursor.
-	var p bytes.Buffer
-	p.WriteByte(0)                                   // window 0
-	protocol.WriteVarInt32ToBuffer(&p, 0)            // state id
-	p.Write(protocol.WriteShort(int16(hotbarStart))) // clicked slot
-	p.WriteByte(0)                                   // button
-	protocol.WriteVarInt32ToBuffer(&p, 0)            // mode: click
-	protocol.WriteVarInt32ToBuffer(&p, 2)            // changed slots
-	p.Write(protocol.WriteShort(int16(hotbarStart)))
-	p.Write(protocol.WriteEmptySlot())
-	p.Write(protocol.WriteShort(int16(hotbarStart + 1)))
-	p.Write(protocol.WriteSlot(iron, 64))
-	p.Write(protocol.WriteEmptySlot()) // cursor
-	cli.write(t, SbPlayClickContainer, p.Bytes())
-
-	waitFor(t, time.Second, func() bool {
-		return c.inv.get(hotbarStart).empty() && c.inv.get(hotbarStart+1).Count == 64
-	}, "window-0 click to update the inventory model")
+	clickSlot(t, c, int16(hotbarStart), 0,
+		map[int16]itemStack{int16(hotbarStart): {}, int16(hotbarStart + 1): {ID: iron, Count: 64}}, itemStack{})
+	if !c.inv.get(hotbarStart).empty() || c.inv.get(hotbarStart+1).Count != 64 {
+		t.Errorf("model after merge: %+v / %+v", c.inv.get(hotbarStart), c.inv.get(hotbarStart+1))
+	}
 	if got := c.countItem(iron); got != 64 {
 		t.Errorf("count after merge: %d", got)
 	}
 }
 
 func TestMenuWindowMirrorsRealInventory(t *testing.T) {
-	s := New()
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Shopper")
-	cli.startDiscardDrain()
-	c := findConn(t, s, "Shopper")
+	inst := bareInstance(New(), world.NewMemoryWorld())
+	c := offlineConn(inst, "Shopper", player.Survival, 0, 64, 0)
 	iron, _ := world.ItemByName("minecraft:iron_ingot")
 	c.inv.set(mainInvStart+2, itemStack{ID: iron, Count: 7})
 	c.inv.set(hotbarStart+4, itemStack{ID: iron, Count: 9})

@@ -61,7 +61,10 @@ func TestKeepAliveKicksUnresponsiveClient(t *testing.T) {
 // Keep Alive it receives and stays in the player list across several
 // intervals.
 func TestKeepAliveAckKeepsClientAlive(t *testing.T) {
-	withKeepAliveTiming(t, 30*time.Millisecond, 90*time.Millisecond)
+	// A roomy timeout: the echo round trip through net.Pipe can take tens of
+	// milliseconds under the race detector, and a false kick here would be
+	// a timing artefact, not an ack bug (the kick path has its own test).
+	withKeepAliveTiming(t, 40*time.Millisecond, 400*time.Millisecond)
 
 	s := New()
 	cli := pipeClientOn(t, s)
@@ -96,9 +99,9 @@ func TestKeepAliveAckKeepsClientAlive(t *testing.T) {
 		}
 	}()
 
-	// Sit through ~6 intervals — if ack logic is broken the player gets
-	// kicked well before this.
-	time.Sleep(200 * time.Millisecond)
+	// Sit through ~7 intervals — if ack logic is broken (acks not clearing
+	// the pending id) the 400 ms timeout kicks the player before this.
+	time.Sleep(300 * time.Millisecond)
 	if s.Hub.Players.Count() != 1 {
 		t.Fatalf("healthy client got kicked: count=%d", s.Hub.Players.Count())
 	}

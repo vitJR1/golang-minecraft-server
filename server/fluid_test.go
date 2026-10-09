@@ -2,7 +2,6 @@ package server
 
 import (
 	"testing"
-	"time"
 
 	"minecraft-server/player"
 	"minecraft-server/world"
@@ -142,19 +141,16 @@ func TestWaterDoesNotReplaceBlocksOrLava(t *testing.T) {
 }
 
 func TestFluidsCannotBeBroken(t *testing.T) {
-	s := New()
+	inst := bareInstance(New(), world.NewMemoryWorld())
 	pos := world.Position{X: 5, Y: 70, Z: 5}
-	s.Hub.World.SetBlock(pos, world.Water)
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Puncher")
-	cli.startDiscardDrain()
-	c := findConn(t, s, "Puncher")
+	inst.World.SetBlock(pos, world.Water)
+	c := offlineConn(inst, "Puncher", player.Survival, 0.5, 64, 0.5)
 	for _, gm := range []player.Gamemode{player.Survival, player.Creative} {
 		c.player.SetGamemode(gm)
-		digAction(t, cli, pos, 0)
-		digAction(t, cli, pos, 2)
-		time.Sleep(60 * time.Millisecond)
-		if got := s.Hub.World.GetBlock(pos); got != world.Water {
+		digAt(t, c, pos, 0)
+		inst.tickCount.Add(1000)
+		digAt(t, c, pos, 2)
+		if got := inst.World.GetBlock(pos); got != world.Water {
 			t.Errorf("gamemode %d: water was broken: %+v", gm, got)
 		}
 	}

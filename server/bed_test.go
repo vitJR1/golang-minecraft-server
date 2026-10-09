@@ -89,13 +89,7 @@ func TestPlacementRewriterRecoloursBeds(t *testing.T) {
 	t.Cleanup(inst.Stop)
 	s.AddInstance(inst)
 	s.AttachLogic(inst, recolourLogic{})
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Sleeper")
-	cli.startDiscardDrain()
-	c := findConn(t, s, "Sleeper")
-	if err := s.MovePlayer(c, inst, 0.5, 80, 0.5); err != nil {
-		t.Fatal(err)
-	}
+	c := offlineConn(inst, "Sleeper", player.Survival, 0.5, 80, 0.5)
 	foot := world.Position{X: 5, Y: 70, Z: 5}
 	c.placeBed(foot, world.RedBed) // held a red bed, yaw 0 → head at z+1
 	head := world.Position{X: 5, Y: 70, Z: 6}

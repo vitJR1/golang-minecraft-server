@@ -36,12 +36,8 @@ func TestSlotNBTRoundTripsDamageAndEnchantments(t *testing.T) {
 }
 
 func TestEfficiencyAndHasteShortenTheDig(t *testing.T) {
-	s := New()
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Ench")
-	cli.startDiscardDrain()
-	c := findConn(t, s, "Ench")
-	c.player.SetGamemode(player.Survival)
+	inst := bareInstance(New(), world.NewMemoryWorld())
+	c := offlineConn(inst, "Ench", player.Survival, 0, 64, 0)
 	pick, _ := world.ItemByName("minecraft:diamond_pickaxe")
 	c.inv.set(hotbarStart, itemStack{ID: pick, Count: 1})
 	stone := world.BreakInfoFor("minecraft:stone")
@@ -49,31 +45,28 @@ func TestEfficiencyAndHasteShortenTheDig(t *testing.T) {
 	base := world.BreakTicksWith(stone, c.heldItemName(), c.digContext())
 	c.inv.set(hotbarStart, itemStack{ID: pick, Count: 1, Enchantments: map[string]int{EnchantEfficiency: 5}})
 	withEff := world.BreakTicksWith(stone, c.heldItemName(), c.digContext())
-	s.effects.apply(c, EffectHaste, 2, time.Minute)
+	inst.Server.effects.apply(c, EffectHaste, 2, time.Minute)
 	withBoth := world.BreakTicksWith(stone, c.heldItemName(), c.digContext())
 	if !(withBoth < withEff && withEff < base) {
 		t.Errorf("ticks base=%d efficiency=%d +haste=%d: each modifier must shorten the dig", base, withEff, withBoth)
 	}
-	if s.Effects.Level(c, EffectHaste) != 2 {
+	if inst.Server.Effects.Level(c, EffectHaste) != 2 {
 		t.Error("haste level not readable")
 	}
-	s.effects.remove(c, &EffectHaste)
-	if s.Effects.Level(c, EffectHaste) != 0 {
+	inst.Server.effects.remove(c, &EffectHaste)
+	if inst.Server.Effects.Level(c, EffectHaste) != 0 {
 		t.Error("haste should be removed")
 	}
-	s.effects.apply(c, EffectMiningFatigue, 1, 10*time.Millisecond)
+	inst.Server.effects.apply(c, EffectMiningFatigue, 1, 10*time.Millisecond)
 	time.Sleep(20 * time.Millisecond)
-	if s.Effects.Level(c, EffectMiningFatigue) != 0 {
+	if inst.Server.Effects.Level(c, EffectMiningFatigue) != 0 {
 		t.Error("expired effect must read as 0")
 	}
 }
 
 func TestEffectCommand(t *testing.T) {
 	s := New()
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Op")
-	cli.startDiscardDrain()
-	c := findConn(t, s, "Op")
+	c := offlineHub(s, "Op")
 	s.Ops.Add("Op")
 	s.RunCommand(c, "effect Op haste 2 60")
 	if s.Effects.Level(c, EffectHaste) != 2 {
@@ -86,12 +79,8 @@ func TestEffectCommand(t *testing.T) {
 }
 
 func TestAirAndWaterSlowTheDig(t *testing.T) {
-	s := New()
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Diver")
-	cli.startDiscardDrain()
-	c := findConn(t, s, "Diver")
-	c.player.MoveTo(0.5, 64, 0.5, true)
+	inst := bareInstance(New(), world.NewMemoryWorld())
+	c := offlineConn(inst, "Diver", player.Survival, 0.5, 64, 0.5)
 	ctx := c.digContext()
 	if !ctx.OnGround || ctx.InWater {
 		t.Fatalf("baseline context: %+v", ctx)
@@ -100,37 +89,33 @@ func TestAirAndWaterSlowTheDig(t *testing.T) {
 	if c.digContext().OnGround {
 		t.Error("airborne player should not be on ground")
 	}
-	s.Hub.World.SetBlock(world.Position{X: 0, Y: 65, Z: 0}, world.Water) // eye level
+	inst.World.SetBlock(world.Position{X: 0, Y: 65, Z: 0}, world.Water) // eye level
 	if !c.digContext().InWater {
 		t.Error("head in water should be detected")
 	}
 }
 
 func TestToolWearsAndBreaks(t *testing.T) {
-	s := New()
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Wearer")
-	cli.startDiscardDrain()
-	c := findConn(t, s, "Wearer")
-	c.player.SetGamemode(player.Survival)
+	inst := bareInstance(New(), world.NewMemoryWorld())
+	c := offlineConn(inst, "Wearer", player.Survival, 0, 64, 0)
 	axe, _ := world.ItemByName("minecraft:golden_axe") // durability 32
 	c.inv.set(hotbarStart, itemStack{ID: axe, Count: 1, Damage: 30})
 	planks, _ := world.BlockByName("minecraft:oak_planks")
 
 	pos := world.Position{X: 5, Y: 70, Z: 5}
-	s.Hub.World.SetBlock(pos, planks)
+	inst.World.SetBlock(pos, planks)
 	c.breakBlock(pos, true)
 	if st := c.inv.get(hotbarStart); st.Damage != 31 {
 		t.Fatalf("after one block: damage %d, want 31", st.Damage)
 	}
-	s.Hub.World.SetBlock(pos, planks)
+	inst.World.SetBlock(pos, planks)
 	c.breakBlock(pos, true)
 	if st := c.inv.get(hotbarStart); !st.empty() {
 		t.Errorf("axe should have broken, got %+v", st)
 	}
 	plankItem, _ := world.ItemByName("minecraft:oak_planks")
-	if itemsIn(s.Hub)[plankItem] != 2 {
-		t.Errorf("both blocks should have dropped: %v", itemsIn(s.Hub))
+	if itemsIn(inst)[plankItem] != 2 {
+		t.Errorf("both blocks should have dropped: %v", itemsIn(inst))
 	}
 
 	// Unbreaking III spares ~3/4 of the wear; blocks (non-tools) never wear.
@@ -138,6 +123,7 @@ func TestToolWearsAndBreaks(t *testing.T) {
 	c.inv.set(hotbarStart, itemStack{ID: pick, Count: 1, Enchantments: map[string]int{EnchantUnbreaking: 3}})
 	for i := 0; i < 400; i++ {
 		c.damageHeldTool(1)
+		drain(c)
 	}
 	if d := c.inv.get(hotbarStart).Damage; d < 50 || d > 160 {
 		t.Errorf("unbreaking III should spare ~3/4 of 400 hits, damage=%d", d)

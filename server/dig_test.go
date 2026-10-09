@@ -1,181 +1,141 @@
 package server
 
 import (
-	"bytes"
 	"testing"
-	"time"
 
 	"minecraft-server/player"
-	"minecraft-server/protocol"
 	"minecraft-server/world"
 )
 
-func digAction(t *testing.T, cli *testClient, pos world.Position, action int32) {
+// digWorld is an offline instance with the given block at (5,70,5) and a
+// survival miner standing on a floor at the origin, long since any tick.
+func digWorld(t *testing.T, blk world.Block) (*Instance, *ClientConnection, world.Position) {
 	t.Helper()
-	var p bytes.Buffer
-	protocol.WriteVarInt32ToBuffer(&p, action)
-	p.Write(protocol.WritePosition(pos.X, pos.Y, pos.Z))
-	p.WriteByte(1)
-	protocol.WriteVarInt32ToBuffer(&p, 1)
-	cli.write(t, SbPlayPlayerAction, p.Bytes())
-}
-
-func hold(c *ClientConnection, item string) {
-	id, _ := world.ItemByName(item)
-	c.inv.set(hotbarStart, itemStack{ID: id, Count: 1})
-	c.heldSlot.Store(0)
+	pos := world.Position{X: 5, Y: 70, Z: 5}
+	inst := bareInstance(New(), world.NewMemoryWorld())
+	inst.World.SetBlock(pos, blk)
+	inst.tickCount.Store(1000)
+	c := offlineConn(inst, "Miner", player.Survival, 0.5, 64, 0.5)
+	return inst, c, pos
 }
 
 func TestSurvivalDigNeedsTime(t *testing.T) {
-	s := New()
-	stone := world.Position{X: 5, Y: 70, Z: 5}
-	s.Hub.World.SetBlock(stone, world.Stone)
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Miner")
-	cli.startDiscardDrain()
-	c := findConn(t, s, "Miner")
-	c.player.SetGamemode(player.Survival)
+	inst, c, stone := digWorld(t, world.Stone)
 
 	// Start + immediate finish: far too early for stone by hand → stays.
-	digAction(t, cli, stone, 0)
-	digAction(t, cli, stone, 2)
-	time.Sleep(100 * time.Millisecond)
-	if got := s.Hub.World.GetBlock(stone); got != world.Stone {
+	digAt(t, c, stone, 0)
+	digAt(t, c, stone, 2)
+	if got := inst.World.GetBlock(stone); got != world.Stone {
 		t.Fatalf("stone broke without digging time: %+v", got)
 	}
 
-	// Pretend the dig started long ago: the finish is accepted, but stone by
-	// hand isn't harvestable → no cobblestone drop.
-	digAction(t, cli, stone, 0)
-	waitFor(t, time.Second, func() bool { return c.digPos != nil }, "dig to start")
-	c.digStartTick = s.Hub.Tick() - 1000
-	digAction(t, cli, stone, 2)
-	waitFor(t, time.Second, func() bool { return s.Hub.World.GetBlock(stone) == world.Air }, "stone to break")
-	if n := len(itemsIn(s.Hub)); n != 0 {
-		t.Errorf("stone by hand must not drop, got %v", itemsIn(s.Hub))
+	// Enough ticks later the finish is accepted, but stone by hand isn't
+	// harvestable → no cobblestone drop.
+	digAt(t, c, stone, 0)
+	if c.digPos == nil {
+		t.Fatal("dig should have started")
+	}
+	inst.tickCount.Add(200) // > 150 ticks by hand
+	digAt(t, c, stone, 2)
+	if got := inst.World.GetBlock(stone); got != world.Air {
+		t.Fatalf("stone should break after its time, got %+v", got)
+	}
+	if n := len(itemsIn(inst)); n != 0 {
+		t.Errorf("stone by hand must not drop, got %v", itemsIn(inst))
 	}
 }
 
 func TestSurvivalDigWithToolDrops(t *testing.T) {
-	s := New()
-	stone := world.Position{X: 5, Y: 70, Z: 5}
-	s.Hub.World.SetBlock(stone, world.Stone)
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Miner")
-	cli.startDiscardDrain()
-	c := findConn(t, s, "Miner")
-	c.player.SetGamemode(player.Survival)
-	hold(c, "minecraft:wooden_pickaxe")
+	inst, c, stone := digWorld(t, world.Stone)
+	hold(c, "minecraft:wooden_pickaxe") // 23 ticks
 
-	digAction(t, cli, stone, 0)
-	waitFor(t, time.Second, func() bool { return c.digPos != nil }, "dig to start")
-	c.digStartTick = s.Hub.Tick() - 1000
-	digAction(t, cli, stone, 2)
+	digAt(t, c, stone, 0)
+	inst.tickCount.Add(30)
+	digAt(t, c, stone, 2)
 	cobble, _ := world.ItemByName("minecraft:cobblestone")
-	waitFor(t, time.Second, func() bool { return itemsIn(s.Hub)[cobble] == 1 }, "cobblestone drop")
+	if itemsIn(inst)[cobble] != 1 {
+		t.Errorf("cobblestone drop expected, got %v", itemsIn(inst))
+	}
 }
 
-func TestSurvivalDigFinishesAfterRealTicks(t *testing.T) {
-	s := New()
-	sandPos := world.Position{X: 5, Y: 70, Z: 5}
+func TestSurvivalDigFinishTooEarlyIsRejected(t *testing.T) {
 	sand, _ := world.BlockByName("minecraft:sand")
-	s.Hub.World.SetBlock(sandPos, sand)
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Miner")
-	cli.startDiscardDrain()
-	c := findConn(t, s, "Miner")
-	c.player.SetGamemode(player.Survival)
-	c.player.MoveTo(0.5, 67, 0.5, true) // on the ground (airborne digs are 5× slower)
-	hold(c, "minecraft:diamond_shovel") // sand: 2 ticks
+	inst, c, pos := digWorld(t, sand)
+	hold(c, "minecraft:diamond_shovel") // sand: 2 ticks → accepted from ceil(0.7·2)=2
 
-	digAction(t, cli, sandPos, 0)
-	time.Sleep(250 * time.Millisecond) // ~5 ticks ≥ the 2 needed
-	digAction(t, cli, sandPos, 2)
-	waitFor(t, time.Second, func() bool { return s.Hub.World.GetBlock(sandPos) == world.Air }, "sand to break after its dig time")
+	digAt(t, c, pos, 0)
+	digAt(t, c, pos, 2) // same tick: too early
+	if inst.World.GetBlock(pos) != sand {
+		t.Fatal("finish on the start tick must be rejected")
+	}
+	digAt(t, c, pos, 0)
+	inst.tickCount.Add(2)
+	digAt(t, c, pos, 2)
+	if inst.World.GetBlock(pos) != world.Air {
+		t.Error("finish after the dig time should break the block")
+	}
 	sandItem, _ := world.ItemByName("minecraft:sand")
-	waitFor(t, time.Second, func() bool { return itemsIn(s.Hub)[sandItem] == 1 }, "sand drop")
+	if itemsIn(inst)[sandItem] != 1 {
+		t.Error("sand should drop")
+	}
 }
 
 func TestCreativeBreaksInstantlyWithoutDrop(t *testing.T) {
-	s := New()
-	pos := world.Position{X: 5, Y: 70, Z: 5}
-	s.Hub.World.SetBlock(pos, world.Stone)
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Builder")
-	cli.startDiscardDrain()
-	findConn(t, s, "Builder").player.SetGamemode(player.Creative)
-
-	digAction(t, cli, pos, 0)
-	waitFor(t, time.Second, func() bool { return s.Hub.World.GetBlock(pos) == world.Air }, "creative break")
-	time.Sleep(50 * time.Millisecond)
-	if len(itemsIn(s.Hub)) != 0 {
+	inst, c, pos := digWorld(t, world.Stone)
+	c.player.SetGamemode(player.Creative)
+	digAt(t, c, pos, 0)
+	if inst.World.GetBlock(pos) != world.Air {
+		t.Error("creative start-digging should break at once")
+	}
+	if len(itemsIn(inst)) != 0 {
 		t.Error("creative breaks must not drop")
 	}
 }
 
 func TestBedBreakRemovesPartnerAndDropsOne(t *testing.T) {
-	s := New()
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Sleeper")
-	cli.startDiscardDrain()
-	c := findConn(t, s, "Sleeper")
-	c.player.SetGamemode(player.Survival)
-
+	inst, c, _ := digWorld(t, world.Air)
 	foot := world.Position{X: 5, Y: 70, Z: 5}
-	c.placeBed(foot, world.RedBed) // head toward the player's facing (default yaw 0 → +Z)
+	c.placeBed(foot, world.RedBed) // head toward the player's facing (yaw 0 → +Z)
+	drain(c)
 	head := world.Position{X: 5, Y: 70, Z: 6}
-	if s.Hub.World.GetBlock(head) == world.Air {
+	if inst.World.GetBlock(head) == world.Air {
 		t.Fatal("bed head not placed")
 	}
 
-	digAction(t, cli, head, 0) // hardness 0.2 by hand = 4 ticks
-	waitFor(t, time.Second, func() bool { return c.digPos != nil }, "dig to start")
-	c.digStartTick = s.Hub.Tick() - 1000
-	digAction(t, cli, head, 2)
-	waitFor(t, time.Second, func() bool {
-		return s.Hub.World.GetBlock(head) == world.Air && s.Hub.World.GetBlock(foot) == world.Air
-	}, "both bed halves to go")
+	digAt(t, c, head, 0) // hardness 0.2 by hand = 4 ticks
+	inst.tickCount.Add(10)
+	digAt(t, c, head, 2)
+	if inst.World.GetBlock(head) != world.Air || inst.World.GetBlock(foot) != world.Air {
+		t.Error("both bed halves should go")
+	}
 	bedItem, _ := world.ItemByName("minecraft:red_bed")
-	waitFor(t, time.Second, func() bool { return itemsIn(s.Hub)[bedItem] == 1 }, "one bed drop")
+	if itemsIn(inst)[bedItem] != 1 {
+		t.Errorf("one bed should drop, got %v", itemsIn(inst))
+	}
 }
 
 func TestCannotPlaceBlockIntoPlayer(t *testing.T) {
-	s := New()
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Placer")
-	cli.startDiscardDrain()
-	c := findConn(t, s, "Placer")
-	c.player.SetGamemode(player.Survival)
-	c.player.MoveTo(0.5, 64, 0.5, true)
-	hold(c, "minecraft:stone")
-
-	place := func(clicked world.Position, face int32) {
-		var p bytes.Buffer
-		protocol.WriteVarInt32ToBuffer(&p, 0) // hand
-		p.Write(protocol.WritePosition(clicked.X, clicked.Y, clicked.Z))
-		protocol.WriteVarInt32ToBuffer(&p, face)
-		p.Write(protocol.WriteFloat(0.5))
-		p.Write(protocol.WriteFloat(0.5))
-		p.Write(protocol.WriteFloat(0.5))
-		p.WriteByte(0)
-		protocol.WriteVarInt32ToBuffer(&p, 1)
-		cli.write(t, SbPlayUseItemOnBlock, p.Bytes())
-	}
+	inst := bareInstance(New(), world.NewMemoryWorld())
+	c := offlineConn(inst, "Placer", player.Survival, 0.5, 64, 0.5)
+	stone, _ := world.ItemByName("minecraft:stone")
+	c.inv.set(hotbarStart, itemStack{ID: stone, Count: 10})
+	c.heldSlot.Store(0)
 
 	// Clicking the top of the block under the feet targets (0,64,0) — the
 	// player's own legs. Then (0,65,0) via the face above — the head.
-	place(world.Position{X: 0, Y: 63, Z: 0}, 1)
-	place(world.Position{X: 0, Y: 64, Z: 0}, 1)
+	placeOn(t, c, world.Position{X: 0, Y: 63, Z: 0}, 1)
+	placeOn(t, c, world.Position{X: 0, Y: 64, Z: 0}, 1)
 	// A block beside the player is fine.
-	place(world.Position{X: 2, Y: 63, Z: 0}, 1)
-	waitFor(t, time.Second, func() bool { return s.Hub.World.GetBlock(world.Position{X: 2, Y: 64, Z: 0}) == world.Stone },
-		"free block to be placed")
+	placeOn(t, c, world.Position{X: 2, Y: 63, Z: 0}, 1)
+	if inst.World.GetBlock(world.Position{X: 2, Y: 64, Z: 0}) != world.Stone {
+		t.Error("free block should be placed")
+	}
 	for _, pos := range []world.Position{{X: 0, Y: 64, Z: 0}, {X: 0, Y: 65, Z: 0}} {
-		if got := s.Hub.World.GetBlock(pos); got != world.Air {
+		if got := inst.World.GetBlock(pos); got != world.Air {
 			t.Errorf("block placed into the player at %v: %+v", pos, got)
 		}
 	}
-	if !s.Hub.blockedByPlayer(world.Position{X: 0, Y: 65, Z: 0}) || s.Hub.blockedByPlayer(world.Position{X: 0, Y: 66, Z: 0}) {
+	if !inst.blockedByPlayer(world.Position{X: 0, Y: 65, Z: 0}) || inst.blockedByPlayer(world.Position{X: 0, Y: 66, Z: 0}) {
 		t.Error("hitbox should cover y 64..65.8 only")
 	}
 }
@@ -184,47 +144,32 @@ func TestCannotPlaceBlockIntoPlayer(t *testing.T) {
 // held stack in survival (so place+break doesn't mint blocks) and leaves
 // creative stacks alone.
 func TestPlacingConsumesHeldBlockInSurvival(t *testing.T) {
-	s := New()
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Placer")
-	cli.startDiscardDrain()
-	c := findConn(t, s, "Placer")
-	c.player.SetGamemode(player.Survival)
-	c.player.MoveTo(0.5, 64, 0.5, true)
+	inst := bareInstance(New(), world.NewMemoryWorld())
+	c := offlineConn(inst, "Placer", player.Survival, 0.5, 64, 0.5)
 	stoneID, _ := world.ItemByName("minecraft:stone")
 	c.inv.set(hotbarStart, itemStack{ID: stoneID, Count: 32})
 	c.heldSlot.Store(0)
 
-	place := func(clicked world.Position) {
-		var p bytes.Buffer
-		protocol.WriteVarInt32ToBuffer(&p, 0) // hand
-		p.Write(protocol.WritePosition(clicked.X, clicked.Y, clicked.Z))
-		protocol.WriteVarInt32ToBuffer(&p, 1) // top face
-		p.Write(protocol.WriteFloat(0.5))
-		p.Write(protocol.WriteFloat(0.5))
-		p.Write(protocol.WriteFloat(0.5))
-		p.WriteByte(0)
-		protocol.WriteVarInt32ToBuffer(&p, 1)
-		cli.write(t, SbPlayUseItemOnBlock, p.Bytes())
+	placeOn(t, c, world.Position{X: 3, Y: 63, Z: 0}, 1)
+	if inst.World.GetBlock(world.Position{X: 3, Y: 64, Z: 0}) != world.Stone {
+		t.Fatal("block should be placed")
+	}
+	if got := c.inv.held(0).Count; got != 31 {
+		t.Errorf("held stack after placing: %d, want 31", got)
 	}
 
-	place(world.Position{X: 3, Y: 63, Z: 0})
-	waitFor(t, time.Second, func() bool { return s.Hub.World.GetBlock(world.Position{X: 3, Y: 64, Z: 0}) == world.Stone },
-		"block to be placed")
-	waitFor(t, time.Second, func() bool { return c.inv.held(0).Count == 31 }, "held stack to shrink to 31")
-
 	// A vetoed placement (into the player) must not consume anything.
-	place(world.Position{X: 0, Y: 63, Z: 0})
-	time.Sleep(100 * time.Millisecond)
+	placeOn(t, c, world.Position{X: 0, Y: 63, Z: 0}, 1)
 	if got := c.inv.held(0).Count; got != 31 {
 		t.Errorf("vetoed placement changed the stack: %d", got)
 	}
 
 	// Creative keeps the stack.
 	c.player.SetGamemode(player.Creative)
-	place(world.Position{X: 4, Y: 63, Z: 0})
-	waitFor(t, time.Second, func() bool { return s.Hub.World.GetBlock(world.Position{X: 4, Y: 64, Z: 0}) == world.Stone },
-		"creative block to be placed")
+	placeOn(t, c, world.Position{X: 4, Y: 63, Z: 0}, 1)
+	if inst.World.GetBlock(world.Position{X: 4, Y: 64, Z: 0}) != world.Stone {
+		t.Error("creative block should be placed")
+	}
 	if got := c.inv.held(0).Count; got != 31 {
 		t.Errorf("creative placement consumed the stack: %d", got)
 	}
