@@ -102,7 +102,12 @@ func (c *ClientConnection) sendWorldEntities() error {
 			return err
 		}
 	}
-	return nil
+	// Dropped items (generator output) and floating text ride the same
+	// join/respawn path.
+	if err := c.sendItemEntities(); err != nil {
+		return err
+	}
+	return c.sendHolograms()
 }
 
 // FrameInteract handles a right-click on an item-frame entity: it puts the

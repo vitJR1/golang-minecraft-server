@@ -20,20 +20,19 @@
           "z": -54
         }
       ],
-      "villagers":
-      [
+      "villagers": [
         {
           "type": "item",
-          "x": 1,
+          "x": 4,
           "y": 69,
-          "z": -57,
+          "z": -61,
           "yaw": 0.26282284
         },
         {
           "type": "upgrade",
-          "x": -1,
+          "x": -3,
           "y": 69,
-          "z": -57,
+          "z": -61,
           "yaw": 0.26282284
         }
       ]
@@ -61,16 +60,16 @@
       "villagers": [
         {
           "type": "item",
-          "x": 59,
+          "x": 62,
           "y": 69,
-          "z": 0,
+          "z": 4,
           "yaw": 90
         },
         {
           "type": "upgrade",
-          "x": 57,
+          "x": 62,
           "y": 69,
-          "z": 0,
+          "z": -3,
           "yaw": 90
         }
       ]
@@ -135,16 +134,16 @@
       "villagers": [
         {
           "type": "item",
-          "x": -58,
+          "x": -3,
           "y": 69,
-          "z": 0,
+          "z": 62,
           "yaw": -90
         },
         {
           "type": "upgrade",
-          "x": -60,
+          "x": 4,
           "y": 69,
-          "z": 0,
+          "z": 62,
           "yaw": -90
         }
       ]
@@ -154,39 +153,71 @@
     {
       "resource": "iron",
       "x": 0,
-      "y": 69,
-      "z": -57,
+      "y": 68,
+      "z": -71,
       "intervalTicks": 60,
       "team": 0
     },
     {
+      "resource": "gold",
+      "x": 0,
+      "y": 68,
+      "z": -71,
+      "intervalTicks": 140,
+      "team": 0
+    },
+    {
       "resource": "iron",
-      "x": 58,
-      "y": 69,
+      "x": 71,
+      "y": 68,
       "z": 0,
       "intervalTicks": 60,
       "team": 1
     },
     {
+      "resource": "gold",
+      "x": 71,
+      "y": 68,
+      "z": 0,
+      "intervalTicks": 140,
+      "team": 1
+    },
+    {
       "resource": "iron",
       "x": 0,
-      "y": 69,
-      "z": 57,
+      "y": 68,
+      "z": 71,
       "intervalTicks": 60,
       "team": 2
     },
     {
+      "resource": "gold",
+      "x": 0,
+      "y": 68,
+      "z": 71,
+      "intervalTicks": 140,
+      "team": 2
+    },
+    {
       "resource": "iron",
-      "x": -59,
-      "y": 69,
+      "x": -71,
+      "y": 68,
       "z": 0,
       "intervalTicks": 60,
       "team": 3
     },
     {
+      "resource": "gold",
+      "x": -71,
+      "y": 68,
+      "z": 0,
+      "intervalTicks": 140,
+      "team": 3
+    },
+    {
       "resource": "emerald",
       "x": 15,
-      "y": 72,
+      "y": 73,
       "z": -15,
       "intervalTicks": 900,
       "team": null
@@ -194,16 +225,40 @@
     {
       "resource": "emerald",
       "x": -14,
-      "y": 72,
+      "y": 73,
       "z": 14,
       "intervalTicks": 900,
       "team": null
     },
     {
       "resource": "diamond",
-      "x": 0,
+      "x": -50,
       "y": 69,
-      "z": 0,
+      "z": -49,
+      "intervalTicks": 600,
+      "team": null
+    },
+    {
+      "resource": "diamond",
+      "x": 50,
+      "y": 69,
+      "z": -50,
+      "intervalTicks": 600,
+      "team": null
+    },
+    {
+      "resource": "diamond",
+      "x": 50,
+      "y": 69,
+      "z": 50,
+      "intervalTicks": 600,
+      "team": null
+    },
+    {
+      "resource": "diamond",
+      "x": -50,
+      "y": 69,
+      "z": 50,
       "intervalTicks": 600,
       "team": null
     }

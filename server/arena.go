@@ -5,6 +5,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"minecraft-server/game"
 	"minecraft-server/templates"
@@ -55,8 +56,10 @@ func (s *Server) CreateArena(kind, templateName, name string) (string, error) {
 	}
 
 	// Spin up the running instance now: one shared world per arena, so every
-	// joiner lands in the same instance and is mutually visible.
+	// joiner lands in the same instance and is mutually visible. Ephemeral:
+	// the janitor collects it if it sits empty (never joined, or abandoned).
 	inst := NewInstance(name, s, def.Template.Instantiate())
+	markEphemeral(inst, time.Now())
 	s.AddInstance(inst)
 	s.AttachLogic(inst, logic)
 
@@ -67,11 +70,11 @@ func (s *Server) CreateArena(kind, templateName, name string) (string, error) {
 }
 
 // nextArenaName picks the next free auto name for a kind ("bw-1", "bw-2", …
-// for bedwars).
+// for bedwars; "bw-1x1-1", … for the bedwars-1x1 duel kind).
 func (s *Server) nextArenaName(kind string) string {
 	prefix := kind
-	if kind == "bedwars" {
-		prefix = "bw"
+	if strings.HasPrefix(kind, "bedwars") {
+		prefix = "bw" + strings.TrimPrefix(kind, "bedwars")
 	}
 	for {
 		name := fmt.Sprintf("%s-%d", prefix, s.arenaSerial.Add(1))

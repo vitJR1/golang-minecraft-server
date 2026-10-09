@@ -97,9 +97,10 @@ func (c *ClientConnection) sendDeclareCommands() error {
 	return c.safeWrite(CbPlayDeclareCommands, buf.Bytes())
 }
 
-// uniqueRegisteredCommands returns each registered Command once, ignoring
-// aliases (which share a *Command pointer in commandRegistry). Order is
-// non-deterministic; callers that need stable order should sort by Name.
+// uniqueRegisteredCommands returns each registered Command once — built-ins
+// (aliases share a *Command pointer in commandRegistry) followed by plugin
+// commands. Order is non-deterministic; callers that need stable order
+// should sort by Name.
 func uniqueRegisteredCommands() []*Command {
 	seen := make(map[*Command]bool, len(commandRegistry))
 	out := make([]*Command, 0, len(commandRegistry))
@@ -110,7 +111,7 @@ func uniqueRegisteredCommands() []*Command {
 		seen[c] = true
 		out = append(out, c)
 	}
-	return out
+	return append(out, pluginCommands()...)
 }
 
 // commandsVisibleTo returns the subset of registered commands that c is

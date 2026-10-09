@@ -90,18 +90,20 @@ const (
 	// NOTE 0x35 = Player Chat Message in 1.20.1, NOT Player Info Remove.
 	// Sending PI-Remove bytes to 0x35 crashes the client (Player Chat Message
 	// expects UUID + Index + sig fields).
-	CbPlayPlayerInfoRemove = 0x39
-	CbPlayPlayerInfoUpdate = 0x3A
-	CbPlaySyncPos          = 0x3C
-	CbPlayRemoveEntities   = 0x3E // NOT 0x3B (= Look At for 1.20.1)
-	CbPlayRespawn          = 0x41
-	CbPlayHeadRotation     = 0x42 // body yaw rides Teleport Entity; head needs its own packet
-	CbPlayDisconnect       = 0x1A // server-initiated kick with reason
-	CbPlaySetCenterChunk   = 0x4E // "update_view_position" — center chunk for the client
-	CbPlaySpawnPos         = 0x50
-	CbPlaySystemChat       = 0x64
-	CbPlayTeleportEntity   = 0x68
-	CbPlaySetExperience    = 0x56 // float bar + VarInt level + VarInt total xp
+	CbPlayPlayerInfoRemove    = 0x39
+	CbPlayPlayerInfoUpdate    = 0x3A
+	CbPlaySyncPos             = 0x3C
+	CbPlayRemoveEntities      = 0x3E // NOT 0x3B (= Look At for 1.20.1)
+	CbPlayRespawn             = 0x41
+	CbPlayHeadRotation        = 0x42 // body yaw rides Teleport Entity; head needs its own packet
+	CbPlayUpdateSectionBlocks = 0x43 // "multi_block_change": many blocks in one 16³ section (Instance.SetBlocks)
+	CbPlayDisconnect          = 0x1A // server-initiated kick with reason
+	CbPlaySetCenterChunk      = 0x4E // "update_view_position" — center chunk for the client
+	CbPlaySpawnPos            = 0x50
+	CbPlaySystemChat          = 0x64
+	CbPlayPickupItem          = 0x67 // "collect": item entity flies into its collector (animation only)
+	CbPlayTeleportEntity      = 0x68
+	CbPlaySetExperience       = 0x56 // float bar + VarInt level + VarInt total xp
 
 	// Inventory / container packets. IDs from minecraft-data 1.20
 	// protocol.json (window_items / set_slot / open_window).

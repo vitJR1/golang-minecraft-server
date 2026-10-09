@@ -1,6 +1,7 @@
 package bedwars
 
 import (
+	"math"
 	"strings"
 	"sync"
 	"testing"
@@ -51,6 +52,7 @@ func (p *fakePlayer) SetGamemode(g player.Gamemode) {
 	p.mu.Unlock()
 }
 func (p *fakePlayer) Kick(string) {}
+func (p *fakePlayer) IsOp() bool  { return false }
 func (p *fakePlayer) GiveItem(itemName string, count int) {
 	p.mu.Lock()
 	if p.given == nil {
@@ -68,6 +70,39 @@ type fakeInstance struct {
 	blocks     map[world.Position]world.Block
 	broadcasts []string
 	ended      bool
+	drops      []fakeDrop // every DropItem call, in order
+	holos      []*fakeHologram
+}
+
+// fakeHologram records the floating text a game asked for.
+type fakeHologram struct {
+	mu      sync.Mutex
+	x, y, z float64
+	text    string
+	removed bool
+}
+
+func (h *fakeHologram) SetText(text string) {
+	h.mu.Lock()
+	h.text = text
+	h.mu.Unlock()
+}
+func (h *fakeHologram) Remove() {
+	h.mu.Lock()
+	h.removed = true
+	h.mu.Unlock()
+}
+func (h *fakeHologram) current() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.text
+}
+
+// fakeDrop records one DropItem call on the fake instance.
+type fakeDrop struct {
+	x, y, z float64
+	item    string
+	count   int
 }
 
 func newFakeInstance() *fakeInstance {
@@ -87,6 +122,13 @@ func (i *fakeInstance) ID() string { return "test" }
 func (i *fakeInstance) SetBlock(p world.Position, b world.Block) {
 	i.mu.Lock()
 	i.blocks[p] = b
+	i.mu.Unlock()
+}
+func (i *fakeInstance) SetBlocks(changes []world.BlockChange) {
+	i.mu.Lock()
+	for _, ch := range changes {
+		i.blocks[ch.Pos] = ch.Block
+	}
 	i.mu.Unlock()
 }
 func (i *fakeInstance) GetBlock(p world.Position) world.Block {
@@ -133,6 +175,48 @@ func (i *fakeInstance) EndGame() {
 // The fake doesn't model combat, so they're no-ops.
 func (i *fakeInstance) SetPvP(bool)            {}
 func (i *fakeInstance) SetInstantRespawn(bool) {}
+
+func (i *fakeInstance) DropItem(x, y, z float64, item string, count int) bool {
+	i.mu.Lock()
+	i.drops = append(i.drops, fakeDrop{x, y, z, item, count})
+	i.mu.Unlock()
+	return true
+}
+
+func (i *fakeInstance) SpawnHologram(x, y, z float64, text string) game.Hologram {
+	h := &fakeHologram{x: x, y: y, z: z, text: text}
+	i.mu.Lock()
+	i.holos = append(i.holos, h)
+	i.mu.Unlock()
+	return h
+}
+
+// dropsAt returns the recorded drops made exactly at (x, y, z).
+func (i *fakeInstance) dropsAt(x, y, z float64) []fakeDrop {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	var out []fakeDrop
+	for _, d := range i.drops {
+		if d.x == x && d.y == y && d.z == z {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// DroppedItemsNear sums the recorded drops of item within radius — the fake
+// never "collects", so this models an unattended forge.
+func (i *fakeInstance) DroppedItemsNear(x, y, z, radius float64, item string) int {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	n := 0
+	for _, d := range i.drops {
+		if d.item == item && math.Abs(d.x-x) <= radius && math.Abs(d.y-y) <= radius && math.Abs(d.z-z) <= radius {
+			n += d.count
+		}
+	}
+	return n
+}
 
 func (i *fakeInstance) sawBroadcast(substr string) bool {
 	i.mu.Lock()
@@ -409,31 +493,126 @@ func TestMapProtectionAndPlacedBlocks(t *testing.T) {
 	}
 }
 
-// TestGeneratorGrantsResources checks that the default inventoryGranter
-// actually hands a team's iron generator output to that team's members when
-// the generator fires on its interval.
-func TestGeneratorGrantsResources(t *testing.T) {
-	g, inst, ctx := harness(t)
-	red := join(g, inst, ctx, "red", 1)
+// redIronGenerator returns red's own team iron generator.
+func redIronGenerator(t *testing.T, g *bedWars, red *fakePlayer) Generator {
+	t.Helper()
 	redTeam := g.byEntity[red.EntityID()]
-
-	// The interval of red's own team iron generator.
-	var ironInterval uint64
 	for _, gen := range g.arena.Generators {
 		if gen.Resource == Iron && gen.TeamID == redTeam {
-			ironInterval = gen.IntervalTicks
+			return gen
 		}
 	}
-	if ironInterval == 0 {
-		t.Fatal("no iron generator for red's team")
+	t.Fatal("no iron generator for red's team")
+	return Generator{}
+}
+
+// TestGeneratorDropsAtForge checks that the default dropGranter spawns the
+// iron as a dropped item at the generator block — not straight into the
+// player's inventory — when the generator fires on its interval.
+func TestGeneratorDropsAtForge(t *testing.T) {
+	g, inst, ctx := harness(t)
+	red := join(g, inst, ctx, "red", 1)
+	gen := redIronGenerator(t, g, red)
+
+	g.OnTick(ctx, gen.IntervalTicks) // one full interval → iron generator fires once
+
+	red.mu.Lock()
+	given := red.given["minecraft:iron_ingot"]
+	red.mu.Unlock()
+	if given != 0 {
+		t.Errorf("iron went straight to the inventory: %d", given)
+	}
+	// Every team's iron forge fires on the same interval; look at red's only.
+	drops := inst.dropsAt(gen.dropPoint())
+	if len(drops) != 1 {
+		t.Fatalf("drops at red's forge after one interval: got %d, want 1", len(drops))
+	}
+	if d := drops[0]; d.item != "minecraft:iron_ingot" || d.count != 1 {
+		t.Errorf("drop = %+v, want 1 iron_ingot", d)
+	}
+}
+
+// TestGeneratorPileCap checks that an unattended forge stops producing once
+// MaxStack units lie there, and resumes with the default cap semantics.
+func TestGeneratorPileCap(t *testing.T) {
+	g, inst, ctx := harness(t)
+	red := join(g, inst, ctx, "red", 1)
+	gen := redIronGenerator(t, g, red)
+	cap := gen.maxStack()
+	if cap != defaultGenMaxStack(Iron) {
+		t.Fatalf("unset MaxStack should use the iron default, got %d", cap)
 	}
 
-	g.OnTick(ctx, ironInterval) // one full interval → iron generator fires once
+	for n := uint64(1); n <= uint64(cap)+10; n++ {
+		g.OnTick(ctx, n*gen.IntervalTicks)
+	}
+	got := len(inst.dropsAt(gen.dropPoint()))
+	if got != cap {
+		t.Errorf("drops with nobody collecting: got %d, want cap %d", got, cap)
+	}
+}
+
+// TestInventoryGranterStillGives keeps the opt-in auto-collect economy
+// working for arenas that swap it in via WithGranter.
+func TestInventoryGranterStillGives(t *testing.T) {
+	g, inst, ctx := harness(t)
+	g.WithGranter(inventoryGranter{})
+	red := join(g, inst, ctx, "red", 1)
+	gen := redIronGenerator(t, g, red)
+
+	g.OnTick(ctx, gen.IntervalTicks)
 
 	red.mu.Lock()
 	got := red.given["minecraft:iron_ingot"]
 	red.mu.Unlock()
 	if got != 1 {
 		t.Errorf("iron granted after one interval: got %d, want 1", got)
+	}
+}
+
+func TestDuelModeRegistered(t *testing.T) {
+	def, ok := game.GetDef(KindDuel)
+	if !ok {
+		t.Fatal("bedwars-1x1 not registered")
+	}
+	if def.MinPlayers != 2 || def.MaxPlayers != 2 {
+		t.Errorf("player bounds: got %d..%d, want 2..2", def.MinPlayers, def.MaxPlayers)
+	}
+	g := def.New().(*bedWars)
+	if len(g.teams) != 2 || g.teamSize != 1 {
+		t.Errorf("teams=%d teamSize=%d, want 2 teams of 1", len(g.teams), g.teamSize)
+	}
+	if len(g.arena.BedBlocks) != 2 {
+		t.Errorf("arena beds: %d, want 2", len(g.arena.BedBlocks))
+	}
+}
+
+// TestDuelOneKillAfterBedBreakWins runs a full 1×1: two joiners land on
+// different teams, breaking the enemy bed then killing them ends the round.
+func TestDuelOneKillAfterBedBreakWins(t *testing.T) {
+	teams := buildTeams(2)
+	g := newBedWars(buildArena(teams), teams, 1)
+	inst := newFakeInstance()
+	ctx := &game.Ctx{InstanceID: "duel", Instance: inst}
+	g.OnInstanceStart(ctx)
+	red := join(g, inst, ctx, "red", 1)
+	blue := join(g, inst, ctx, "blue", 2)
+
+	g.mu.Lock()
+	if g.byEntity[red.eid] == g.byEntity[blue.eid] {
+		t.Fatal("duellists must be on different teams")
+	}
+	blueTeam := g.byEntity[blue.eid]
+	g.mu.Unlock()
+
+	if !g.OnBlockBreak(ctx, red, g.arena.BedBlocks[blueTeam][0]) {
+		t.Fatal("red should be able to break blue's bed")
+	}
+	g.OnPlayerAttack(ctx, red, blue)
+	if blue.Pose().Gamemode != player.Spectator {
+		t.Error("blue should be eliminated once bedless")
+	}
+	if !inst.sawBroadcast("Red team wins") {
+		t.Errorf("expected Red win broadcast, got %v", inst.broadcasts)
 	}
 }

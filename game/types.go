@@ -85,6 +85,14 @@ type Logic interface {
 	// OnBlockPlace returns true to allow, false to veto.
 	OnBlockPlace(*Ctx, PlayerHandle, world.Position, world.Block) bool
 
+	// OnBlockInteract fires for every left- or right-click on a block,
+	// before the core interprets it as a dig, a placement, or a container
+	// open. Return false to consume the click (nothing else happens and
+	// the client's prediction is rolled back); true lets it proceed to
+	// OnBlockBreak/OnBlockPlace as usual. This is the hook for selection
+	// wands and other tool items.
+	OnBlockInteract(*Ctx, PlayerHandle, BlockInteraction) bool
+
 	// OnChat may rewrite the outgoing text and/or veto delivery. Return
 	// (msg, true) for unchanged + allow, ("", false) for drop.
 	OnChat(*Ctx, PlayerHandle, string) (string, bool)
@@ -117,6 +125,7 @@ type Ctx struct {
 
 // Instance is the slice of *server.Instance the plugin is allowed to
 // touch. Server provides an adapter that implements this interface.
+// Note that Range on the world isn't exposed: read regions with GetBlock.
 type Instance interface {
 	// ID returns the instance's identifier (matches Definition.ID +
 	// a uniquifier for each round).
@@ -128,6 +137,30 @@ type Instance interface {
 
 	// GetBlock reads a block from this instance's world.
 	GetBlock(p world.Position) world.Block
+
+	// SetBlocks applies many block changes at once and broadcasts them
+	// as per-section Update Section Blocks packets instead of one Block
+	// Update each — use it for fills, pastes, and other region edits.
+	SetBlocks(changes []world.BlockChange)
+
+	// DropItem spawns count of the namespaced item (e.g. "minecraft:iron_ingot")
+	// as a dropped-item entity at (x, y, z) — the BedWars generator output.
+	// The item falls onto the block below, merges with a same-item drop lying
+	// within a block, is collected by the first living non-spectator player
+	// who walks over it, and despawns after five minutes. Returns false for
+	// an unknown item id or a non-positive count.
+	DropItem(x, y, z float64, itemName string, count int) bool
+
+	// DroppedItemsNear counts the units of itemName lying within radius of
+	// (x, y, z). Generators use it to cap the pile at their spawn point.
+	DroppedItemsNear(x, y, z, radius float64, itemName string) int
+
+	// SpawnHologram creates floating text hovering at (x, y, z) — an
+	// invisible marker armor stand whose name is always shown, rendering
+	// about half a block above the point. Legacy §-colour codes work. Use
+	// the returned handle to update or remove it; it is also re-streamed to
+	// players on join/respawn automatically.
+	SpawnHologram(x, y, z float64, text string) Hologram
 
 	// BroadcastChat sends a chat line to every player. An empty sender
 	// renders as a server announcement (no angle brackets).
@@ -161,6 +194,14 @@ type Instance interface {
 	SetInstantRespawn(enabled bool)
 }
 
+// Hologram is a floating-text entity created by Instance.SpawnHologram.
+type Hologram interface {
+	// SetText replaces the text for every viewer (no-op if unchanged).
+	SetText(text string)
+	// Remove despawns the hologram. Safe to call more than once.
+	Remove()
+}
+
 // PlayerHandle is the safe wrapper around a connected player. Plugins
 // only see this — never *server.ClientConnection or raw network state.
 type PlayerHandle interface {
@@ -190,8 +231,12 @@ type PlayerHandle interface {
 	// "minecraft:iron_ingot") to the player's inventory, merging into
 	// existing stacks of the same item before filling empty main-inventory
 	// and hotbar slots. Unknown item ids and overflow past inventory
-	// capacity are silently dropped (there is no item-entity model yet).
+	// capacity are silently dropped; use Instance.DropItem to put a stack on
+	// the ground instead.
 	GiveItem(itemName string, count int)
+
+	// IsOp reports whether the player is a server operator.
+	IsOp() bool
 
 	// Kick closes the player's connection. The reason is logged but not
 	// (yet) sent as a Disconnect message — that needs the Play Disconnect

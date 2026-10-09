@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"minecraft-server/cfg"
+	"minecraft-server/game"
 	"minecraft-server/protocol"
 	"minecraft-server/world"
 	"sync"
@@ -113,6 +114,10 @@ type Instance struct {
 	World   world.World
 	Players *PlayerList
 
+	// ephemeralState carries the janitor's collectability flag + empty
+	// timestamp — see janitor.go.
+	ephemeralState
+
 	// Combat holds the numeric PvP tuning for this instance (damage, speed,
 	// knockback). Set at construction (DefaultCombatConfig) and safe to
 	// tweak before traffic arrives; the live on/off toggles below are
@@ -148,6 +153,17 @@ type Instance struct {
 	projMu      sync.Mutex
 	projectiles []*projectile
 
+	// items are dropped-item entities (generator output) lying in this
+	// instance, simulated on the tick loop (fall, pickup, despawn). Guarded by
+	// itemsMu.
+	itemsMu sync.Mutex
+	items   []*itemEntity
+
+	// holograms are floating-text armor stands (game labels / timers).
+	// Guarded by holoMu.
+	holoMu    sync.Mutex
+	holograms []*hologram
+
 	// joinMu serializes registration + visibility announcements per
 	// instance, so one player's join can't observe another mid-join inside
 	// the same instance.
@@ -159,6 +175,12 @@ type Instance struct {
 	tickHandlers []TickHandler
 	stopTick     chan struct{} // closed by Stop()
 	stopOnce     sync.Once
+
+	// Tick timing for /stats: duration of the most recent tick and the
+	// slowest tick since the instance started, in nanoseconds. Written by
+	// the tick loop, read by metrics.
+	lastTickNanos atomic.Int64
+	maxTickNanos  atomic.Int64
 
 	// Event hooks. Set at construction, read from handler goroutines.
 	// Don't reassign after the instance starts taking traffic — there's no
@@ -186,10 +208,21 @@ type Instance struct {
 	// respawn (death screen or instant) is finalized.
 	OnPlayerDeath func(victim, killer *ClientConnection)
 
+	// OnBlockInteract fires for a left/right click on a block before the
+	// core treats it as a dig / placement / container open. false = consume
+	// (see game.BlockInteraction).
+	OnBlockInteract func(c *ClientConnection, click game.BlockInteraction) bool
+
 	// OnStop fires once when the instance is being torn down (via
 	// Server.RemoveInstance or Instance.Stop). Use for game cleanup;
 	// the tick loop is still running when this fires.
 	OnStop func()
+
+	// ctx is the game.Ctx handed to plugin listeners and commands for this
+	// instance; listeners is the snapshot of game.Listeners() taken at
+	// construction. Both are set once in NewInstance (see plugins.go).
+	ctx       *game.Ctx
+	listeners []game.Listener
 }
 
 // NewInstance creates an instance and starts its tick loop. Caller
@@ -209,6 +242,8 @@ func NewInstance(id string, srv *Server, w world.World) *Instance {
 	i.loadWorldEntities()
 	i.OnTick(i.combatTick)
 	i.OnTick(i.projectileTick)
+	i.OnTick(i.itemTick)
+	i.initListeners()
 	go i.tickLoop()
 	return i
 }
@@ -237,14 +272,13 @@ func (i *Instance) Tick() uint64 {
 	return i.tickCount.Load()
 }
 
-// Stop halts the tick loop and fires OnStop (under panic recovery). Safe
-// to call multiple times. Does not affect connected players or pending
-// broadcasts — those continue running on their own goroutines.
+// Stop halts the tick loop and fires listeners' OnInstanceEnd + OnStop
+// (under panic recovery). Safe to call multiple times. Does not affect
+// connected players or pending broadcasts — those continue running on their
+// own goroutines.
 func (i *Instance) Stop() {
 	i.stopOnce.Do(func() {
-		if i.OnStop != nil {
-			safeHook(i, "OnStop", i.OnStop)
-		}
+		i.fireStop()
 		close(i.stopTick)
 	})
 }
@@ -264,6 +298,7 @@ func (i *Instance) tickLoop() {
 
 func (i *Instance) runTick() {
 	tick := i.tickCount.Add(1)
+	start := time.Now()
 
 	// Snapshot the handler list so a handler can OnTick a new subscriber
 	// without deadlocking, and so we don't hold the lock during user code.
@@ -275,6 +310,14 @@ func (i *Instance) runTick() {
 	for _, h := range handlers {
 		// Isolate panics: one buggy game shouldn't freeze the instance.
 		safeTick(i, h, tick)
+	}
+
+	elapsed := int64(time.Since(start))
+	i.lastTickNanos.Store(elapsed)
+	if elapsed > i.maxTickNanos.Load() {
+		// Plain store, not CAS: only the tick loop writes, so a lost
+		// race can't happen.
+		i.maxTickNanos.Store(elapsed)
 	}
 }
 
@@ -318,14 +361,11 @@ func (i *Instance) JoinAndAnnounce(c *ClientConnection) {
 	i.Players.Broadcast(CbPlayPlayerInfoUpdate, addNewcomer, c.player.EntityID)
 	i.Players.Broadcast(CbPlaySpawnPlayer, spawnNewcomer, c.player.EntityID)
 
-	hook := i.OnPlayerJoin
 	i.joinMu.Unlock()
 
-	// Hook fires outside the lock so game logic can call back into the
+	// Hooks fire outside the lock so game logic can call back into the
 	// instance without deadlocking.
-	if hook != nil {
-		safeHook(i, "OnPlayerJoin", func() { hook(c) })
-	}
+	i.fireJoin(c)
 }
 
 // LeaveAndAnnounce removes the player from the instance and tells the
@@ -337,10 +377,8 @@ func (i *Instance) LeaveAndAnnounce(c *ClientConnection) {
 		return
 	}
 
-	// Hook outside joinMu so game cleanup can call into the instance.
-	if hook := i.OnPlayerLeave; hook != nil {
-		safeHook(i, "OnPlayerLeave", func() { hook(c) })
-	}
+	// Hooks outside joinMu so game cleanup can call into the instance.
+	i.fireLeave(c)
 
 	i.joinMu.Lock()
 	defer i.joinMu.Unlock()

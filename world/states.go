@@ -1,5 +1,7 @@
 package world
 
+import "strings"
+
 // Property-state resolution for blocks that have variants (stairs facing,
 // slab half, log axis, …). Only blocks listed in blockStates participate;
 // everything else falls back to its plain-default StateID via BlockByName.
@@ -450,4 +452,64 @@ func ResolveStateID(name string, props map[string]string) int32 {
 		offset += idx * strides[i]
 	}
 	return info.MinStateID + offset
+}
+
+// StateProperties decodes a block-state ID back into its property map for
+// blocks with a registered variant table ("minecraft:oak_stairs" state 1234
+// → {facing:north, half:bottom, …}). Returns nil for blocks without variants
+// or an ID outside the block's range, so the inverse of ResolveStateID:
+//
+//	ResolveStateID(name, StateProperties(name, id)) == id
+func StateProperties(name string, stateID int32) map[string]string {
+	info, ok := blockStates[name]
+	if !ok || len(info.Properties) == 0 {
+		return nil
+	}
+	total := int32(1)
+	for _, p := range info.Properties {
+		total *= int32(len(p.Values))
+	}
+	idx := stateID - info.MinStateID
+	if idx < 0 || idx >= total {
+		return nil
+	}
+	props := make(map[string]string, len(info.Properties))
+	// Same right-to-left strides as ResolveStateID: the last property is the
+	// fastest-varying.
+	for i := len(info.Properties) - 1; i >= 0; i-- {
+		p := info.Properties[i]
+		n := int32(len(p.Values))
+		props[p.Name] = p.Values[idx%n]
+		idx /= n
+	}
+	return props
+}
+
+// PaletteName formats a block as a Sponge-schematic palette entry:
+// "minecraft:oak_stairs[facing=north,half=bottom]" for blocks with variant
+// properties, or the bare name otherwise. Property order follows the
+// registry table so output is deterministic. Inverse of schem's palette
+// parsing + ResolveStateID.
+func PaletteName(b Block) string {
+	info, ok := blockStates[b.Name]
+	if !ok || len(info.Properties) == 0 {
+		return b.Name
+	}
+	props := StateProperties(b.Name, b.StateID)
+	if props == nil {
+		return b.Name
+	}
+	var sb strings.Builder
+	sb.WriteString(b.Name)
+	sb.WriteByte('[')
+	for i, p := range info.Properties {
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		sb.WriteString(p.Name)
+		sb.WriteByte('=')
+		sb.WriteString(props[p.Name])
+	}
+	sb.WriteByte(']')
+	return sb.String()
 }

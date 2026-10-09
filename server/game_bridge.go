@@ -6,6 +6,7 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/world"
+	"time"
 )
 
 // instanceBridge implements game.Instance over *Instance. The bridge is
@@ -19,10 +20,29 @@ type instanceBridge struct {
 func (b instanceBridge) ID() string                                 { return b.inst.ID }
 func (b instanceBridge) SetBlock(p world.Position, blk world.Block) { b.inst.SetBlock(p, blk) }
 func (b instanceBridge) GetBlock(p world.Position) world.Block      { return b.inst.World.GetBlock(p) }
+func (b instanceBridge) SetBlocks(changes []world.BlockChange)      { b.inst.SetBlocks(changes) }
 func (b instanceBridge) BroadcastChat(sender, msg string)           { b.inst.BroadcastChat(sender, msg) }
 func (b instanceBridge) PlayerCount() int                           { return b.inst.Players.Count() }
 func (b instanceBridge) SetPvP(enabled bool)                        { b.inst.SetPvP(enabled) }
 func (b instanceBridge) SetInstantRespawn(enabled bool)             { b.inst.SetInstantRespawn(enabled) }
+
+func (b instanceBridge) DropItem(x, y, z float64, itemName string, count int) bool {
+	return b.inst.DropItem(x, y, z, itemName, count)
+}
+
+func (b instanceBridge) DroppedItemsNear(x, y, z, radius float64, itemName string) int {
+	return b.inst.DroppedItemsNear(x, y, z, radius, itemName)
+}
+
+// SpawnHologram returns nil (not a typed-nil handle) when the instance can't
+// allocate entities, so games can nil-check the result.
+func (b instanceBridge) SpawnHologram(x, y, z float64, text string) game.Hologram {
+	h := b.inst.SpawnHologram(x, y, z, text)
+	if h == nil {
+		return nil
+	}
+	return h
+}
 
 func (b instanceBridge) Players() []game.PlayerHandle {
 	conns := b.inst.Players.snapshot()
@@ -69,7 +89,10 @@ type playerBridge struct {
 	conn *ClientConnection
 }
 
-func (b playerBridge) Name() string          { return b.conn.player.Name }
+func (b playerBridge) Name() string { return b.conn.player.Name }
+func (b playerBridge) IsOp() bool {
+	return b.conn.server != nil && b.conn.server.Ops.Has(b.conn.playerName)
+}
 func (b playerBridge) EntityID() int32       { return b.conn.player.EntityID }
 func (b playerBridge) Pose() player.Snapshot { return b.conn.player.Snapshot() }
 func (b playerBridge) SendMessage(text string) {
@@ -115,10 +138,7 @@ func (b playerBridge) Kick(reason string) {
 // implementations can stash it (in OnInstanceStart) if they need to call
 // back into the server from a goroutine they spawn.
 func (s *Server) AttachLogic(inst *Instance, logic game.Logic) *game.Ctx {
-	ctx := &game.Ctx{
-		InstanceID: inst.ID,
-		Instance:   instanceBridge{server: s, inst: inst},
-	}
+	ctx := inst.pluginCtx()
 
 	inst.OnTick(func(tick uint64) {
 		logic.OnTick(ctx, tick)
@@ -134,6 +154,9 @@ func (s *Server) AttachLogic(inst *Instance, logic game.Logic) *game.Ctx {
 	}
 	inst.OnBlockPlace = func(c *ClientConnection, pos world.Position, blk world.Block) bool {
 		return logic.OnBlockPlace(ctx, playerBridge{conn: c}, pos, blk)
+	}
+	inst.OnBlockInteract = func(c *ClientConnection, click game.BlockInteraction) bool {
+		return logic.OnBlockInteract(ctx, playerBridge{conn: c}, click)
 	}
 	inst.OnChat = func(c *ClientConnection, msg string) (string, bool) {
 		return logic.OnChat(ctx, playerBridge{conn: c}, msg)
@@ -174,6 +197,9 @@ func (s *Server) StartGame(defID string) (*Instance, error) {
 	}
 	id := fmt.Sprintf("%s-%d", def.ID, s.nextInstanceSerial())
 	inst := NewInstance(id, s, def.Template.Instantiate())
+	// Ephemeral: normally EndGame removes the round, but if every player
+	// disconnects instead, the janitor collects the leftover.
+	markEphemeral(inst, time.Now())
 	s.AddInstance(inst)
 
 	logic := def.New()

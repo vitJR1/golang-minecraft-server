@@ -216,9 +216,36 @@ func arenaOnClick(c *ClientConnection, e menuEntry) {
 	c.menu.Store(nil)
 }
 
+// Bedwars arena kinds (mirror the ArenaBuilder registrations in
+// games/bedwars/arena_config.go): the regular team mode and the 1×1 duel.
+const (
+	bedwarsKindFull = "bedwars"
+	bedwarsKindDuel = "bedwars-1x1"
+)
+
+// bedwarsModeMenu describes one "create" button in the BedWars arena browser
+// and how running arenas of that kind are labelled.
+type bedwarsModeMenu struct {
+	kind   string // arena kind handed to CreateArena / ArenasOfKind
+	create string // label of the "+ New …" button
+	label  string // prefix for running arenas ("DOTA 4×4 bw-1 — 2 online")
+	icon   int32  // item shown on the create button
+}
+
+// bedwarsModes is the ordered list of modes offered in the browser; create
+// buttons take the first len(bedwarsModes) slots.
+var bedwarsModes = []bedwarsModeMenu{
+	{kind: bedwarsKindFull, create: "+ New DOTA arena (4×4)", label: "DOTA 4×4", icon: itemRedBed},
+	{kind: bedwarsKindDuel, create: "+ New 1×1 duel", label: "Duel 1×1", icon: itemDiamondSword},
+}
+
+// createKey is the menu key of a mode's "+ New …" button.
+func (m bedwarsModeMenu) createKey() string { return "create:" + m.kind }
+
 // openBedwarsArenaMenu shows the live DOTA arena browser: a "create new arena"
-// compass plus one compass per running bedwars arena that already has players
-// (its stack size = player count). Clicking creates-and-joins or joins.
+// button per mode (4×4 team game, 1×1 duel) plus one compass per running
+// bedwars arena that already has players (its stack size = player count).
+// Clicking creates-and-joins or joins.
 func (c *ClientConnection) openBedwarsArenaMenu() {
 	entries := bedwarsArenaEntries(c.server)
 	c.menu.Store(&openMenu{kind: "bw-arenas", entries: entries, onClick: bedwarsArenaOnClick})
@@ -226,47 +253,52 @@ func (c *ClientConnection) openBedwarsArenaMenu() {
 	_ = c.sendChestContents(1, entries)
 }
 
-// bedwarsArenaEntries builds the DOTA arena browser slots: slot 0 is always
-// "create a new arena"; each following slot is a running bedwars arena that has
-// players, its compass stack size showing the online count.
+// bedwarsArenaEntries builds the DOTA arena browser slots: the first slots are
+// the per-mode "create a new arena" buttons; each following slot is a running
+// bedwars arena (any mode) that has players, its compass stack size showing
+// the online count.
 func bedwarsArenaEntries(s *Server) map[int16]menuEntry {
-	entries := map[int16]menuEntry{
-		0: {slot: 0, itemID: itemCompass, name: "+ New DOTA arena", key: "create", count: 1},
-	}
-	slot := int16(1)
-	for _, name := range s.ArenasOfKind("bedwars") {
-		inst := s.GetInstance(name)
-		if inst == nil {
-			continue
-		}
-		n := inst.Players.Count()
-		if n <= 0 {
-			continue // only list arenas someone's already on
-		}
-		count := byte(n)
-		if n > 64 {
-			count = 64 // item stacks cap at 64
-		}
-		entries[slot] = menuEntry{
-			slot: slot, itemID: itemCompass, count: count,
-			name: fmt.Sprintf("DOTA %s — %d online", name, n), key: name,
-		}
+	entries := map[int16]menuEntry{}
+	slot := int16(0)
+	for _, m := range bedwarsModes {
+		entries[slot] = menuEntry{slot: slot, itemID: m.icon, name: m.create, key: m.createKey(), count: 1}
 		slot++
+	}
+	for _, m := range bedwarsModes {
+		for _, name := range s.ArenasOfKind(m.kind) {
+			inst := s.GetInstance(name)
+			if inst == nil {
+				continue
+			}
+			n := inst.Players.Count()
+			if n <= 0 {
+				continue // only list arenas someone's already on
+			}
+			count := byte(n)
+			if n > 64 {
+				count = 64 // item stacks cap at 64
+			}
+			entries[slot] = menuEntry{
+				slot: slot, itemID: itemCompass, count: count,
+				name: fmt.Sprintf("%s %s — %d online", m.label, name, n), key: name,
+			}
+			slot++
+		}
 	}
 	return entries
 }
 
-// bedwarsArenaOnClick handles the DOTA arena browser: "create" spins up a fresh
-// arena from the DOTA map and joins it; any other key is an existing arena name
-// to join directly.
+// bedwarsArenaOnClick handles the DOTA arena browser: a "create:<kind>" key
+// spins up a fresh arena of that kind from the DOTA map and joins it; any other
+// key is an existing arena name to join directly.
 func bedwarsArenaOnClick(c *ClientConnection, e menuEntry) {
 	c.menu.Store(nil)
 	name := e.key
-	if name == "create" {
-		created, err := c.server.CreateArena("bedwars", templates.BedwarsDotaMap, "")
+	if kind, ok := strings.CutPrefix(name, "create:"); ok {
+		created, err := c.server.CreateArena(kind, templates.BedwarsDotaMap, "")
 		if err != nil {
 			_ = c.sendSystemMessage("Couldn't create arena: " + err.Error())
-			slog.Warn("bedwars arena create failed", "player", c.playerName, "err", err)
+			slog.Warn("bedwars arena create failed", "player", c.playerName, "kind", kind, "err", err)
 			return
 		}
 		name = created

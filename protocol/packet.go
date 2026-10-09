@@ -13,6 +13,16 @@ import (
 // use the simpler uncompressed framing.
 const CompressionDisabled = -1
 
+// MaxPacketLength caps the frame length a peer may declare (vanilla's
+// 21-bit frame limit, 2 MiB). The length prefix is attacker-controlled, so
+// without a cap a single connection could ask us to allocate gigabytes.
+const MaxPacketLength = 1 << 21
+
+// MaxUncompressedLength caps the declared pre-compression size of a
+// compressed packet (vanilla: 8 MiB). Guards against zlib bombs — a tiny
+// wire payload claiming a huge uncompressed size.
+const MaxUncompressedLength = 1 << 23
+
 // DebugPackets enables per-packet stderr logging from WritePacket. Leave
 // false in production — chunk streaming alone spams thousands of lines/s.
 var DebugPackets = false
@@ -117,6 +127,9 @@ func readFramedBody(conn net.Conn) ([]byte, error) {
 	if length < 0 {
 		return nil, errors.New("negative packet length")
 	}
+	if length > MaxPacketLength {
+		return nil, fmt.Errorf("packet length %d exceeds limit %d", length, MaxPacketLength)
+	}
 	body := make([]byte, length)
 	if _, err := io.ReadFull(conn, body); err != nil {
 		return nil, fmt.Errorf("packet data: %w", err)
@@ -138,6 +151,9 @@ func decodeCompressedBody(body []byte) (*bytes.Buffer, error) {
 	}
 	if dataLen < 0 {
 		return nil, errors.New("negative compressed data length")
+	}
+	if dataLen > MaxUncompressedLength {
+		return nil, fmt.Errorf("uncompressed length %d exceeds limit %d", dataLen, MaxUncompressedLength)
 	}
 	decoded, err := DecompressPayload(rest, dataLen)
 	if err != nil {

@@ -103,6 +103,45 @@ func WriteVarInt32(value int32) []byte {
 	return buf
 }
 
+// ReadVarLong decodes a protocol VarLong (up to 10 bytes) from buf.
+func ReadVarLong(buf *bytes.Buffer) (int64, error) {
+	var value uint64
+	var shift uint
+	for {
+		b, err := buf.ReadByte()
+		if err != nil {
+			return 0, err
+		}
+		value |= uint64(b&varIntSegmentBits) << shift
+		if b&varIntContinueBit == 0 {
+			return int64(value), nil
+		}
+		shift += 7
+		if shift >= 70 {
+			return 0, errVarLongTooBig
+		}
+	}
+}
+
+var errVarLongTooBig = errors.New("VarLong too big")
+
+// WriteVarLongToBuffer appends value as a protocol VarLong (LEB128-style,
+// up to 10 bytes; negative values take all 10).
+func WriteVarLongToBuffer(buf *bytes.Buffer, value int64) {
+	u := uint64(value)
+	for {
+		b := byte(u & varIntSegmentBits)
+		u >>= 7
+		if u != 0 {
+			b |= varIntContinueBit
+		}
+		buf.WriteByte(b)
+		if u == 0 {
+			break
+		}
+	}
+}
+
 func WriteVarInt32ToBuffer(buf *bytes.Buffer, value int32) {
 	u := uint32(value)
 	for {

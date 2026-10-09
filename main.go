@@ -18,9 +18,11 @@ import (
 	"minecraft-server/templates"
 	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -29,6 +31,10 @@ import (
 	// its init(). Drop a game by deleting the line.
 	_ "minecraft-server/games/bedwars"
 	_ "minecraft-server/games/ffa"
+
+	// Plugins: server-wide listeners + commands (game/plugin.go). Same
+	// deal — one blank import each.
+	_ "minecraft-server/plugins/worldedit"
 )
 
 const (
@@ -60,6 +66,16 @@ func main() {
 	server.SetupLobbies(srv)
 	server.SetupHubMenu(srv)
 
+	// Ops endpoint (pprof + /stats JSON). Unauthenticated — keep it on
+	// loopback and reach it via SSH; "off" disables entirely.
+	if maddr := getEnv("METRICS_ADDR", "127.0.0.1:6060"); maddr != "off" {
+		if _, err := server.StartMetrics(srv, maddr); err != nil {
+			slog.Warn("metrics endpoint failed to start", "addr", maddr, "err", err)
+		} else {
+			slog.Info("metrics endpoint up", "addr", maddr)
+		}
+	}
+
 	addr := ":" + getEnv("PORT", "25565")
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -69,9 +85,34 @@ func main() {
 	slog.Info("listening", "addr", addr, "version", "1.20.1", "protocol", 763,
 		"online_mode", cfg.OnlineMode)
 
+	// Graceful shutdown: SIGINT/SIGTERM → stop accepting, kick everyone
+	// with a message, stop tick loops, close backends. The accept loop
+	// below waits on shutdownDone so the process exits only after the
+	// disconnect packets have flushed.
+	shutdownDone := make(chan struct{})
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		sig := <-sigCh
+		slog.Info("shutting down", "signal", sig.String())
+		_ = lis.Close() // unblocks Accept with net.ErrClosed
+		srv.Shutdown("Server is restarting")
+		if srv.Redis != nil {
+			_ = srv.Redis.Close()
+		}
+		if srv.DB != nil {
+			srv.DB.Close()
+		}
+		close(shutdownDone)
+	}()
+
 	for {
 		conn, err := lis.Accept()
 		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				<-shutdownDone
+				return
+			}
 			slog.Error("accept failed", "err", err)
 			continue
 		}
@@ -129,31 +170,30 @@ func loadTemplates(srv *server.Server) {
 	}
 }
 
-// connectStores opens the optional Postgres and Redis backends and stashes
-// the handles on the server. Each is gated by its *_ENABLED env var (default
-// on) and is best-effort: a connection failure is logged and the server boots
-// without it (the corresponding srv field stays nil). Nothing in the core
-// server requires them yet, so a down database shouldn't block startup.
+// connectStores opens the storage backends and stashes the handles on the
+// server. Postgres is a HARD dependency — player accounts and auth password
+// hashes live there, so a server that boots without it would let anyone
+// /register over existing names and lose every account created meanwhile.
+// Connection or migration failure aborts startup. Redis stays best-effort:
+// a down Redis is logged and the server boots without it.
 func connectStores(srv *server.Server) {
 	ctx := context.Background()
 
-	if envEnabled("POSTGRES_ENABLED", true) {
-		dbCfg := db.ConfigFromEnv()
-		pg, err := db.Connect(ctx, dbCfg)
-		if err != nil {
-			slog.Warn("postgres connect failed; continuing without it", "err", err)
-		} else {
-			srv.DB = pg
-			// Bring the schema up to date, then expose the repositories.
-			if err := store.Migrate(dbCfg.DSN()); err != nil {
-				slog.Error("db migrations failed; repositories may be unusable", "err", err)
-			} else {
-				slog.Info("db migrations applied")
-			}
-			srv.Store = store.New(pg.Pool)
-			slog.Info("postgres connected")
-		}
+	dbCfg := db.ConfigFromEnv()
+	pg, err := db.Connect(ctx, dbCfg)
+	if err != nil {
+		slog.Error("postgres connect failed — Postgres is required, refusing to start",
+			"err", err, "hint", "docker compose up -d")
+		os.Exit(1)
 	}
+	srv.DB = pg
+	// Bring the schema up to date, then expose the repositories.
+	if err := store.Migrate(dbCfg.DSN()); err != nil {
+		slog.Error("db migrations failed — refusing to start on a stale schema", "err", err)
+		os.Exit(1)
+	}
+	srv.Store = store.New(pg.Pool)
+	slog.Info("postgres connected, migrations applied")
 
 	if envEnabled("REDIS_ENABLED", true) {
 		rc, err := redisc.Connect(ctx, redisc.ConfigFromEnv())
@@ -225,6 +265,23 @@ func loadEnv() {
 	if v := os.Getenv("MAX_PLAYERS"); v != "" {
 		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
 			cfg.MaxPlayers = n
+		}
+	}
+	// Connection-flood limits. Unlike MAX_PLAYERS, zero is meaningful here
+	// (= disable that limit), so >= 0 is accepted.
+	if v := os.Getenv("MAX_CONNS"); v != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n >= 0 {
+			cfg.MaxConns = n
+		}
+	}
+	if v := os.Getenv("MAX_CONNS_PER_IP"); v != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n >= 0 {
+			cfg.MaxConnsPerIP = n
+		}
+	}
+	if v := os.Getenv("CONN_RATE_PER_IP"); v != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n >= 0 {
+			cfg.ConnRatePerIP = n
 		}
 	}
 	// Auth knobs. time.ParseDuration handles "30s", "5m", "1h30m", etc.

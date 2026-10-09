@@ -20,7 +20,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-minecraft}
       POSTGRES_DB: ${POSTGRES_DB:-minecraft}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # Bound to loopback: only the game server on this host may talk to the
+      # DB. Without the 127.0.0.1 prefix Docker punches a hole through the
+      # host firewall and exposes Postgres to the internet.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -36,7 +39,8 @@ services:
     # Append-only file = data survives restarts. Drop it for a pure cache.
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      # Loopback-only, same reasoning as postgres above.
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
     healthcheck:

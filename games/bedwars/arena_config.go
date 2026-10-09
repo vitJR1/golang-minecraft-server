@@ -24,7 +24,7 @@ import (
 //	     "villagers":[{"type":"item","x":11,"y":65,"z":9,"yaw":180},
 //	                  {"type":"upgrade","x":9,"y":65,"z":9,"yaw":180}]}
 //	  ],
-//	  "generators":[{"resource":"iron","x":10,"y":65,"z":8,"intervalTicks":60,"team":0},
+//	  "generators":[{"resource":"iron","x":10,"y":65,"z":8,"intervalTicks":60,"team":0,"maxStack":48},
 //	                {"resource":"diamond","x":0,"y":65,"z":0}]
 //	}
 
@@ -37,7 +37,24 @@ type vec3 struct {
 type arenaConfig struct {
 	Teams      []teamConfig      `json:"teams"`
 	Generators []generatorConfig `json:"generators"`
+
+	// TeamSize caps players per team (default defaultTeamSize); MinPlayers is
+	// how many the round needs before it counts (default 2). Both optional —
+	// the 1×1 builder overrides them regardless of what the file says.
+	TeamSize   int `json:"teamSize"`
+	MinPlayers int `json:"minPlayers"`
 }
+
+const (
+	// KindFull is the arena kind for the regular team mode (every team in the
+	// config, up to TeamSize players each).
+	KindFull = "bedwars"
+	// KindDuel is the 1×1 arena kind: two opposite bases from the same map,
+	// one player per team.
+	KindDuel = "bedwars-1x1"
+
+	defaultTeamSize = 4
+)
 
 type teamConfig struct {
 	Name  string `json:"name"`
@@ -55,6 +72,9 @@ type generatorConfig struct {
 	vec3          `json:""`
 	IntervalTicks int  `json:"intervalTicks"`
 	Team          *int `json:"team"` // nil → neutral; otherwise team index
+	// MaxStack caps the uncollected pile at the generator (0 → per-resource
+	// default: iron 48, gold 16, diamond 8, emerald 4).
+	MaxStack int `json:"maxStack,omitempty"`
 }
 
 type villagerConfig struct {
@@ -64,42 +84,120 @@ type villagerConfig struct {
 }
 
 func init() {
-	game.RegisterArenaBuilder("bedwars", buildBedwarsArenaDef)
+	game.RegisterArenaBuilder(KindFull, buildBedwarsArenaDef)
+	game.RegisterArenaBuilder(KindDuel, buildBedwarsDuelArenaDef)
 }
 
 // buildBedwarsArenaDef is the ArenaBuilder for the "bedwars" kind: parse the
 // config, build the arena over a clone of the map template, and return a
 // playable Definition the matchmaker can queue.
 func buildBedwarsArenaDef(arenaID, name string, tmpl *world.Template, config []byte) (*game.Definition, error) {
-	if len(config) == 0 {
-		return nil, fmt.Errorf("missing arena config")
+	cfg, err := parseArenaConfig(config)
+	if err != nil {
+		return nil, err
 	}
+	return buildArenaDef(arenaID, name, tmpl, cfg)
+}
+
+// buildBedwarsDuelArenaDef is the ArenaBuilder for the "bedwars-1x1" kind: the
+// same map and config as the full mode, but only two bases are used (opposite
+// ones on a 4-team map) and each team holds a single player. The unused
+// teams' beds stay as plain map blocks (protected, not owned by anyone) and
+// their villagers/generators aren't spawned.
+func buildBedwarsDuelArenaDef(arenaID, name string, tmpl *world.Template, config []byte) (*game.Definition, error) {
+	cfg, err := parseArenaConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	cfg = duelConfig(cfg)
+	return buildArenaDef(arenaID, name, tmpl, cfg)
+}
+
+// parseArenaConfig decodes the JSON layout and validates the team count.
+func parseArenaConfig(config []byte) (arenaConfig, error) {
 	var cfg arenaConfig
+	if len(config) == 0 {
+		return cfg, fmt.Errorf("missing arena config")
+	}
 	if err := json.Unmarshal(config, &cfg); err != nil {
-		return nil, fmt.Errorf("parse arena config: %w", err)
+		return cfg, fmt.Errorf("parse arena config: %w", err)
 	}
 	if len(cfg.Teams) < 2 {
-		return nil, fmt.Errorf("arena needs at least 2 teams, got %d", len(cfg.Teams))
+		return cfg, fmt.Errorf("arena needs at least 2 teams, got %d", len(cfg.Teams))
 	}
 	if len(cfg.Teams) > MaxTeams {
-		return nil, fmt.Errorf("arena has %d teams, max %d", len(cfg.Teams), MaxTeams)
+		return cfg, fmt.Errorf("arena has %d teams, max %d", len(cfg.Teams), MaxTeams)
 	}
+	if cfg.TeamSize <= 0 {
+		cfg.TeamSize = defaultTeamSize
+	}
+	if cfg.MinPlayers <= 0 {
+		cfg.MinPlayers = 2
+	}
+	return cfg, nil
+}
 
+// buildArenaDef builds the arena over a clone of the map and wraps it in a
+// Definition sized from the config (Teams × TeamSize).
+func buildArenaDef(arenaID, name string, tmpl *world.Template, cfg arenaConfig) (*game.Definition, error) {
 	teams := buildTeams(len(cfg.Teams))
 	arena, err := buildConfigArena(tmpl, cfg, teams)
 	if err != nil {
 		return nil, err
 	}
-
-	const teamSize = 4 // default capacity per team until the config carries it
+	teamSize := cfg.TeamSize
 	return &game.Definition{
 		ID:         arenaID,
 		Name:       name,
-		MinPlayers: 2,
+		MinPlayers: cfg.MinPlayers,
 		MaxPlayers: len(teams) * teamSize,
 		Template:   arena.Template,
 		New:        func() game.Logic { return newBedWars(arena, teams, teamSize) },
 	}, nil
+}
+
+// duelConfig reduces a config to the 1×1 layout: two teams of one player.
+// A 2-team config is used as-is; otherwise the first team and the one
+// halfway round the list are taken — configs list bases in ring order, so
+// on a symmetric 4-team map that's the pair of opposite islands, giving
+// both duellists the longest possible approach. Generators are re-indexed
+// to the kept teams; those owned by dropped teams are removed, neutral
+// ones stay.
+func duelConfig(cfg arenaConfig) arenaConfig {
+	keep := []int{0, 1}
+	if len(cfg.Teams) > 2 {
+		keep = []int{0, len(cfg.Teams) / 2}
+	}
+	return selectTeams(cfg, keep, 1, 2)
+}
+
+// selectTeams returns a copy of cfg with only the teams at the given config
+// indices (in that order), generator team references remapped accordingly,
+// and the capacity fields set. Generators owned by a dropped team are
+// omitted.
+func selectTeams(cfg arenaConfig, keep []int, teamSize, minPlayers int) arenaConfig {
+	remap := make(map[int]int, len(keep))
+	out := arenaConfig{
+		Teams:      make([]teamConfig, 0, len(keep)),
+		TeamSize:   teamSize,
+		MinPlayers: minPlayers,
+	}
+	for newIdx, oldIdx := range keep {
+		remap[oldIdx] = newIdx
+		out.Teams = append(out.Teams, cfg.Teams[oldIdx])
+	}
+	for _, gc := range cfg.Generators {
+		if gc.Team != nil {
+			newIdx, ok := remap[*gc.Team]
+			if !ok {
+				continue // belongs to a base that isn't in play
+			}
+			t := newIdx
+			gc.Team = &t
+		}
+		out.Generators = append(out.Generators, gc)
+	}
+	return out
 }
 
 // buildConfigArena assembles an Arena from an explicit config over a clone of
@@ -165,6 +263,7 @@ func buildConfigArena(tmpl *world.Template, cfg arenaConfig, teams []Team) (*Are
 			Resource:      res,
 			IntervalTicks: interval,
 			TeamID:        team,
+			MaxStack:      gc.MaxStack,
 		})
 	}
 

@@ -35,6 +35,22 @@ var (
 	// vouches for identity). Read once at startup — no concurrent
 	// mutation concern.
 	AuthEnabled = false
+
+	// MaxConns caps simultaneous TCP connections in ANY state — status
+	// pings, logins in flight, and play sessions all count. Distinct from
+	// MaxPlayers, which only limits logged-in players: this one bounds the
+	// raw goroutine/socket load a flood can create. Zero = unlimited.
+	MaxConns = 512
+
+	// MaxConnsPerIP caps simultaneous connections from one IP. High enough
+	// for a NAT'd LAN party, low enough that one host can't hold hundreds
+	// of sockets open. Zero = unlimited.
+	MaxConnsPerIP = 15
+
+	// ConnRatePerIP caps NEW connections per IP within a 10-second window
+	// (see server.connRateWindow), throttling rapid connect/disconnect
+	// cycling that the concurrent cap alone doesn't catch. Zero = unlimited.
+	ConnRatePerIP = 30
 )
 
 // --- Auth plugin tunables (used by EnableAuth) ---

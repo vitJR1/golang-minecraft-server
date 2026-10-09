@@ -31,6 +31,8 @@ func (NoopLogic) OnBlockPlace(*Ctx, PlayerHandle, world.Position, world.Block) b
 	return true
 }
 
+func (NoopLogic) OnBlockInteract(*Ctx, PlayerHandle, BlockInteraction) bool { return true }
+
 func (NoopLogic) OnChat(_ *Ctx, _ PlayerHandle, msg string) (string, bool) {
 	return msg, true
 }

@@ -173,9 +173,7 @@ func (c *ClientConnection) die(killer *ClientConnection) {
 		// Heal + teleport to spawn now; no death screen. The hook fires
 		// after, so a game can override the spawn (e.g. a random corner).
 		c.instantRespawn()
-		if hook := c.instance.OnPlayerDeath; hook != nil {
-			safeHook(c.instance, "OnPlayerDeath", func() { hook(c, killer) })
-		}
+		c.instance.fireDeath(c, killer)
 		return
 	}
 
@@ -189,9 +187,7 @@ func (c *ClientConnection) die(killer *ClientConnection) {
 	_ = c.sendSetHealth(0)
 	c.instance.BroadcastChat("", msg)
 
-	if hook := c.instance.OnPlayerDeath; hook != nil {
-		safeHook(c.instance, "OnPlayerDeath", func() { hook(c, killer) })
-	}
+	c.instance.fireDeath(c, killer)
 }
 
 // instantRespawn heals the player to full and teleports them to the instance

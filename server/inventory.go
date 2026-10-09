@@ -74,21 +74,26 @@ func (c *ClientConnection) onSetCreativeSlot(packet *bytes.Buffer) {
 }
 
 // giveItem adds count of itemID to the player's inventory. It first tops up
-// existing partial stacks of the same item, then fills empty slots, across
-// the main-inventory + hotbar range (window-0 slots 9..44). Each slot it
-// touches is pushed to the client with Set Container Slot. Items that don't
-// fit (inventory full) are dropped — there is no item-entity model yet.
+// existing partial stacks of the same item, then fills empty slots — hotbar
+// first (window-0 slots 36..44, left to right), then the main inventory
+// (9..35), like vanilla, so a picked-up sword lands in the player's hand
+// rather than behind the E key. Each slot it touches is pushed to the client
+// with Set Container Slot. Returns how many units did NOT fit (inventory
+// full) so a dropped-item pickup can leave the remainder on the ground.
 //
 // This is the only path that mutates a Survival player's inventory server-
 // side; creative edits flow the other way via onSetCreativeSlot.
-func (c *ClientConnection) giveItem(itemID int32, count int) {
+func (c *ClientConnection) giveItem(itemID int32, count int) int {
 	if count <= 0 {
-		return
+		return 0
 	}
 	remaining := count
 	// Pass 0 merges into existing stacks of itemID; pass 1 fills empties.
 	for pass := 0; pass < 2 && remaining > 0; pass++ {
-		for slot := int16(mainInvStart); slot < hotbarStart+9 && remaining > 0; slot++ {
+		for _, slot := range giveSlotOrder {
+			if remaining == 0 {
+				break
+			}
 			cur := c.inv.get(slot)
 			if pass == 0 {
 				if cur.empty() || cur.ID != itemID || int(cur.Count) >= maxStackSize {
@@ -107,7 +112,21 @@ func (c *ClientConnection) giveItem(itemID int32, count int) {
 			_ = c.sendSetSlot(0, slot, cur)
 		}
 	}
+	return remaining
 }
+
+// giveSlotOrder is the slot visiting order for giveItem: the 9 hotbar slots
+// first, then the 27 main-inventory slots.
+var giveSlotOrder = func() []int16 {
+	order := make([]int16, 0, 36)
+	for slot := int16(hotbarStart); slot < hotbarStart+9; slot++ {
+		order = append(order, slot)
+	}
+	for slot := int16(mainInvStart); slot < hotbarStart; slot++ {
+		order = append(order, slot)
+	}
+	return order
+}()
 
 // sendSetSlot writes a single inventory slot on the client (Set Container
 // Slot). windowID 0 is the player's own inventory; slot is a window-0 index.

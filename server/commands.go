@@ -25,11 +25,15 @@ type Command struct {
 	NeedsOp bool
 	Help    string
 	Run     func(c *ClientConnection, args []string)
+
+	// plugin is set when this Command wraps a game.Command registered by a
+	// plugin (see plugins.go); nil for built-ins.
+	plugin *game.Command
 }
 
-// commandRegistry is filled in init(); RunCommand looks up by name and
-// dispatches. A real plugin system would let games register their own
-// commands — for now the set is fixed and small.
+// commandRegistry holds the built-in commands, filled in init(). Plugins
+// contribute theirs through game.RegisterCommand; lookupCommand (plugins.go)
+// consults both, built-ins first.
 var commandRegistry = map[string]*Command{}
 
 func registerCommand(cmd *Command) {
@@ -150,7 +154,13 @@ func (s *Server) RunCommand(c *ClientConnection, raw string) {
 	name := strings.ToLower(parts[0])
 	args := parts[1:]
 
-	cmd, ok := commandRegistry[name]
+	cmd, ok := lookupCommand(name)
+	if !ok && strings.HasPrefix(name, "/") {
+		// "/name" is only a command in its own right for double-slash plugin
+		// commands; otherwise treat the slash as a client-included prefix.
+		name = strings.TrimPrefix(name, "/")
+		cmd, ok = lookupCommand(name)
+	}
 	if !ok {
 		_ = c.sendSystemMessage("Unknown command: /" + name)
 		return
@@ -793,14 +803,7 @@ func cmdUnmute(c *ClientConnection, args []string) {
 func cmdHelp(c *ClientConnection, args []string) {
 	_ = args
 	_ = c.sendSystemMessage("Available commands:")
-	// Dedup by canonical name (aliases share *Command pointers).
-	seen := map[*Command]bool{}
-	hasOp := c.server.Ops.Has(c.playerName)
-	for _, cmd := range commandRegistry {
-		if seen[cmd] || (!hasOp && cmd.NeedsOp) {
-			continue
-		}
-		seen[cmd] = true
+	for _, cmd := range commandsVisibleTo(c) {
 		_ = c.sendSystemMessage("  " + cmd.Help)
 	}
 }

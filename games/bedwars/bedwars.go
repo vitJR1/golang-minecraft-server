@@ -14,8 +14,8 @@
 //     everyone to the hub.
 //
 // Resource generators tick on a schedule and hand off to a ResourceGranter
-// (default inventoryGranter, which drops the resource item into recipients'
-// inventories via PlayerHandle.GiveItem). There is no shop yet — spending
+// (default dropGranter, which spawns the resource as a dropped-item entity
+// at the generator block for players to walk over). There is no shop yet — spending
 // those resources plugs in later without touching this file. See generator.go.
 package bedwars
 
@@ -88,12 +88,16 @@ type bedWars struct {
 	placed   map[world.Position]bool // blocks players put down (breakable)
 	engaged  bool                    // ≥2 teams have had a member (arm win-check)
 	over     bool
+
+	// holograms are the countdown labels over diamond/emerald generators
+	// (see hologram.go); spawned in OnInstanceStart, refreshed on tick.
+	holograms []genHologram
 }
 
 func newBedWars(arena *Arena, teams []Team, teamSize int) *bedWars {
 	g := &bedWars{
 		arena:    arena,
-		granter:  inventoryGranter{},
+		granter:  dropGranter{},
 		teamSize: teamSize,
 		teams:    make([]*teamState, len(teams)),
 		byEntity: make(map[int32]int),
@@ -106,8 +110,9 @@ func newBedWars(arena *Arena, teams []Team, teamSize int) *bedWars {
 }
 
 // WithGranter swaps the resource granter (Open/Closed seam for the economy).
-// The constructor defaults to inventoryGranter; override for tests or a
-// custom economy (e.g. noopGranter for a silent arena).
+// The constructor defaults to dropGranter (items appear at the forge);
+// override for tests or a custom economy (inventoryGranter auto-collects,
+// noopGranter is silent).
 func (g *bedWars) WithGranter(r ResourceGranter) *bedWars {
 	g.granter = r
 	return g
@@ -115,6 +120,7 @@ func (g *bedWars) WithGranter(r ResourceGranter) *bedWars {
 
 func (g *bedWars) OnInstanceStart(ctx *game.Ctx) {
 	ctx.Instance.BroadcastChat("", "BedWars! Protect your bed, break the others.")
+	g.spawnHolograms(ctx)
 }
 
 // OnPlayerJoin assigns the newcomer to the smallest team, drops them on
@@ -217,12 +223,14 @@ func (g *bedWars) OnBlockPlace(_ *game.Ctx, _ game.PlayerHandle, pos world.Posit
 	return true
 }
 
-// OnTick drives void-death detection and resource generators.
+// OnTick drives void-death detection, resource generators, and the
+// generator countdown holograms.
 func (g *bedWars) OnTick(ctx *game.Ctx, tick uint64) {
 	if tick%voidScanInterval == 0 {
 		g.checkVoid(ctx)
 	}
 	g.runGenerators(ctx, tick)
+	g.updateHolograms(ctx, tick)
 }
 
 // --- internals -------------------------------------------------------------

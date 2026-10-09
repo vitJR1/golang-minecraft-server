@@ -66,7 +66,7 @@ func (c *ClientConnection) placeBed(pos world.Position, bed world.Block) {
 	foot := world.Block{StateID: minState + facingIdx*4 + bedFootOffset, Name: bed.Name}
 	head := world.Block{StateID: minState + facingIdx*4 + bedHeadOffset, Name: bed.Name}
 
-	if hook := c.instance.OnBlockPlace; hook != nil && !hook(c, pos, foot) {
+	if !c.instance.allowBlockPlace(c, pos, foot) {
 		// Veto: roll both targeted positions back to what they were.
 		_ = c.sendBlockUpdate(pos, c.instance.World.GetBlock(pos))
 		_ = c.sendBlockUpdate(headPos, c.instance.World.GetBlock(headPos))

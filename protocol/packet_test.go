@@ -87,6 +87,38 @@ func TestReadPacketNegativeLength(t *testing.T) {
 	}
 }
 
+func TestReadPacketOversizedLength(t *testing.T) {
+	cli, srv := pipePair(t)
+
+	go func() {
+		// Claim a frame just past the limit; no body needed — the length
+		// check must fire before any allocation/read.
+		_, _ = srv.Write(WriteVarInt32(MaxPacketLength + 1))
+	}()
+
+	if _, err := ReadPacket(cli, CompressionDisabled); err == nil {
+		t.Fatal("expected error for oversized packet length")
+	}
+}
+
+func TestDecodeCompressedOversizedDataLength(t *testing.T) {
+	cli, srv := pipePair(t)
+	const threshold = 256
+
+	go func() {
+		// A tiny frame whose data-length VarInt claims a huge uncompressed
+		// size (zlib-bomb shape). Must be rejected before decompression.
+		body := WriteVarInt32(MaxUncompressedLength + 1)
+		body = append(body, 0x78, 0x9c) // zlib header bytes, never reached
+		frame := append(WriteVarInt32(int32(len(body))), body...)
+		_, _ = srv.Write(frame)
+	}()
+
+	if _, err := ReadPacket(cli, threshold); err == nil {
+		t.Fatal("expected error for oversized uncompressed data length")
+	}
+}
+
 func TestWritePacketLengthHeader(t *testing.T) {
 	// Manually decode the framing to confirm the length prefix matches body size.
 	cli, srv := pipePair(t)

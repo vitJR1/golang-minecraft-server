@@ -67,17 +67,8 @@ func (s *Server) Suggestions(c *ClientConnection, text string) (start, length in
 	case argIdx == 0:
 		// Command name slot. Same op-filter as commandsVisibleTo so
 		// non-ops don't see /ban /op /tp etc. in autocomplete.
-		isOp := s.Ops.Has(c.playerName)
-		seen := map[*Command]bool{}
-		for name, command := range commandRegistry {
-			if seen[command] {
-				continue
-			}
-			seen[command] = true
-			if command.NeedsOp && !isOp {
-				continue
-			}
-			candidates = append(candidates, name)
+		for _, command := range commandsVisibleTo(c) {
+			candidates = append(candidates, command.Name)
 		}
 	case takesPlayerName(cmd, argIdx):
 		candidates = s.PlayerNames()
@@ -137,6 +128,15 @@ func (s *Server) Suggestions(c *ClientConnection, text string) (start, length in
 		case 2:
 			// /play <game> <arena> → arenas of that kind.
 			candidates = s.ArenasOfKind(strings.ToLower(parts[1]))
+		}
+	default:
+		// Plugin commands supply their own completions (game.Command.Complete).
+		if command, ok := lookupCommand(cmd); ok && command.plugin != nil {
+			args := append([]string{}, parts[1:]...)
+			if trailingSpace {
+				args = append(args, "")
+			}
+			candidates = pluginComplete(c, command, args)
 		}
 	}
 

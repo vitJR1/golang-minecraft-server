@@ -49,6 +49,40 @@ type Generator struct {
 	Resource      Resource
 	IntervalTicks uint64
 	TeamID        int // -1 for neutral
+	// MaxStack caps how many units may lie uncollected at the spawn point;
+	// the generator idles while the pile is at the cap. 0 = the per-resource
+	// default (defaultGenMaxStack).
+	MaxStack int
+}
+
+// defaultGenMaxStack is the uncollected-pile cap per resource when the
+// config doesn't set one: cheap resources pile high, rare ones barely.
+func defaultGenMaxStack(r Resource) int {
+	switch r {
+	case Gold:
+		return 16
+	case Diamond:
+		return 8
+	case Emerald:
+		return 4
+	default:
+		return 48
+	}
+}
+
+// maxStack resolves the pile cap (config value or resource default).
+func (g Generator) maxStack() int {
+	if g.MaxStack > 0 {
+		return g.MaxStack
+	}
+	return defaultGenMaxStack(g.Resource)
+}
+
+// dropX/dropY/dropZ is where the generator's output appears: the centre of
+// its block position, at that block's floor level (the item then falls onto
+// whatever is underneath).
+func (g Generator) dropPoint() (x, y, z float64) {
+	return float64(g.Pos.X) + 0.5, float64(g.Pos.Y), float64(g.Pos.Z) + 0.5
 }
 
 // neutral marks a generator as map-shared rather than team-owned. Used by
@@ -60,10 +94,10 @@ const neutral = -1
 // interface, not on any concrete "give the player N iron" mechanism.
 //
 // Implementations decide what "granting" means:
-//   - noopGranter: nothing (default — keeps the round running cleanly while
-//     there is no inventory system to receive items).
-//   - a future inventoryGranter: push an item stack to nearby teammates
-//     once PlayerHandle exposes item-give.
+//   - dropGranter (default): spawn the resource as a dropped item at the
+//     generator block, so players collect it at the forge.
+//   - inventoryGranter: push the unit straight into recipients' inventories.
+//   - noopGranter: nothing (silent arena / tests).
 //
 // recipients is the set of players the grant should target (e.g. living
 // members of the owning team for a team forge, or everyone for a neutral
@@ -78,9 +112,33 @@ type noopGranter struct{}
 
 func (noopGranter) Grant(*game.Ctx, Generator, []game.PlayerHandle) {}
 
-// inventoryGranter is the live economy: each generator tick drops one unit of
-// its resource into every recipient's inventory via PlayerHandle.GiveItem.
-// This is the default granter wired into the BedWars Definition factories.
+// dropGranter is the live economy: each generator tick spawns one unit of its
+// resource as a dropped-item entity at the generator's block (the "forge"),
+// where players have to walk over it — vanilla BedWars. The pile at the forge
+// is capped by Generator.MaxStack so an unattended base doesn't flood. This
+// is the default granter wired into the BedWars Definition factories; the
+// recipients list is ignored (anyone standing at the forge collects).
+type dropGranter struct{}
+
+// dropCapRadius is how far around the drop point DroppedItemsNear looks when
+// deciding whether the forge pile is full.
+const dropCapRadius = 1.5
+
+func (dropGranter) Grant(ctx *game.Ctx, g Generator, _ []game.PlayerHandle) {
+	item, ok := resourceItem[g.Resource]
+	if !ok {
+		return
+	}
+	x, y, z := g.dropPoint()
+	if ctx.Instance.DroppedItemsNear(x, y, z, dropCapRadius, item) >= g.maxStack() {
+		return
+	}
+	ctx.Instance.DropItem(x, y, z, item, 1)
+}
+
+// inventoryGranter hands each generator tick straight into every recipient's
+// inventory via PlayerHandle.GiveItem — no walking to the forge. Kept as an
+// opt-in (WithGranter) for arenas that want the old "auto-collect" economy.
 type inventoryGranter struct{}
 
 func (inventoryGranter) Grant(_ *game.Ctx, g Generator, recipients []game.PlayerHandle) {

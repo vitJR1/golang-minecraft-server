@@ -95,6 +95,20 @@ type Server struct {
 	instances map[string]*Instance
 	templates map[string]*world.Template
 	arenas    map[string]string
+
+	// connLimit gates every accepted socket (per-IP caps + global cap)
+	// before any protocol work happens. See conn_limit.go.
+	connLimit *connLimiter
+
+	// janitorStop terminates the empty-instance sweep loop (janitor.go).
+	janitorStop     chan struct{}
+	janitorStopOnce sync.Once
+
+	// Ops counters surfaced on /stats (metrics.go). startTime anchors the
+	// uptime figure.
+	startTime      time.Time
+	connsRejected  atomic.Uint64
+	queueFullKicks atomic.Uint64
 }
 
 // nextInstanceSerial allocates a unique monotonic uint64 used by
@@ -113,6 +127,9 @@ func New() *Server {
 		templates:   make(map[string]*world.Template),
 		arenas:      make(map[string]string),
 		TemplateDir: templates.Root,
+		connLimit:   newConnLimiter(),
+		janitorStop: make(chan struct{}),
+		startTime:   time.Now(),
 	}
 	s.Hub = NewInstance("hub", s, world.NewMemoryWorld())
 	// The hub is a safe lobby — no PvP. Game instances keep the default
@@ -120,6 +137,8 @@ func New() *Server {
 	s.Hub.SetPvP(false)
 	s.instances[s.Hub.ID] = s.Hub
 	s.Matchmaker = NewMatchmaker(s)
+	s.startJanitor()
+	warnShadowedPluginCommands()
 	return s
 }
 
@@ -382,6 +401,19 @@ func (c *ClientConnection) sendSystemMessage(text string) error {
 // HandleConn drives a single client connection through its state machine.
 // Call in a goroutine per accepted net.Conn.
 func (s *Server) HandleConn(conn net.Conn) {
+	// Connection-flood gate: reject before allocating any per-connection
+	// state or goroutines. A rejected socket is closed silently — at this
+	// point we don't even know the protocol state to say goodbye in.
+	release, reason := s.connLimit.acquire(clientIP(conn.RemoteAddr()))
+	if release == nil {
+		s.connsRejected.Add(1)
+		slog.Warn("connection rejected",
+			"addr", conn.RemoteAddr().String(), "reason", reason)
+		_ = conn.Close()
+		return
+	}
+	defer release()
+
 	client := &ClientConnection{
 		server:               s,
 		conn:                 conn,
@@ -459,6 +491,12 @@ type ClientConnection struct {
 	// potentially from future cross-goroutine inspection — atomic so
 	// `-race` stays clean and the test harness doesn't need locks.
 	menu atomic.Pointer[openMenu]
+
+	// consumedDig remembers a block whose "start digging" click a plugin
+	// consumed (OnBlockInteract → false), so the survival client's matching
+	// "finished digging" is swallowed instead of breaking the block. Only
+	// touched from the readLoop goroutine.
+	consumedDig *world.Position
 
 	// authed gates the connection through the offline-mode auth plugin.
 	// True = player has run /register or /login successfully (or auth
@@ -722,6 +760,9 @@ func (c *ClientConnection) safeWrite(packetID int32, payload []byte) error {
 		return nil
 	default:
 		c.sendMu.Unlock()
+		if c.server != nil {
+			c.server.queueFullKicks.Add(1)
+		}
 		go c.cleanup() // queue full — kick
 		return fmt.Errorf("send queue full")
 	}

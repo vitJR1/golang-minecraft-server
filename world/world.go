@@ -8,6 +8,14 @@ type Position struct {
 	X, Y, Z int
 }
 
+// BlockChange is one (position, block) pair for bulk updates such as
+// Instance.SetBlocks: a region fill or a schematic paste is expressed as a
+// slice of these, applied and broadcast together.
+type BlockChange struct {
+	Pos   Position
+	Block Block
+}
+
 // World is the storage abstraction. Implementations decide whether blocks
 // live in memory, on disk, or are generated on demand.
 //

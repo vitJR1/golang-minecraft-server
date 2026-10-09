@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"log/slog"
+	"minecraft-server/game"
 	"minecraft-server/protocol"
 	"minecraft-server/world"
 	"strings"
@@ -48,23 +49,21 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			message = rewritten
 		}
 		slog.Info("chat", "player", c.playerName, "msg", message)
-		if hook := c.instance.OnChat; hook != nil {
-			rewrite, allow := hook(c, message)
-			if !allow {
-				break
-			}
-			message = rewrite
+		rewrite, allow := c.instance.filterChat(c, message)
+		if !allow {
+			break
 		}
-		c.instance.BroadcastChat(c.playerName, message)
+		c.instance.BroadcastChat(c.playerName, rewrite)
 
 	case SbPlayChatCommand:
 		raw, err := protocol.ReadStringFromBuf(packet)
 		if err != nil {
 			return fmt.Errorf("reading chat command: %w", err)
 		}
-		// Strip the leading slash if the client included it (it usually does
-		// not — the client sends just the name+args).
-		raw = strings.TrimPrefix(raw, "/")
+		// The vanilla client sends the text after the first slash, so a
+		// WorldEdit-style "//set stone" arrives as "/set stone" — the leading
+		// slash is part of the command name there. RunCommand falls back to
+		// the slash-less name for clients that include the slash themselves.
 		slog.Info("command", "player", c.playerName, "cmd", raw)
 		c.server.RunCommand(c, raw)
 
@@ -72,6 +71,13 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		x, y, z, onGround, err := readPosOnGround(packet)
 		if err != nil {
 			return fmt.Errorf("set player position: %w", err)
+		}
+		if !finite64(x, y, z) {
+			c.kickInvalidMove()
+			break
+		}
+		if !c.acceptMove(x, y, z) {
+			break
 		}
 		c.player.MoveTo(x, y, z, onGround)
 		c.broadcastEntityTeleport()
@@ -85,6 +91,13 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		if err != nil {
 			return fmt.Errorf("set player position+rotation: %w", err)
 		}
+		if !finite64(x, y, z) || !finite32(yaw, pitch) {
+			c.kickInvalidMove()
+			break
+		}
+		if !c.acceptMove(x, y, z) {
+			break
+		}
 		c.player.MoveAndLook(x, y, z, yaw, pitch, onGround)
 		c.broadcastEntityTeleport()
 		c.broadcastHeadRotation()
@@ -93,6 +106,10 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		yaw, pitch, onGround, err := readYawPitchOnGround(packet)
 		if err != nil {
 			return fmt.Errorf("set player rotation: %w", err)
+		}
+		if !finite32(yaw, pitch) {
+			c.kickInvalidMove()
+			break
 		}
 		c.player.LookAt(yaw, pitch, onGround)
 		c.broadcastEntityTeleport()
@@ -163,15 +180,24 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		// Acknowledge the client's prediction first so it doesn't roll back.
 		_ = c.sendAckBlockChange(int32(seq))
 
-		// Right-clicking a chest opens it instead of placing a block.
 		clickedPos := world.Position{X: bx, Y: by, Z: bz}
+		placePos := offsetByFace(clickedPos, face)
+		held := c.heldItemName()
+
+		// Plugins get first refusal on the click (selection wands, tools).
+		// A consumed click places nothing: roll back the client's predicted
+		// placement at the target block.
+		click := game.BlockInteraction{Pos: clickedPos, Face: int(face), Action: game.RightClick, Item: held}
+		if !c.instance.allowBlockInteract(c, click) {
+			_ = c.sendBlockUpdate(placePos, c.instance.World.GetBlock(placePos))
+			break
+		}
+
+		// Right-clicking a chest opens it instead of placing a block.
 		if isChestBlock(c.instance.World.GetBlock(clickedPos)) {
 			c.openBlockChest(clickedPos)
 			break
 		}
-
-		placePos := offsetByFace(world.Position{X: bx, Y: by, Z: bz}, face)
-		held := c.heldItemName()
 
 		// Item frames are entities, not blocks — placing one spawns an item
 		// frame on the clicked face (the UseItemOnBlock face enum 0..5 maps
@@ -203,13 +229,11 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		if !ok || block == world.Air {
 			break
 		}
-		if hook := c.instance.OnBlockPlace; hook != nil {
-			if !hook(c, placePos, block) {
-				// Veto: replay the existing block back to the client to
-				// roll back its placement prediction.
-				_ = c.sendBlockUpdate(placePos, c.instance.World.GetBlock(placePos))
-				break
-			}
+		if !c.instance.allowBlockPlace(c, placePos, block) {
+			// Veto: replay the existing block back to the client to
+			// roll back its placement prediction.
+			_ = c.sendBlockUpdate(placePos, c.instance.World.GetBlock(placePos))
+			break
 		}
 		c.instance.SetBlock(placePos, block)
 
@@ -223,7 +247,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		if err != nil {
 			return fmt.Errorf("player action: position: %w", err)
 		}
-		_, _ = packet.ReadByte() // face — we don't differentiate
+		face, _ := packet.ReadByte()
 		seq, err := protocol.ReadVarInt(packet)
 		if err != nil {
 			return fmt.Errorf("player action: sequence: %w", err)
@@ -233,15 +257,30 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		// action 1 = cancelled, 2 = finished digging (survival),
 		// 3 = drop item stack, 4 = drop item, 5 = shoot arrow / finish eating,
 		// 6 = swap held items. We treat 0/2 as "break this block".
-		if action == 0 || action == 2 {
-			pos := world.Position{X: bx, Y: by, Z: bz}
-			if hook := c.instance.OnBlockBreak; hook != nil {
-				if !hook(c, pos) {
-					_ = c.sendBlockUpdate(pos, c.instance.World.GetBlock(pos))
-					break
-				}
+		pos := world.Position{X: bx, Y: by, Z: bz}
+		switch action {
+		case 0:
+			// Start of a dig = a left click: plugins may consume it (wand).
+			// Remember the position so the survival client's matching
+			// "finished digging" for the same block is swallowed too.
+			click := game.BlockInteraction{Pos: pos, Face: int(face), Action: game.LeftClick, Item: c.heldItemName()}
+			if !c.instance.allowBlockInteract(c, click) {
+				c.consumedDig = &pos
+				_ = c.sendBlockUpdate(pos, c.instance.World.GetBlock(pos))
+				break
 			}
-			c.instance.SetBlock(pos, world.Air)
+			c.consumedDig = nil
+			c.breakBlock(pos)
+		case 1:
+			c.consumedDig = nil
+		case 2:
+			if c.consumedDig != nil && *c.consumedDig == pos {
+				c.consumedDig = nil
+				_ = c.sendBlockUpdate(pos, c.instance.World.GetBlock(pos))
+				break
+			}
+			c.consumedDig = nil
+			c.breakBlock(pos)
 		}
 
 	case SbPlayInteract:
@@ -261,11 +300,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 				// The game logic hook gets first refusal: returning false
 				// vetoes the hit (no damage), so a game can implement teams,
 				// spawn protection, spectators, etc. A nil hook = allow.
-				allow := true
-				if hook := c.instance.OnPlayerAttack; hook != nil {
-					allow = hook(c, victim)
-				}
-				if allow {
+				if c.instance.allowAttack(c, victim) {
 					c.handleAttack(victim)
 				}
 			}
@@ -457,4 +492,14 @@ func offsetByFace(p world.Position, face int) world.Position {
 		return world.Position{X: p.X + 1, Y: p.Y, Z: p.Z}
 	}
 	return p
+}
+
+// breakBlock runs the block-break veto chain (listeners, then the instance
+// hook) and either air-fills the block or rolls the client back.
+func (c *ClientConnection) breakBlock(pos world.Position) {
+	if !c.instance.allowBlockBreak(c, pos) {
+		_ = c.sendBlockUpdate(pos, c.instance.World.GetBlock(pos))
+		return
+	}
+	c.instance.SetBlock(pos, world.Air)
 }
