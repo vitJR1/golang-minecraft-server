@@ -213,6 +213,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 					Glowing: held == "minecraft:glow_item_frame",
 				},
 			})
+			c.consumeHeld()
 			break
 		}
 
@@ -241,6 +242,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			break
 		}
 		c.instance.SetBlock(placePos, block)
+		c.consumeHeld()
 
 	case SbPlayPlayerAction:
 		// action(VarInt) + Position(8) + face(Byte) + sequence(VarInt)

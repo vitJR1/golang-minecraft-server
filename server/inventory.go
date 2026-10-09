@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"minecraft-server/player"
 
 	"minecraft-server/protocol"
 	"minecraft-server/world"
@@ -265,6 +266,27 @@ func (c *ClientConnection) sendSetSlot(windowID byte, slot int16, st itemStack) 
 		buf.Write(protocol.WriteSlot(st.ID, st.Count))
 	}
 	return c.safeWrite(CbPlaySetContainerSlot, buf.Bytes())
+}
+
+// consumeHeld removes one unit from the held stack after a successful
+// placement (block, bed, item frame) and syncs the slot. Creative players
+// keep their stack, like vanilla. Without this a survival player could place
+// a block, break it, and come out one block richer each round.
+func (c *ClientConnection) consumeHeld() {
+	if c.gamemode() == player.Creative {
+		return
+	}
+	slot := int16(hotbarStart) + int16(c.heldSlot.Load())
+	st := c.inv.get(slot)
+	if st.empty() {
+		return
+	}
+	st.Count--
+	if st.Count == 0 {
+		st = itemStack{}
+	}
+	c.inv.set(slot, st)
+	_ = c.sendSetSlot(0, slot, st)
 }
 
 // heldItemName returns the namespaced id of the item in the selected hotbar

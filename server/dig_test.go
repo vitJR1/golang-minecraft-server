@@ -179,3 +179,53 @@ func TestCannotPlaceBlockIntoPlayer(t *testing.T) {
 		t.Error("hitbox should cover y 64..65.8 only")
 	}
 }
+
+// TestPlacingConsumesHeldBlockInSurvival: placing a block takes one from the
+// held stack in survival (so place+break doesn't mint blocks) and leaves
+// creative stacks alone.
+func TestPlacingConsumesHeldBlockInSurvival(t *testing.T) {
+	s := New()
+	cli := pipeClientOn(t, s)
+	completeOfflineLogin(t, cli, "Placer")
+	cli.startDiscardDrain()
+	c := findConn(t, s, "Placer")
+	c.player.SetGamemode(player.Survival)
+	c.player.MoveTo(0.5, 64, 0.5, true)
+	stoneID, _ := world.ItemByName("minecraft:stone")
+	c.inv.set(hotbarStart, itemStack{ID: stoneID, Count: 32})
+	c.heldSlot.Store(0)
+
+	place := func(clicked world.Position) {
+		var p bytes.Buffer
+		protocol.WriteVarInt32ToBuffer(&p, 0) // hand
+		p.Write(protocol.WritePosition(clicked.X, clicked.Y, clicked.Z))
+		protocol.WriteVarInt32ToBuffer(&p, 1) // top face
+		p.Write(protocol.WriteFloat(0.5))
+		p.Write(protocol.WriteFloat(0.5))
+		p.Write(protocol.WriteFloat(0.5))
+		p.WriteByte(0)
+		protocol.WriteVarInt32ToBuffer(&p, 1)
+		cli.write(t, SbPlayUseItemOnBlock, p.Bytes())
+	}
+
+	place(world.Position{X: 3, Y: 63, Z: 0})
+	waitFor(t, time.Second, func() bool { return s.Hub.World.GetBlock(world.Position{X: 3, Y: 64, Z: 0}) == world.Stone },
+		"block to be placed")
+	waitFor(t, time.Second, func() bool { return c.inv.held(0).Count == 31 }, "held stack to shrink to 31")
+
+	// A vetoed placement (into the player) must not consume anything.
+	place(world.Position{X: 0, Y: 63, Z: 0})
+	time.Sleep(100 * time.Millisecond)
+	if got := c.inv.held(0).Count; got != 31 {
+		t.Errorf("vetoed placement changed the stack: %d", got)
+	}
+
+	// Creative keeps the stack.
+	c.player.SetGamemode(player.Creative)
+	place(world.Position{X: 4, Y: 63, Z: 0})
+	waitFor(t, time.Second, func() bool { return s.Hub.World.GetBlock(world.Position{X: 4, Y: 64, Z: 0}) == world.Stone },
+		"creative block to be placed")
+	if got := c.inv.held(0).Count; got != 31 {
+		t.Errorf("creative placement consumed the stack: %d", got)
+	}
+}

@@ -76,6 +76,7 @@ func (c *ClientConnection) placeBed(pos world.Position, bed world.Block) {
 
 	c.instance.SetBlock(pos, foot)
 	c.instance.SetBlock(headPos, head)
+	c.consumeHeld()
 	// Beds are rendered by a BlockEntityRenderer; register the block entities
 	// so a player loading these chunks later still sees the bed.
 	if w, ok := c.instance.World.(*world.MemoryWorld); ok {
