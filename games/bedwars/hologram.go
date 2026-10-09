@@ -52,7 +52,7 @@ func (r Resource) title() string {
 // players by the server, so the game only has to update the text.
 func (g *bedWars) spawnHolograms(ctx *game.Ctx) {
 	var holos []genHologram
-	for _, gen := range g.arena.Generators {
+	for _, gen := range g.gens {
 		if !gen.Resource.timed() || gen.IntervalTicks == 0 {
 			continue
 		}

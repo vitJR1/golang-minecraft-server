@@ -74,10 +74,13 @@ type teamState struct {
 	forge      int
 	healPool   bool
 	traps      []trapKind // queued traps, first fires first (max 3)
+	// inside tracks which enemies were in the base on the last trap scan,
+	// so a trap fires on entry rather than every tick (traps.go).
+	inside map[int32]bool
 }
 
 func newTeamState(t Team) *teamState {
-	return &teamState{team: t, bedAlive: true, members: make(map[int32]bool)}
+	return &teamState{team: t, bedAlive: true, members: make(map[int32]bool), inside: make(map[int32]bool)}
 }
 
 // inPlay reports whether the team can still win: it has at least one active

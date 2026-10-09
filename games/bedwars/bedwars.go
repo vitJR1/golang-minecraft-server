@@ -84,6 +84,10 @@ type bedWars struct {
 	arena    *Arena
 	granter  ResourceGranter
 	teamSize int // max players per team (0 = unbounded)
+	// gens is this round's copy of the arena generators: Forge upgrades
+	// change team generator timing per round, and the Arena is shared by
+	// every round of the mode.
+	gens []Generator
 
 	mu       sync.Mutex
 	teams    []*teamState
@@ -106,6 +110,7 @@ func newBedWars(arena *Arena, teams []Team, teamSize int) *bedWars {
 		arena:    arena,
 		granter:  dropGranter{},
 		teamSize: teamSize,
+		gens:     append([]Generator(nil), arena.Generators...),
 		teams:    make([]*teamState, len(teams)),
 		byEntity: make(map[int32]int),
 		placed:   make(map[world.Position]bool),
@@ -334,6 +339,8 @@ func (g *bedWars) OnTick(ctx *game.Ctx, tick uint64) {
 	g.processRespawns(ctx, tick)
 	g.runGenerators(ctx, tick)
 	g.updateHolograms(ctx, tick)
+	g.healPoolTick(ctx, tick)
+	g.trapTick(ctx, tick)
 }
 
 // --- internals -------------------------------------------------------------
@@ -404,15 +411,79 @@ func (g *bedWars) checkVoid(ctx *game.Ctx) {
 	}
 }
 
-// runGenerators fires each generator on its interval, handing the recipient
-// set to the (pluggable) granter.
+// forgeMultiplier is the generator speed-up per Forge tier (interval is
+// divided by it); tier III adds emeralds instead of more speed.
+var forgeMultiplier = [...]float64{1, 1.5, 2, 2, 3}
+
+// forgeEmeraldInterval is how often (ticks) a tier-III / tier-IV forge
+// drops an emerald at the team's generator.
+var forgeEmeraldInterval = map[int]uint64{3: 1200, 4: 600}
+
+// effectiveInterval is a generator's interval after the owning team's
+// Forge tier (neutral generators are untouched). Caller holds g.mu.
+func (g *bedWars) effectiveIntervalLocked(gen Generator) uint64 {
+	if gen.IntervalTicks == 0 || gen.TeamID == neutral || gen.TeamID >= len(g.teams) {
+		return gen.IntervalTicks
+	}
+	tier := g.teams[gen.TeamID].forge
+	if tier <= 0 || tier >= len(forgeMultiplier) {
+		return gen.IntervalTicks
+	}
+	return max(1, uint64(float64(gen.IntervalTicks)/forgeMultiplier[tier]))
+}
+
+// runGenerators fires each generator on its (Forge-adjusted) interval,
+// handing the recipient set to the (pluggable) granter, and drops Forge
+// emeralds for teams at tier III+.
 func (g *bedWars) runGenerators(ctx *game.Ctx, tick uint64) {
-	for _, gen := range g.arena.Generators {
-		if gen.IntervalTicks == 0 || tick%gen.IntervalTicks != 0 {
+	g.mu.Lock()
+	var due []Generator
+	for _, gen := range g.gens {
+		interval := g.effectiveIntervalLocked(gen)
+		if interval == 0 || tick%interval != 0 {
 			continue
 		}
+		due = append(due, gen)
+	}
+	var emeraldAt []Generator
+	for _, ts := range g.teams {
+		every, ok := forgeEmeraldInterval[ts.forge]
+		if !ok || tick%every != 0 {
+			continue
+		}
+		if gen, found := g.teamGeneratorLocked(ts.team.ID); found {
+			emeraldAt = append(emeraldAt, Generator{Pos: gen.Pos, Resource: Emerald, TeamID: ts.team.ID, MaxStack: defaultGenMaxStack(Emerald)})
+		}
+	}
+	g.mu.Unlock()
+
+	for _, gen := range due {
 		g.granter.Grant(ctx, gen, g.recipientsFor(ctx, gen))
 	}
+	for _, gen := range emeraldAt {
+		g.granter.Grant(ctx, gen, g.recipientsFor(ctx, gen))
+	}
+}
+
+// teamGeneratorLocked returns a team's own generator (iron preferred).
+func (g *bedWars) teamGeneratorLocked(teamID int) (Generator, bool) {
+	var found *Generator
+	for i := range g.gens {
+		gen := &g.gens[i]
+		if gen.TeamID != teamID {
+			continue
+		}
+		if gen.Resource == Iron {
+			return *gen, true
+		}
+		if found == nil {
+			found = gen
+		}
+	}
+	if found != nil {
+		return *found, true
+	}
+	return Generator{}, false
 }
 
 // recipientsFor returns the players a generator's output should target:
