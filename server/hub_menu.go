@@ -61,9 +61,9 @@ type openMenu struct {
 	entries map[int16]menuEntry // slot → entry
 	onClick func(c *ClientConnection, e menuEntry)
 
-	// chestPos is the block position of the open chest when kind == "chest",
-	// so Click Container changes persist to the right chest.
-	chestPos world.Position
+	// chest is the open chest's storage when kind == "chest" (a block chest
+	// or the player's ender chest), so Click Container changes persist there.
+	chest chestStore
 
 	// rows is the window height, kept so a plugin menu can be re-sent
 	// after each click.

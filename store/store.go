@@ -26,9 +26,10 @@ func notFound(err error) error {
 type Store struct {
 	Pool *pgxpool.Pool
 
-	Players *PlayerRepo
-	Bans    *BanRepo
-	Mutes   *MuteRepo
+	Players     *PlayerRepo
+	Bans        *BanRepo
+	Mutes       *MuteRepo
+	EnderChests *EnderChestRepo
 
 	BedwarsMatches *BedwarsMatchRepo
 	BedwarsPlayers *BedwarsPlayerRepo
@@ -50,10 +51,11 @@ type Store struct {
 // their per-mode table (a trusted constant — never user input).
 func New(pool *pgxpool.Pool) *Store {
 	return &Store{
-		Pool:    pool,
-		Players: NewPlayerRepo(pool),
-		Bans:    NewBanRepo(pool),
-		Mutes:   NewMuteRepo(pool),
+		Pool:        pool,
+		Players:     NewPlayerRepo(pool),
+		Bans:        NewBanRepo(pool),
+		Mutes:       NewMuteRepo(pool),
+		EnderChests: NewEnderChestRepo(pool),
 
 		BedwarsMatches: NewBedwarsMatchRepo(pool),
 		BedwarsPlayers: NewBedwarsPlayerRepo(pool),

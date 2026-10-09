@@ -213,10 +213,12 @@ func connectStores(srv *server.Server) {
 	case storagePostgres:
 		connectPostgres(ctx, srv)
 		srv.Bans = store.NewBanStore(srv.Store.Players, srv.Store.Bans)
+		srv.EnderChests = srv.Store.EnderChests
 		importBanlist(ctx, srv.Bans)
 	case storageMemory:
 		slog.Warn("STORAGE=memory: accounts, passwords, match history and ratings are NOT persisted")
 		srv.Bans = memoryBanStore()
+		srv.EnderChests = fileEnderChestStore()
 	}
 
 	if envEnabled("REDIS_ENABLED", mode == storagePostgres) {
@@ -266,6 +268,28 @@ func memoryBanStore() ban.Store {
 		return ban.NewMemoryStore()
 	}
 	slog.Info("bans: file-backed", "path", path)
+	return fs
+}
+
+// defaultEnderChestPath is where ender chest contents go under
+// STORAGE=memory unless ENDERCHEST_FILE overrides it ("off" = RAM only).
+const defaultEnderChestPath = "enderchests.json"
+
+// fileEnderChestStore builds the STORAGE=memory ender chest backend. A
+// corrupt file is logged and falls back to RAM only rather than aborting.
+func fileEnderChestStore() server.EnderChestStore {
+	path := getEnv("ENDERCHEST_FILE", defaultEnderChestPath)
+	switch strings.ToLower(path) {
+	case "off", "none":
+		slog.Info("ender chests: in-memory only (ENDERCHEST_FILE=" + path + ")")
+		return nil
+	}
+	fs, err := server.NewFileEnderChestStore(path)
+	if err != nil {
+		slog.Warn("ender chests: failed to load file, using in-memory only", "path", path, "err", err)
+		return nil
+	}
+	slog.Info("ender chests: file-backed", "path", path)
 	return fs
 }
 

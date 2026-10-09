@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"testing"
 
+	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/world"
 )
@@ -89,7 +90,7 @@ func TestApplyChestClickPersists(t *testing.T) {
 
 	// Client reports: chest slot 0 now holds diamond(764) ×3; cursor empty.
 	put := changedSlots(t, map[int16]itemStack{0: {ID: 764, Count: 3}})
-	c.applyChestClick(put, pos)
+	c.applyChestClick(put, blockChest{inst, pos})
 
 	got := inst.chestAt(pos)
 	if got[0].ID != 764 || got[0].Count != 3 {
@@ -98,14 +99,14 @@ func TestApplyChestClickPersists(t *testing.T) {
 
 	// Now the client empties slot 0 (took the item out).
 	clear := changedSlots(t, map[int16]itemStack{0: {}})
-	c.applyChestClick(clear, pos)
+	c.applyChestClick(clear, blockChest{inst, pos})
 	if !inst.chestAt(pos)[0].empty() {
 		t.Errorf("slot 0 should be empty after removal: %+v", inst.chestAt(pos)[0])
 	}
 
 	// Player-inventory slots (>= 27) are ignored, not stored as chest slots.
 	inv := changedSlots(t, map[int16]itemStack{30: {ID: 1, Count: 1}})
-	c.applyChestClick(inv, pos)
+	c.applyChestClick(inv, blockChest{inst, pos})
 	for _, s := range inst.chestAt(pos) {
 		if !s.empty() {
 			t.Errorf("inventory-slot change leaked into chest: %+v", s)
@@ -129,4 +130,73 @@ func changedSlots(t *testing.T, slots map[int16]itemStack) *bytes.Buffer {
 	}
 	buf.Write(protocol.WriteEmptySlot()) // cursor
 	return &buf
+}
+
+// enderTestConn builds an offline connection (no network goroutines) for a
+// player with the given UUID, parked in inst.
+func enderTestConn(s *Server, inst *Instance, name string, uuid [16]byte) *ClientConnection {
+	return &ClientConnection{
+		server:   s,
+		instance: inst,
+		player:   player.New(1, name, uuid),
+		outbound: make(chan outboundMsg, 64),
+		done:     make(chan struct{}),
+	}
+}
+
+// TestEnderChestSharedPerPlayer: two ender chest blocks in two different
+// instances open the same per-player inventory, and another player sees
+// their own, separate one.
+func TestEnderChestSharedPerPlayer(t *testing.T) {
+	s := New()
+	other := NewInstance("arena", s, world.NewMemoryWorld())
+	t.Cleanup(other.Stop)
+	ender := world.Block{StateID: 1, Name: "minecraft:ender_chest"}
+	hubPos := world.Position{X: 1, Y: 64, Z: 1}
+	arenaPos := world.Position{X: 9, Y: 64, Z: 9}
+	s.Hub.World.SetBlock(hubPos, ender)
+	other.World.SetBlock(arenaPos, ender)
+
+	owner := [16]byte{1}
+	c := enderTestConn(s, s.Hub, "Owner", owner)
+
+	// Open the hub ender chest and put a diamond in slot 0.
+	c.openBlockChest(hubPos)
+	m := c.menu.Load()
+	if m == nil || m.kind != "chest" {
+		t.Fatalf("menu after opening ender chest: %+v", m)
+	}
+	if _, ok := m.chest.(*enderChest); !ok {
+		t.Fatalf("ender chest block should open an enderChest store, got %T", m.chest)
+	}
+	c.applyChestClick(changedSlots(t, map[int16]itemStack{0: {ID: 764, Count: 3}}), m.chest)
+
+	// The same player in another instance sees the same slots; the hub
+	// block's own position holds nothing as a regular chest.
+	c2 := enderTestConn(s, other, "Owner", owner)
+	c2.openBlockChest(arenaPos)
+	got := c2.menu.Load().chest.contents()
+	if got[0].ID != 764 || got[0].Count != 3 {
+		t.Fatalf("arena ender chest slot 0 = %+v, want diamond×3", got[0])
+	}
+	if !s.Hub.chestAt(hubPos)[0].empty() {
+		t.Error("ender contents leaked into the block-position chest store")
+	}
+
+	// Another player has their own empty ender chest.
+	stranger := enderTestConn(s, s.Hub, "Stranger", [16]byte{2})
+	stranger.openBlockChest(hubPos)
+	if st := stranger.menu.Load().chest.contents()[0]; !st.empty() {
+		t.Errorf("stranger sees owner's items: %+v", st)
+	}
+	if s.enderChestFor(owner) != m.chest {
+		t.Error("enderChestFor should return the same record for the same player")
+	}
+	// A regular chest still opens a block-bound store.
+	regular := world.Position{X: 3, Y: 64, Z: 3}
+	s.Hub.World.SetBlock(regular, world.Chest)
+	c.openBlockChest(regular)
+	if _, ok := c.menu.Load().chest.(blockChest); !ok {
+		t.Errorf("regular chest should open a blockChest, got %T", c.menu.Load().chest)
+	}
 }

@@ -2,8 +2,6 @@ package server
 
 import (
 	"math"
-
-	"minecraft-server/world"
 )
 
 // drop.go turns the two ways a player gets rid of an item into dropped-item
@@ -76,8 +74,8 @@ func (c *ClientConnection) dropCursor() {
 }
 
 // itemTotals sums the player's modelled items — inventory slots + cursor,
-// plus the open chest's slots when pos is non-nil — per item id.
-func (c *ClientConnection) itemTotals(chestPos *world.Position) map[int32]int {
+// plus the open chest's slots when chest is non-nil — per item id.
+func (c *ClientConnection) itemTotals(chest chestStore) map[int32]int {
 	totals := map[int32]int{}
 	for _, st := range c.inv.slots {
 		if !st.empty() {
@@ -87,8 +85,8 @@ func (c *ClientConnection) itemTotals(chestPos *world.Position) map[int32]int {
 	if !c.cursor.empty() {
 		totals[c.cursor.ID] += int(c.cursor.Count)
 	}
-	if chestPos != nil && c.instance != nil {
-		for _, st := range c.instance.chestAt(*chestPos) {
+	if chest != nil {
+		for _, st := range chest.contents() {
 			if !st.empty() {
 				totals[st.ID] += int(st.Count)
 			}

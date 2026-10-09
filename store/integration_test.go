@@ -29,7 +29,7 @@ func testStore(t *testing.T) (*Store, context.Context) {
 	// Fresh slate. CASCADE clears all dependent rows (bans, participation,
 	// events, ratings); matches are listed explicitly (not FK'd to players).
 	_, err = d.Pool.Exec(ctx,
-		`TRUNCATE players, bedwars_matches, skywars_matches, ffa_matches RESTART IDENTITY CASCADE`)
+		`TRUNCATE players, bedwars_matches, skywars_matches, ffa_matches, ender_chests RESTART IDENTITY CASCADE`)
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
 	}

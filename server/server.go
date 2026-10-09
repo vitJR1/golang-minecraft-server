@@ -79,6 +79,16 @@ type Server struct {
 	// (STORAGE=memory) — auth then falls back to an in-memory credential map.
 	Store *store.Store
 
+	// enderChests holds every player's ender chest inventory, keyed by player
+	// UUID, so the same 27 slots show up in any ender chest block in any
+	// instance. Guarded by enderMu. In-memory only for now.
+	enderMu     sync.Mutex
+	enderChests map[[16]byte]*enderChest
+	// EnderChests persists them: store.EnderChestRepo (Postgres),
+	// FileEnderChestStore (enderchests.json) or nil for RAM only. Set by main
+	// before players connect.
+	EnderChests EnderChestStore
+
 	// Bans is the player-ban backend the login handler and /ban //unban use.
 	// New() installs an in-memory store; main swaps in store.BanStore
 	// (Postgres) or ban.FileStore (banlist.json) depending on STORAGE.

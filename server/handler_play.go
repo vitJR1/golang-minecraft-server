@@ -456,9 +456,12 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			case m.kind == "chest":
 				// Persist the client's computed slot changes to the chest;
 				// anything that left chest+inventory+cursor was dropped.
-				before := c.itemTotals(&m.chestPos)
-				c.cursor = c.applyChestClick(packet, m.chestPos)
-				c.dropDeficit(before, c.itemTotals(&m.chestPos))
+				before := c.itemTotals(m.chest)
+				c.cursor = c.applyChestClick(packet, m.chest)
+				c.dropDeficit(before, c.itemTotals(m.chest))
+				if e, ok := m.chest.(*enderChest); ok && c.server != nil {
+					c.server.saveEnderChest(e)
+				}
 			case m.kind == menuKindPlugin:
 				// Plugin GUI (shops): dispatch, then re-send the whole window
 				// so the client's ghost pickup / local inventory moves are
