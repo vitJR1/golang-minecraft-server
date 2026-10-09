@@ -78,7 +78,7 @@ type generatorConfig struct {
 }
 
 type villagerConfig struct {
-	Type string `json:"type"` // "item" / "upgrade" — label only (display-only NPC for now)
+	Type string `json:"type"` // "item" (default) / "upgrade": which shop the NPC opens
 	vec3 `json:""`
 	Yaw  float32 `json:"yaw"`
 }
@@ -241,6 +241,7 @@ func buildConfigArena(tmpl *world.Template, cfg arenaConfig, teams []Team) (*Are
 		Spawns:    make([]world.SpawnPoint, len(teams)),
 		BedBlocks: make([][]world.Position, len(teams)),
 		bedOwner:  make(map[world.Position]int),
+		Villagers: make(map[world.Position]villagerSpot),
 	}
 
 	for i, tc := range cfg.Teams {
@@ -261,16 +262,28 @@ func buildConfigArena(tmpl *world.Template, cfg arenaConfig, teams []Team) (*Are
 		}
 		a.BedBlocks[i] = beds
 
-		// This team's shop NPCs (display-only for now). Stored as world
-		// entities so the entity streamer shows them like any other entity.
+		// This team's shop NPCs. Stored as world entities so the entity
+		// streamer shows them like any other entity, and indexed by block
+		// position so a click resolves to item shop vs team upgrades.
 		for _, vc := range tc.Villagers {
+			kind := vc.Type
+			if kind != villagerUpgrade {
+				kind = villagerItem
+			}
+			label := "§b§lITEM SHOP"
+			if kind == villagerUpgrade {
+				label = "§e§lTEAM UPGRADES"
+			}
 			work.AddEntity(world.Entity{
 				Type: "minecraft:villager",
+				Name: label,
 				X:    float64(vc.X) + 0.5,
 				Y:    float64(vc.Y),
 				Z:    float64(vc.Z) + 0.5,
 				Yaw:  vc.Yaw,
 			})
+			pos := world.Position{X: vc.X, Y: vc.Y, Z: vc.Z}
+			a.Villagers[pos] = villagerSpot{Pos: pos, Team: i, Kind: kind}
 		}
 	}
 

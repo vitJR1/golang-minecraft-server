@@ -22,6 +22,28 @@ type Arena struct {
 	BedBlocks  [][]world.Position     // BedBlocks[i] = team i's two bed blocks
 	Generators []Generator            // team forges + central forge
 	bedOwner   map[world.Position]int // bed block → team ID (O(1) lookup)
+	// Villagers are the shop NPCs placed by the arena config, keyed by
+	// block position so a click (entity x/y/z) resolves to a team + kind.
+	Villagers map[world.Position]villagerSpot
+}
+
+// Villager kinds (arena JSON teams[].villagers[].type).
+const (
+	villagerItem    = "item"
+	villagerUpgrade = "upgrade"
+)
+
+// villagerSpot is one shop NPC's team and kind.
+type villagerSpot struct {
+	Pos  world.Position
+	Team int
+	Kind string
+}
+
+// villagerAt resolves an entity position (block centre + 0.5) to its spot.
+func (a *Arena) villagerAt(x, y, z float64) (villagerSpot, bool) {
+	spot, ok := a.Villagers[world.Position{X: int(math.Floor(x)), Y: int(math.Floor(y)), Z: int(math.Floor(z))}]
+	return spot, ok
 }
 
 // buildArena lays out one island per team around a circle, so the same code

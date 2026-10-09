@@ -551,31 +551,14 @@ func TestBreakingEnemyBedKillsIt(t *testing.T) {
 	}
 }
 
-func TestKillRespawnsWhenBedAlive(t *testing.T) {
-	g, inst, ctx := harness(t)
-	red := join(g, inst, ctx, "red", 1)
-	blue := join(g, inst, ctx, "blue", 2)
-	// Move blue away, then red kills blue → respawn at blue's island.
-	blue.Teleport(999, 999, 999)
-	g.OnPlayerAttack(ctx, red, blue)
-	if blue.Pose().Gamemode == player.Spectator {
-		t.Error("victim with a live bed should respawn, not spectate")
-	}
-	spawn := g.arena.Spawns[1].Position
-	if int(blue.Pose().X) != spawn.X || int(blue.Pose().Z) != spawn.Z {
-		t.Errorf("respawn pos: got (%v,%v), want (%d,%d)",
-			blue.Pose().X, blue.Pose().Z, spawn.X, spawn.Z)
-	}
-}
-
 func TestKillEliminatesWhenBedDead_AndLastTeamWins(t *testing.T) {
 	g, inst, ctx := harness(t)
 	red := join(g, inst, ctx, "red", 1)
 	blue := join(g, inst, ctx, "blue", 2)
 
-	// Red breaks Blue's bed, then kills Blue → elimination → Red wins.
+	// Red breaks Blue's bed, then kills Blue → final kill → Red wins.
 	g.OnBlockBreak(ctx, red, g.arena.BedBlocks[1][0])
-	g.OnPlayerAttack(ctx, red, blue)
+	g.OnPlayerDeath(ctx, blue, red)
 
 	if blue.Pose().Gamemode != player.Spectator {
 		t.Error("victim with a dead bed should be eliminated to Spectator")
@@ -583,15 +566,19 @@ func TestKillEliminatesWhenBedDead_AndLastTeamWins(t *testing.T) {
 	g.mu.Lock()
 	stillIn := g.teams[1].inPlay()
 	over := g.over
+	_, pending := g.pending[blue.eid]
 	g.mu.Unlock()
 	if stillIn {
 		t.Error("blue team should be out after its last member is eliminated")
 	}
+	if pending {
+		t.Error("an eliminated player must not be scheduled to respawn")
+	}
 	if !over {
 		t.Error("round should be over with one team left")
 	}
-	if !inst.sawBroadcast("Red team wins") {
-		t.Error("expected Red win broadcast")
+	if !inst.sawBroadcast("FINAL KILL") || !inst.sawBroadcast("Red team wins") {
+		t.Errorf("expected final-kill + Red win broadcasts, got %v", inst.broadcasts)
 	}
 }
 
@@ -601,13 +588,19 @@ func TestVoidKill(t *testing.T) {
 	blue := join(g, inst, ctx, "blue", 2)
 	blue.Teleport(0, voidY-5, 0) // fall below the void line
 	g.checkVoid(ctx)
-	// Bed alive → respawn (not spectator), and a void message broadcast.
-	if blue.Pose().Gamemode == player.Spectator {
-		t.Error("void death with live bed should respawn")
+	// The game asks the server to kill; the death flow then runs via the hook.
+	if !blue.Pose().Dead {
+		t.Fatal("void should kill the player")
 	}
-	if !inst.sawBroadcast("fell into the void") {
-		t.Error("expected void-death broadcast")
+	g.OnPlayerDeath(ctx, blue, nil)
+	if blue.Pose().Gamemode != player.Spectator {
+		t.Error("dead player spectates until respawn")
 	}
+	if !inst.sawBroadcast("blue died") {
+		t.Errorf("expected death broadcast, got %v", inst.broadcasts)
+	}
+	// Already dead players aren't killed again.
+	g.checkVoid(ctx)
 }
 
 func TestModeArenaScalesWithTeamCount(t *testing.T) {
@@ -825,7 +818,7 @@ func TestDuelOneKillAfterBedBreakWins(t *testing.T) {
 	if !g.OnBlockBreak(ctx, red, g.arena.BedBlocks[blueTeam][0]) {
 		t.Fatal("red should be able to break blue's bed")
 	}
-	g.OnPlayerAttack(ctx, red, blue)
+	g.OnPlayerDeath(ctx, blue, red)
 	if blue.Pose().Gamemode != player.Spectator {
 		t.Error("blue should be eliminated once bedless")
 	}

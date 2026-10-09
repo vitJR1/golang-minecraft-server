@@ -1,22 +1,24 @@
 // Package bedwars is a 4-team BedWars mini-game.
 //
-// Rules implemented on today's engine:
-//   - Four teams (Red/Blue/Green/Yellow), each on its own island with a
-//     bed. Joining players are balanced across teams.
+// Rules (Hypixel-style):
+//   - Teams, each on its own island with a bed. Joining players are
+//     balanced across teams and equipped with their kit (kit.go): wooden
+//     sword, team-coloured leather armour, owned armour tier and tools.
 //   - Break an enemy team's bed (OnBlockBreak) and that team can no longer
 //     respawn. You cannot break your own bed, the map, or anything you
 //     didn't place — only player-placed blocks and beds are breakable.
-//   - A "kill" (the OnPlayerAttack hook — the server has no damage system,
-//     so one hit is a kill) or a fall into the void respawns the victim at
-//     their island if their bed is alive, or eliminates them (→ Spectator)
-//     if it isn't.
+//   - Real HP combat (weapon damage + armour). Death (OnPlayerDeath, with
+//     the server's custom-respawn mode) drops the victim's resources to the
+//     killer, downgrades tools, and either respawns them at their island
+//     after respawnDelayTicks (bed alive) or eliminates them (→ Spectator,
+//     "final kill"). Falling into the void kills too.
 //   - Last team with a living member wins; the instance then returns
 //     everyone to the hub.
 //
 // Resource generators tick on a schedule and hand off to a ResourceGranter
 // (default dropGranter, which spawns the resource as a dropped-item entity
-// at the generator block for players to walk over). There is no shop yet — spending
-// those resources plugs in later without touching this file. See generator.go.
+// at the generator block for players to walk over). Resources are spent at
+// the item shop (shop.go) and the team-upgrade shop (upgrades.go).
 package bedwars
 
 import (
@@ -89,6 +91,10 @@ type bedWars struct {
 	placed   map[world.Position]bool // blocks players put down (breakable)
 	engaged  bool                    // ≥2 teams have had a member (arm win-check)
 	over     bool
+	kits     map[int32]*kit           // entityID → persistent loadout
+	pending  map[int32]pendingRespawn // dead players waiting to respawn
+	tick     uint64                   // last OnTick value
+	ctx      *game.Ctx                // set in OnInstanceStart
 
 	// holograms are the countdown labels over diamond/emerald generators
 	// (see hologram.go); spawned in OnInstanceStart, refreshed on tick.
@@ -103,6 +109,8 @@ func newBedWars(arena *Arena, teams []Team, teamSize int) *bedWars {
 		teams:    make([]*teamState, len(teams)),
 		byEntity: make(map[int32]int),
 		placed:   make(map[world.Position]bool),
+		kits:     make(map[int32]*kit),
+		pending:  make(map[int32]pendingRespawn),
 	}
 	for i, t := range teams {
 		g.teams[i] = newTeamState(t)
@@ -120,6 +128,15 @@ func (g *bedWars) WithGranter(r ResourceGranter) *bedWars {
 }
 
 func (g *bedWars) OnInstanceStart(ctx *game.Ctx) {
+	g.mu.Lock()
+	g.ctx = ctx
+	g.mu.Unlock()
+	// Hypixel rules: real HP from weapons/armour, the game drives respawns,
+	// placed TNT lights itself.
+	ctx.Instance.SetPvP(true)
+	ctx.Instance.SetWeaponDamage(true)
+	ctx.Instance.SetCustomRespawn(true)
+	ctx.Instance.SetTNTAutoPrime(true)
 	ctx.Instance.BroadcastChat("", "BedWars! Protect your bed, break the others.")
 	g.spawnHolograms(ctx)
 }
@@ -136,10 +153,12 @@ func (g *bedWars) OnPlayerJoin(ctx *game.Ctx, p game.PlayerHandle) {
 	}
 	spawn := g.arena.Spawns[ts.team.ID]
 	teamName := ts.team.Name
+	k := g.kitOfLocked(p.EntityID())
 	g.mu.Unlock()
 
 	p.SetGamemode(player.Survival)
 	teleport(p, spawn)
+	g.equip(p, ts, k)
 	ctx.Instance.BroadcastChat("", fmt.Sprintf("%s joined the %s team.", p.Name(), teamName))
 }
 
@@ -148,6 +167,7 @@ func (g *bedWars) OnPlayerJoin(ctx *game.Ctx, p game.PlayerHandle) {
 func (g *bedWars) OnPlayerLeave(ctx *game.Ctx, p game.PlayerHandle) {
 	g.mu.Lock()
 	g.removeMemberLocked(p.EntityID())
+	delete(g.pending, p.EntityID())
 	winner, decided := g.winnerLocked()
 	g.mu.Unlock()
 
@@ -156,19 +176,84 @@ func (g *bedWars) OnPlayerLeave(ctx *game.Ctx, p game.PlayerHandle) {
 	}
 }
 
-// OnPlayerAttack treats one hit as a kill (the server has no HP system).
-// Friendly fire is ignored.
-func (g *bedWars) OnPlayerAttack(ctx *game.Ctx, attacker, target game.PlayerHandle) bool {
+// OnPlayerAttack vetoes friendly fire; enemy hits go to the server's HP
+// combat (weapon damage, armour), and a lethal one comes back as
+// OnPlayerDeath.
+func (g *bedWars) OnPlayerAttack(_ *game.Ctx, attacker, target game.PlayerHandle) bool {
 	g.mu.Lock()
 	at, aok := g.byEntity[attacker.EntityID()]
 	tt, tok := g.byEntity[target.EntityID()]
 	sameTeam := aok && tok && at == tt
 	g.mu.Unlock()
-	if sameTeam {
-		return true
+	return !sameTeam
+}
+
+// OnPlayerDeath applies the Hypixel death rules: the killer loots the
+// victim's resources, tools drop a tier, the inventory is wiped, and the
+// victim either waits respawnDelayTicks as a spectator (bed alive) or is
+// eliminated for good.
+func (g *bedWars) OnPlayerDeath(ctx *game.Ctx, victim, killer game.PlayerHandle) {
+	g.mu.Lock()
+	teamID, ok := g.byEntity[victim.EntityID()]
+	if !ok || g.over {
+		g.mu.Unlock()
+		return
 	}
-	g.kill(ctx, target, attacker.Name()+" killed "+target.Name())
-	return true
+	ts := g.teams[teamID]
+	bedAlive := ts.bedAlive
+	k := g.kitOfLocked(victim.EntityID())
+	k.onDeath()
+	killerTeam, killerKnown := -1, false
+	if killer != nil {
+		killerTeam, killerKnown = g.byEntity[killer.EntityID()]
+	}
+	enemyKiller := killerKnown && killerTeam != teamID
+	if bedAlive {
+		g.pending[victim.EntityID()] = pendingRespawn{p: victim, at: g.tick + respawnDelayTicks}
+	} else {
+		g.removeMemberLocked(victim.EntityID())
+	}
+	winner, decided := g.winnerLocked()
+	teamName := ts.team.Name
+	g.mu.Unlock()
+
+	// Loot: the killer picks up the victim's currencies.
+	loot := lootResources(victim)
+	if enemyKiller {
+		for _, r := range []Resource{Iron, Gold, Diamond, Emerald} {
+			if n := loot[r]; n > 0 {
+				killer.GiveItem(r.item(), n)
+				killer.SendMessage(fmt.Sprintf("%s+%d %s", r.colour(), n, r.String()))
+			}
+		}
+	}
+	victim.ClearInventory()
+	for _, e := range []string{"haste", "speed", "jump_boost", "invisibility", "regeneration"} {
+		victim.RemoveEffect(e)
+	}
+
+	msg := victim.Name() + " died."
+	if killer != nil {
+		msg = victim.Name() + " was killed by " + killer.Name() + "."
+	}
+	if !bedAlive {
+		msg += " §c§lFINAL KILL!"
+	}
+	ctx.Instance.BroadcastChat("", msg)
+
+	pose := victim.Pose()
+	victim.SetGamemode(player.Spectator)
+	if bedAlive {
+		victim.Teleport(pose.X, pose.Y+5, pose.Z)
+		victim.SendTitle("§cYOU DIED!", fmt.Sprintf("§eYou will respawn in §c%d §eseconds!", respawnDelayTicks/20), 0, 40, 10)
+	} else {
+		victim.Teleport(spectatorPos.X, spectatorPos.Y, spectatorPos.Z)
+		victim.SendTitle("§cYOU DIED!", "§7You will not respawn.", 0, 60, 20)
+		ctx.Instance.BroadcastChat("", fmt.Sprintf("%s was eliminated (%s team).", victim.Name(), teamName))
+	}
+	if decided {
+		g.finish(ctx, winner)
+	}
 }
 
 // OnBlockBreak enforces the build rules:
@@ -237,61 +322,84 @@ func (g *bedWars) RewritePlacedBlock(_ *game.Ctx, p game.PlayerHandle, _ world.P
 	return team.Bed
 }
 
-// OnTick drives void-death detection, resource generators, and the
-// generator countdown holograms.
+// OnTick drives void-death detection, pending respawns, resource
+// generators, and the generator countdown holograms.
 func (g *bedWars) OnTick(ctx *game.Ctx, tick uint64) {
+	g.mu.Lock()
+	g.tick = tick
+	g.mu.Unlock()
 	if tick%voidScanInterval == 0 {
 		g.checkVoid(ctx)
 	}
+	g.processRespawns(ctx, tick)
 	g.runGenerators(ctx, tick)
 	g.updateHolograms(ctx, tick)
 }
 
 // --- internals -------------------------------------------------------------
 
-// kill respawns the victim at their island if their bed is alive, otherwise
-// eliminates them. Announces reason. Re-checks the win condition.
-func (g *bedWars) kill(ctx *game.Ctx, victim game.PlayerHandle, reason string) {
+// pendingRespawn is a dead player waiting for their respawn tick.
+type pendingRespawn struct {
+	p  game.PlayerHandle
+	at uint64
+}
+
+// processRespawns counts down titles for the dead and brings them back at
+// their island with a fresh kit when their time is up.
+func (g *bedWars) processRespawns(ctx *game.Ctx, tick uint64) {
 	g.mu.Lock()
-	teamID, ok := g.byEntity[victim.EntityID()]
-	if !ok || g.over {
+	if len(g.pending) == 0 {
 		g.mu.Unlock()
 		return
 	}
-	ts := g.teams[teamID]
-	bedAlive := ts.bedAlive
-	spawn := g.arena.Spawns[teamID]
-	if !bedAlive {
-		g.removeMemberLocked(victim.EntityID())
+	type due struct {
+		p    game.PlayerHandle
+		ts   *teamState
+		k    *kit
+		spwn world.SpawnPoint
 	}
-	winner, decided := g.winnerLocked()
+	var ready []due
+	var waiting []pendingRespawn
+	for eid, pr := range g.pending {
+		if tick >= pr.at {
+			teamID, ok := g.byEntity[eid]
+			delete(g.pending, eid)
+			if !ok {
+				continue
+			}
+			ready = append(ready, due{p: pr.p, ts: g.teams[teamID], k: g.kitOfLocked(eid), spwn: g.arena.Spawns[teamID]})
+		} else if (pr.at-tick)%20 == 0 {
+			waiting = append(waiting, pr)
+		}
+	}
 	g.mu.Unlock()
 
-	ctx.Instance.BroadcastChat("", reason)
-	if bedAlive {
-		teleport(victim, spawn) // respawn
-	} else {
-		victim.SetGamemode(player.Spectator)
-		victim.Teleport(spectatorPos.X, spectatorPos.Y, spectatorPos.Z)
-		ctx.Instance.BroadcastChat("", victim.Name()+" was eliminated.")
+	for _, pr := range waiting {
+		secs := (pr.at - tick) / 20
+		pr.p.SendTitle("§cYOU DIED!", fmt.Sprintf("§eYou will respawn in §c%d §eseconds!", secs), 0, 25, 5)
 	}
-	if decided {
-		g.finish(ctx, winner)
+	for _, d := range ready {
+		d.p.Respawn(float64(d.spwn.Position.X)+0.5, float64(d.spwn.Position.Y), float64(d.spwn.Position.Z)+0.5)
+		d.p.SetGamemode(player.Survival)
+		g.equip(d.p, d.ts, d.k)
+		d.p.SendTitle("§aRESPAWNED!", "", 0, 20, 10)
 	}
+	_ = ctx
 }
 
-// checkVoid kills any active (non-spectator) player who has fallen below
-// voidY. Runs off the tick loop since the engine has no void detection.
+// checkVoid kills any living, active player who has fallen below voidY. The
+// death itself comes back through OnPlayerDeath.
 func (g *bedWars) checkVoid(ctx *game.Ctx) {
 	for _, p := range ctx.Instance.Players() {
-		if p.Pose().Gamemode == player.Spectator {
+		pose := p.Pose()
+		if pose.Gamemode == player.Spectator || pose.Dead {
 			continue
 		}
 		g.mu.Lock()
 		_, tracked := g.byEntity[p.EntityID()]
 		g.mu.Unlock()
-		if tracked && p.Pose().Y < voidY {
-			g.kill(ctx, p, p.Name()+" fell into the void.")
+		if tracked && pose.Y < voidY {
+			p.Kill()
 		}
 	}
 }

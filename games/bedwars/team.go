@@ -14,6 +14,8 @@ type Team struct {
 	// Wool clads the island; Bed is the respawn anchor to defend.
 	Wool world.Block
 	Bed  world.Block
+	// Color is the team's leather-armour dye (0xRRGGBB, vanilla dye RGB).
+	Color int32
 }
 
 // colorPalette is the ordered pool of team colours. A mode with N teams
@@ -21,18 +23,19 @@ type Team struct {
 // Green/Yellow, and so on up to the palette length. Append here to support
 // more simultaneous teams.
 var colorPalette = []struct {
-	name string
-	wool world.Block
-	bed  world.Block
+	name  string
+	wool  world.Block
+	bed   world.Block
+	color int32
 }{
-	{"Red", world.RedWool, world.RedBed},
-	{"Blue", world.BlueWool, world.BlueBed},
-	{"Green", world.GreenWool, world.GreenBed},
-	{"Yellow", world.YellowWool, world.YellowBed},
-	{"Cyan", world.CyanWool, world.CyanBed},
-	{"White", world.WhiteWool, world.WhiteBed},
-	{"Pink", world.PinkWool, world.PinkBed},
-	{"Gray", world.GrayWool, world.GrayBed},
+	{"Red", world.RedWool, world.RedBed, 0xB02E26},
+	{"Blue", world.BlueWool, world.BlueBed, 0x3C44AA},
+	{"Green", world.GreenWool, world.GreenBed, 0x5E7C16},
+	{"Yellow", world.YellowWool, world.YellowBed, 0xFED83D},
+	{"Cyan", world.CyanWool, world.CyanBed, 0x169C9C},
+	{"White", world.WhiteWool, world.WhiteBed, 0xF9FFFE},
+	{"Pink", world.PinkWool, world.PinkBed, 0xF38BAA},
+	{"Gray", world.GrayWool, world.GrayBed, 0x474F52},
 }
 
 // MaxTeams is the largest team count any mode can request (bounded by the
@@ -49,7 +52,7 @@ func buildTeams(n int) []Team {
 	teams := make([]Team, n)
 	for i := range n {
 		c := colorPalette[i]
-		teams[i] = Team{ID: i, Name: c.name, Wool: c.wool, Bed: c.bed}
+		teams[i] = Team{ID: i, Name: c.name, Wool: c.wool, Bed: c.bed, Color: c.color}
 	}
 	return teams
 }
@@ -61,6 +64,16 @@ type teamState struct {
 	team     Team
 	bedAlive bool
 	members  map[int32]bool // active players' entity IDs
+
+	// Team upgrades (upgrades.go). sharpened: Sharpness I on every sword;
+	// protection: Protection level on every armour piece; haste: Maniac
+	// Miner level; forge: Forge tier 0..4; healPool: Regeneration at base.
+	sharpened  bool
+	protection int
+	haste      int
+	forge      int
+	healPool   bool
+	traps      []trapKind // queued traps, first fires first (max 3)
 }
 
 func newTeamState(t Team) *teamState {

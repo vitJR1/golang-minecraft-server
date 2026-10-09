@@ -31,6 +31,10 @@ const (
 	// endDelay is how long the win banner stays up before the instance is
 	// torn down and everyone is sent back to the hub.
 	endDelay = 5 * time.Second
+
+	// respawnDelayTicks is how long a dead player (bed alive) spectates
+	// before respawning at their island (Hypixel: 5 seconds).
+	respawnDelayTicks = 100
 )
 
 // spectatorPos is where eliminated players are parked (high above center,
