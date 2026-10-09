@@ -336,10 +336,15 @@ func (i *fakeInstance) SetBlocks(changes []world.BlockChange) {
 	}
 	i.mu.Unlock()
 }
+
+// GetBlock mirrors MemoryWorld: an unset position is air, not the zero Block.
 func (i *fakeInstance) GetBlock(p world.Position) world.Block {
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	return i.blocks[p]
+	if b, ok := i.blocks[p]; ok {
+		return b
+	}
+	return world.Air
 }
 func (i *fakeInstance) BroadcastChat(_, msg string) {
 	i.mu.Lock()
