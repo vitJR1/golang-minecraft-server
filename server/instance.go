@@ -262,6 +262,7 @@ func NewInstance(id string, srv *Server, w world.World) *Instance {
 	i.OnTick(i.projectileTick)
 	i.OnTick(i.fluidTick)
 	i.OnTick(i.burnTick)
+	i.OnTick(i.effectsTick)
 	i.OnTick(i.itemTick)
 	i.OnTick(i.tntTick)
 	i.initListeners()

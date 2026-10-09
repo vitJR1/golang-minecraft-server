@@ -44,6 +44,7 @@ func (c *ClientConnection) resyncView() error {
 	_ = c.sendSetHealth(s.Health)
 	_ = c.sendCombatAttributes()
 	_ = c.sendInventoryContents()
+	c.resendEffects() // Respawn made the client forget them
 	// 4. Re-spawn the instance's world entities (item frames, villagers).
 	_ = c.sendWorldEntities()
 	// 5. Rebuild the tab list + the other players' entities for this client.

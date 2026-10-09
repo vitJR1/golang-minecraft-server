@@ -193,6 +193,7 @@ func (i *Instance) filterChat(c *ClientConnection, msg string) (string, bool) {
 // fireDeath runs listeners' OnPlayerDeath then the instance hook. killer may
 // be nil (environmental death).
 func (i *Instance) fireDeath(victim, killer *ClientConnection) {
+	victim.clearEffects() // vanilla: death ends every potion effect
 	ctx := i.pluginCtx()
 	v := playerBridge{conn: victim}
 	var k game.PlayerHandle

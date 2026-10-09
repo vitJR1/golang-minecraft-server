@@ -3,9 +3,11 @@ package server
 import (
 	"bytes"
 	"math/rand"
+	"sort"
 	"sync"
 	"time"
 
+	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/world"
 )
@@ -53,15 +55,48 @@ type Effect struct {
 }
 
 var (
+	EffectSpeed         = Effect{"speed", 1}
+	EffectSlowness      = Effect{"slowness", 2}
 	EffectHaste         = Effect{"haste", 3}
 	EffectMiningFatigue = Effect{"mining_fatigue", 4}
+	EffectJumpBoost     = Effect{"jump_boost", 8}
+	EffectRegeneration  = Effect{"regeneration", 10}
+	EffectInvisibility  = Effect{"invisibility", 14}
+	EffectBlindness     = Effect{"blindness", 15}
 
-	// knownEffects is what /effect accepts.
+	// knownEffects is what /effect and games can grant. Speed / slowness /
+	// jump boost / blindness are applied by the client itself once it has
+	// the Entity Effect packet; haste / mining fatigue feed the dig formula,
+	// regeneration heals on effectsTick, invisibility flips the entity flag.
 	knownEffects = map[string]Effect{
+		EffectSpeed.Name:         EffectSpeed,
+		EffectSlowness.Name:      EffectSlowness,
 		EffectHaste.Name:         EffectHaste,
 		EffectMiningFatigue.Name: EffectMiningFatigue,
+		EffectJumpBoost.Name:     EffectJumpBoost,
+		EffectRegeneration.Name:  EffectRegeneration,
+		EffectInvisibility.Name:  EffectInvisibility,
+		EffectBlindness.Name:     EffectBlindness,
 	}
 )
+
+// effectNames lists the known effect names, sorted — for /effect help and
+// tab-completion.
+func effectNames() []string {
+	names := make([]string, 0, len(knownEffects))
+	for n := range knownEffects {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// ActiveEffect is one effect currently on a player, as games see it.
+type ActiveEffect struct {
+	Effect    Effect
+	Level     int // amplifier+1
+	Remaining time.Duration
+}
 
 // Effects answers "what amplifier+1 of effect does this player have now"
 // (0 = none, 1 = level I, …).
@@ -111,6 +146,49 @@ func (t *effectTable) apply(c *ClientConnection, effect Effect, level int, d tim
 	if c.player != nil {
 		_ = c.safeWrite(CbPlayEntityEffect, entityEffectPayload(c.player.EntityID, effect, level, d))
 	}
+	if effect == EffectInvisibility {
+		c.broadcastEntityFlags()
+	}
+}
+
+// active returns the player's unexpired effects, sorted by name.
+func (t *effectTable) active(c *ClientConnection) []ActiveEffect {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	now := time.Now()
+	out := make([]ActiveEffect, 0, len(t.players[c]))
+	for name, ae := range t.players[c] {
+		if !now.Before(ae.expires) {
+			continue
+		}
+		out = append(out, ActiveEffect{Effect: knownEffects[name], Level: ae.level, Remaining: ae.expires.Sub(now)})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Effect.Name < out[j].Effect.Name })
+	return out
+}
+
+// sweep drops every expired effect, telling each client (and, for
+// invisibility, everyone) — the lazy expiry in Level isn't enough for
+// effects whose end must be visible.
+func (t *effectTable) sweep() {
+	now := time.Now()
+	t.mu.Lock()
+	expired := map[*ClientConnection][]Effect{}
+	for c, effects := range t.players {
+		for name, ae := range effects {
+			if !now.Before(ae.expires) {
+				delete(effects, name)
+				expired[c] = append(expired[c], knownEffects[name])
+			}
+		}
+		if len(effects) == 0 {
+			delete(t.players, c)
+		}
+	}
+	t.mu.Unlock()
+	for c, list := range expired {
+		c.sendEffectsRemoved(list)
+	}
 }
 
 // remove clears one effect (or all, when effect is nil) and tells the client.
@@ -127,15 +205,137 @@ func (t *effectTable) remove(c *ClientConnection, effect *Effect) {
 		cleared = append(cleared, *effect)
 	}
 	t.mu.Unlock()
+	c.sendEffectsRemoved(cleared)
+}
+
+// sendEffectsRemoved tells the client these effects ended and refreshes the
+// entity flags if invisibility was among them.
+func (c *ClientConnection) sendEffectsRemoved(list []Effect) {
 	if c.player == nil {
 		return
 	}
-	for _, e := range cleared {
+	invisible := false
+	for _, e := range list {
 		var buf bytes.Buffer
 		protocol.WriteVarInt32ToBuffer(&buf, c.player.EntityID)
 		protocol.WriteVarInt32ToBuffer(&buf, e.ID)
 		_ = c.safeWrite(CbPlayRemoveEntityEffect, buf.Bytes())
+		if e == EffectInvisibility {
+			invisible = true
+		}
 	}
+	if invisible {
+		c.broadcastEntityFlags()
+	}
+}
+
+// --- per-connection effect API (games bridge these) -------------------------
+
+// applyEffect grants e at level (1 = I) for d. No-op without a server.
+func (c *ClientConnection) applyEffect(e Effect, level int, d time.Duration) {
+	if c.server == nil || c.server.effects == nil || level < 1 {
+		return
+	}
+	c.server.effects.apply(c, e, level, d)
+}
+
+// removeEffect ends e now (no-op when absent).
+func (c *ClientConnection) removeEffect(e Effect) {
+	if c.server == nil || c.server.effects == nil {
+		return
+	}
+	c.server.effects.remove(c, &e)
+}
+
+// clearEffects ends every effect (death, game end).
+func (c *ClientConnection) clearEffects() {
+	if c.server == nil || c.server.effects == nil {
+		return
+	}
+	c.server.effects.remove(c, nil)
+}
+
+// activeEffects lists the player's current effects.
+func (c *ClientConnection) activeEffects() []ActiveEffect {
+	if c.server == nil || c.server.effects == nil {
+		return nil
+	}
+	return c.server.effects.active(c)
+}
+
+// effectLevel is the player's level of e (0 = none).
+func (c *ClientConnection) effectLevel(e Effect) int {
+	if c.server == nil || c.server.Effects == nil {
+		return 0
+	}
+	return c.server.Effects.Level(c, e)
+}
+
+// resendEffects re-sends every active effect to the client — Respawn makes
+// the client forget them, so resyncView calls this.
+func (c *ClientConnection) resendEffects() {
+	if c.player == nil {
+		return
+	}
+	for _, ae := range c.activeEffects() {
+		_ = c.safeWrite(CbPlayEntityEffect, entityEffectPayload(c.player.EntityID, ae.Effect, ae.Level, ae.Remaining))
+	}
+}
+
+// effectsTick runs every tick on the instance: expires effects whose end
+// must be visible, and heals players with Regeneration (level I: 1 HP every
+// 50 ticks, each further level halves the interval, like vanilla).
+func (i *Instance) effectsTick(tick uint64) {
+	if i.Server == nil || i.Server.effects == nil {
+		return
+	}
+	if tick%20 == 0 {
+		i.Server.effects.sweep()
+	}
+	for _, c := range i.Players.snapshot() {
+		p := c.player
+		if p == nil || p.IsDead() {
+			continue
+		}
+		lvl := c.effectLevel(EffectRegeneration)
+		if lvl <= 0 {
+			continue
+		}
+		interval := uint64(50) >> uint(min(lvl-1, 5))
+		if interval < 1 {
+			interval = 1
+		}
+		if tick%interval != 0 {
+			continue
+		}
+		if h := p.Health(); h < player.MaxHealth {
+			p.SetHealth(min(h+1, player.MaxHealth))
+			_ = c.sendSetHealth(p.Health())
+		}
+	}
+}
+
+// entityFlags is the player's metadata index-0 bitmask: on fire (0x01)
+// and invisible (0x20).
+func (c *ClientConnection) entityFlags() byte {
+	var flags byte
+	if c.fireTicks.Load() > 0 {
+		flags |= 0x01
+	}
+	if c.effectLevel(EffectInvisibility) > 0 {
+		flags |= 0x20
+	}
+	return flags
+}
+
+// broadcastEntityFlags sends the player's current entity flags to everyone
+// in the instance, the player's own client included (it renders the
+// first-person fire overlay from them).
+func (c *ClientConnection) broadcastEntityFlags() {
+	if c.player == nil || c.instance == nil {
+		return
+	}
+	c.instance.Players.Broadcast(CbPlaySetEntityMetadata, entityFlagsPayload(c.player.EntityID, c.entityFlags()), -1)
 }
 
 // forget drops a disconnected player's effects.

@@ -285,19 +285,9 @@ func (c *ClientConnection) extinguish() {
 	}
 }
 
-// broadcastOnFire flips the "on fire" entity flag (metadata index 0, bit
-// 0x01) for everyone in the instance, including the player's own client,
-// which renders the first-person flame overlay from it.
-func (c *ClientConnection) broadcastOnFire(on bool) {
-	if c.player == nil || c.instance == nil {
-		return
-	}
-	var flags byte
-	if on {
-		flags |= 0x01
-	}
-	c.instance.Players.Broadcast(CbPlaySetEntityMetadata, entityFlagsPayload(c.player.EntityID, flags), -1)
-}
+// broadcastOnFire refreshes the entity flags (fire bit 0x01 together with
+// the other flag bits, see entityFlags) for everyone in the instance.
+func (c *ClientConnection) broadcastOnFire(bool) { c.broadcastEntityFlags() }
 
 // entityFlagsPayload builds Set Entity Metadata with just the index-0 byte
 // (on fire / sneaking / sprinting / … bitmask).

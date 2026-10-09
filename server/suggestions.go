@@ -77,7 +77,7 @@ func (s *Server) Suggestions(c *ClientConnection, text string) (start, length in
 		case 1:
 			candidates = s.PlayerNames()
 		case 2:
-			candidates = []string{"haste", "mining_fatigue", "clear"}
+			candidates = append(effectNames(), "clear")
 		}
 	case cmd == "template" || cmd == "templates":
 		if argIdx == 1 {

@@ -67,7 +67,7 @@ func init() {
 	registerCommand(&Command{
 		Name:    "effect",
 		NeedsOp: true,
-		Help:    "/effect <player> <haste|mining_fatigue> [level] [seconds] | /effect <player> clear",
+		Help:    "/effect <player> <effect> [level] [seconds] | /effect <player> clear (speed, slowness, haste, mining_fatigue, jump_boost, regeneration, invisibility, blindness)",
 		Run:     cmdEffect,
 	})
 	registerCommand(&Command{
@@ -840,7 +840,7 @@ func (c *ClientConnection) sendGameModeChange(mode player.Gamemode) error {
 //	/effect <player> clear
 func cmdEffect(c *ClientConnection, args []string) {
 	if len(args) < 2 {
-		_ = c.sendSystemMessage("Usage: /effect <player> <haste|mining_fatigue> [level] [seconds] | /effect <player> clear")
+		_ = c.sendSystemMessage("Usage: /effect <player> <" + strings.Join(effectNames(), "|") + "> [level] [seconds] | /effect <player> clear")
 		return
 	}
 	target, _, ok := c.server.FindPlayer(args[0])
@@ -855,7 +855,7 @@ func cmdEffect(c *ClientConnection, args []string) {
 	}
 	effect, ok := knownEffects[strings.ToLower(args[1])]
 	if !ok {
-		_ = c.sendSystemMessage("Unknown effect: " + args[1] + " (haste, mining_fatigue)")
+		_ = c.sendSystemMessage("Unknown effect: " + args[1] + " (" + strings.Join(effectNames(), ", ") + ")")
 		return
 	}
 	level, seconds := 1, 30
