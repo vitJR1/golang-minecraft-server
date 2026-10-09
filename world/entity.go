@@ -12,6 +12,10 @@ type Entity struct {
 	X, Y, Z    float64
 	Yaw, Pitch float32
 
+	// Name, when set, is shown over the entity as an always-visible custom
+	// name (§ colour codes work): shop NPC labels like "§bITEM SHOP".
+	Name string
+
 	// Frame is non-nil for item_frame / glow_item_frame entities.
 	Frame *FrameData
 }

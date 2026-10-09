@@ -181,3 +181,41 @@ func TestFrameInteractInsertAndRotate(t *testing.T) {
 	// Unknown eid is a no-op (no panic).
 	inst.FrameInteract(999999, "minecraft:diamond")
 }
+
+func TestNamedEntityMetadataCarriesCustomName(t *testing.T) {
+	ie := instanceEntity{eid: 7, e: world.Entity{Type: "minecraft:villager", X: 1, Y: 65, Z: 1, Name: "§bITEM SHOP"}}
+	meta := frameMetadataPayload(ie)
+	if meta == nil {
+		t.Fatal("a named entity must get metadata")
+	}
+	buf := bytes.NewBuffer(meta)
+	eid, _ := protocol.ReadVarInt(buf)
+	if eid != 7 {
+		t.Fatalf("eid %d", eid)
+	}
+	if idx, _ := buf.ReadByte(); idx != metaCustomName {
+		t.Fatalf("first index %d, want custom name (2)", idx)
+	}
+	if typ, _ := protocol.ReadVarInt(buf); typ != metaTypeOptChat {
+		t.Fatalf("type %d, want OptChat", typ)
+	}
+	present, _ := buf.ReadByte()
+	name, _ := protocol.ReadStringFromBuf(buf)
+	if present != 1 || name != `{"text":"§bITEM SHOP"}` {
+		t.Errorf("name %q present=%d", name, present)
+	}
+	if idx, _ := buf.ReadByte(); idx != metaCustomNameVisible {
+		t.Errorf("second index %d, want custom-name-visible (3)", idx)
+	}
+	_, _ = protocol.ReadVarInt(buf)
+	if vis, _ := buf.ReadByte(); vis != 1 {
+		t.Error("name must be visible")
+	}
+	if end, _ := buf.ReadByte(); end != 0xFF {
+		t.Error("metadata must end with 0xFF")
+	}
+	// Unnamed, frameless entities still send nothing.
+	if frameMetadataPayload(instanceEntity{eid: 8, e: world.Entity{Type: "minecraft:villager"}}) != nil {
+		t.Error("plain villager needs no metadata")
+	}
+}

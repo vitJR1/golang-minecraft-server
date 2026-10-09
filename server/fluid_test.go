@@ -163,19 +163,19 @@ func TestFluidsCannotBeBroken(t *testing.T) {
 	}
 }
 
-func TestLavaHurtsPlayers(t *testing.T) {
-	s := New()
-	inst := NewInstance("arena", s, world.NewMemoryWorld())
-	inst.Stop()
+// lavaArena is an offline PvP instance with a lava block at the origin.
+func lavaArena(t *testing.T) (*Instance, *ClientConnection) {
+	t.Helper()
+	inst := bareInstance(New(), world.NewMemoryWorld())
+	inst.Combat = DefaultCombatConfig()
+	inst.combatEnabled.Store(true)
 	inst.World.SetBlock(world.Position{X: 0, Y: 64, Z: 0}, world.Lava)
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Swimmer")
-	cli.startDiscardDrain()
-	c := findConn(t, s, "Swimmer")
-	c.player.SetGamemode(player.Survival)
-	if err := s.MovePlayer(c, inst, 0.5, 64, 0.5); err != nil {
-		t.Fatal(err)
-	}
+	c := tntConn(inst, "Swimmer", player.Survival, 0.5, 64, 0.5)
+	return inst, c
+}
+
+func TestLavaHurtsPlayers(t *testing.T) {
+	inst, c := lavaArena(t)
 	start := c.player.Health()
 	inst.lavaTick(10)
 	if h := c.player.Health(); h != start-lavaDamage {
@@ -203,19 +203,8 @@ func TestLavaHurtsPlayers(t *testing.T) {
 }
 
 func TestLavaSetsPlayerOnFireUntilWater(t *testing.T) {
-	s := New()
-	inst := NewInstance("arena", s, world.NewMemoryWorld())
-	inst.Stop()
-	inst.World.SetBlock(world.Position{X: 0, Y: 64, Z: 0}, world.Lava)
-	inst.World.SetBlock(world.Position{X: 9, Y: 64, Z: 0}, world.Water)
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Burner")
-	cli.startDiscardDrain()
-	c := findConn(t, s, "Burner")
-	c.player.SetGamemode(player.Survival)
-	if err := s.MovePlayer(c, inst, 0.5, 64, 0.5); err != nil {
-		t.Fatal(err)
-	}
+	inst, c := lavaArena(t)
+	inst.World.SetBlock(world.Position{X: 9, Y: 64, Z: 9}, world.Water)
 	inst.burnTick(10) // in lava: damage + catch fire
 	if c.fireTicks.Load() != fireFromLavaTicks {
 		t.Fatalf("fire ticks after lava: %d, want %d", c.fireTicks.Load(), fireFromLavaTicks)
@@ -238,7 +227,6 @@ func TestLavaSetsPlayerOnFireUntilWater(t *testing.T) {
 
 	// Water puts it out at once.
 	c.player.MoveTo(9.5, 64, 9.5, true)
-	inst.World.SetBlock(world.Position{X: 9, Y: 64, Z: 9}, world.Water)
 	inst.burnTick(61)
 	if c.fireTicks.Load() != 0 {
 		t.Error("water should extinguish the fire")

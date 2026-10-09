@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"minecraft-server/protocol"
 	"minecraft-server/world"
 )
@@ -204,21 +205,34 @@ func spawnEntityPayload(ie instanceEntity) []byte {
 // caller can skip the packet.
 func frameMetadataPayload(ie instanceEntity) []byte {
 	f := ie.e.Frame
-	if f == nil {
-		return nil
-	}
 	itemID, haveItem := int32(0), false
-	if f.Item != "" {
+	if f != nil && f.Item != "" {
 		if id, ok := world.ItemByName(f.Item); ok {
 			itemID, haveItem = id, true
 		}
 	}
-	if !haveItem && f.Rotation == 0 {
+	if ie.e.Name == "" && (f == nil || (!haveItem && f.Rotation == 0)) {
 		return nil // nothing non-default to send
 	}
 
 	var buf bytes.Buffer
 	protocol.WriteVarInt32ToBuffer(&buf, ie.eid)
+	if ie.e.Name != "" {
+		// Custom name (index 2, OptChat) shown always (index 3, Boolean) —
+		// the label over a shop villager.
+		name, _ := json.Marshal(map[string]string{"text": ie.e.Name})
+		buf.WriteByte(metaCustomName)
+		protocol.WriteVarInt32ToBuffer(&buf, metaTypeOptChat)
+		buf.WriteByte(1)
+		buf.Write(protocol.WriteString(string(name)))
+		buf.WriteByte(metaCustomNameVisible)
+		protocol.WriteVarInt32ToBuffer(&buf, metaTypeBoolean)
+		buf.WriteByte(1)
+	}
+	if f == nil {
+		buf.WriteByte(0xFF)
+		return buf.Bytes()
+	}
 	if haveItem {
 		// Index 8: Item (metadata type 7 = Slot).
 		buf.WriteByte(8)
