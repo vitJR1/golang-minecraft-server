@@ -111,16 +111,20 @@ func TestInvisibilityFlagAndExpirySweep(t *testing.T) {
 }
 
 func TestResendEffectsAndDeathClearsThem(t *testing.T) {
-	inst := bareInstance(New(), world.NewMemoryWorld())
-	c := tntConn(inst, "Resync", player.Survival, 0, 64, 0)
-	c.applyEffect(EffectSpeed, 1, time.Minute)
-	lastPacket(t, c, CbPlayEntityEffect) // drain
-	c.resendEffects()
-	if lastPacket(t, c, CbPlayEntityEffect) == nil {
+	_, a, v := duel(t)
+	v.applyEffect(EffectSpeed, 1, time.Minute)
+	lastPacket(t, v, CbPlayEntityEffect) // drain
+	v.resendEffects()
+	if lastPacket(t, v, CbPlayEntityEffect) == nil {
 		t.Error("resendEffects should re-send active effects")
 	}
-	inst.fireDeath(c, nil)
-	if len(c.activeEffects()) != 0 {
+	// A lethal hit runs die(), which ends every effect.
+	v.player.SetHealth(1)
+	a.handleAttack(v)
+	if !v.player.IsDead() {
+		t.Fatal("victim should have died")
+	}
+	if len(v.activeEffects()) != 0 {
 		t.Error("death should clear effects")
 	}
 }

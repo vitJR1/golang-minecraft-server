@@ -256,6 +256,13 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		}
 		c.instance.SetBlock(placePos, block)
 		c.consumeHeld()
+		switch {
+		case block == world.TNT && c.instance.TNTAutoPrime():
+			// Games can make TNT light itself the moment it's placed.
+			c.instance.primeTNT(placePos, tntAutoFuse, c)
+		case block == world.Sponge:
+			c.instance.absorbWater(placePos)
+		}
 
 	case SbPlayPlayerAction:
 		// action(VarInt) + Position(8) + face(Byte) + sequence(VarInt)
@@ -279,7 +286,10 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		// 6 = swap held items. We treat 0/2 as "break this block".
 		pos := world.Position{X: bx, Y: by, Z: bz}
 		switch action {
+		case 5: // release use item: stopped eating / drinking, or loosed a bow
+			c.releaseUse()
 		case 0:
+			c.cancelUse()
 			// Start of a dig = a left click: plugins may consume it (wand).
 			// Remember the position so the survival client's matching
 			// "finished digging" for the same block is swallowed too.
@@ -413,14 +423,28 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			if name == "" {
 				break
 			}
-			// Buckets: the client sends a plain Use Item for them, with no
-			// target — the server ray-casts for the fluid / placement spot.
-			if c.useBucket(name) {
+			// Games/plugins get first refusal on the click (bridge egg, …).
+			if !c.instance.allowItemUse(c, game.ItemUse{Item: name, Name: held.Name, Slot: int(c.heldSlot.Load())}) {
 				break
 			}
-			// Throwable items (egg / snowball / ender pearl) in any slot.
-			if _, ok := throwableEntityID(name); ok {
-				c.throwProjectile(name)
+			switch {
+			case isConsumable(name):
+				// Eating/drinking takes time: the consume tick finishes it.
+				c.startUse(name)
+			case name == "minecraft:bow":
+				c.startDraw()
+			case name == "minecraft:fire_charge":
+				c.throwFireball()
+				c.consumeHeld()
+			case c.useBucket(name):
+				// Buckets: the client sends a plain Use Item for them, with
+				// no target — the server ray-casts for the fluid / spot.
+			default:
+				// Throwable items (egg / snowball / ender pearl) in any slot.
+				if _, ok := throwableEntityID(name); ok {
+					c.throwProjectile(name)
+					c.consumeHeld()
+				}
 			}
 		}
 
@@ -433,6 +457,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		}
 		slot := int16(raw) // signed cast preserves bits; vanilla sends 0..8
 		c.heldSlot.Store(int32(slot))
+		c.cancelUse()
 		c.equipmentChanged()
 
 	case SbPlaySetCreativeSlot:

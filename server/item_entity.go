@@ -38,8 +38,7 @@ const (
 type itemEntity struct {
 	eid      int32
 	uuid     [16]byte
-	itemID   int32
-	count    int
+	stack    itemStack // item + count + NBT (a dropped enchanted sword keeps its enchantments)
 	x, y, z  float64
 	vx, vy   float64
 	vz       float64
@@ -59,7 +58,7 @@ func (i *Instance) DropItem(x, y, z float64, itemName string, count int) bool {
 	if !ok {
 		return false
 	}
-	return i.spawnItem(itemID, count, x, y, z, 0, itemPopVelocity, 0, itemPickupDelay, true)
+	return i.spawnStack(itemStack{ID: itemID, Count: byte(min(count, maxStackSize))}, x, y, z, 0, itemPopVelocity, 0, itemPickupDelay, true)
 }
 
 // ThrowItem spawns count of itemID flying from (x, y, z) with the given
@@ -68,27 +67,34 @@ func (i *Instance) DropItem(x, y, z float64, itemName string, count int) bool {
 // collected for itemThrowDelay ticks, so the thrower doesn't vacuum it
 // straight back up.
 func (i *Instance) ThrowItem(itemID int32, count int, x, y, z, vx, vy, vz float64) bool {
-	return i.spawnItem(itemID, count, x, y, z, vx, vy, vz, itemThrowDelay, false)
+	return i.ThrowStack(itemStack{ID: itemID, Count: byte(min(count, maxStackSize))}, x, y, z, vx, vy, vz)
 }
 
-func (i *Instance) spawnItem(itemID int32, count int, x, y, z, vx, vy, vz float64, pickupAt int, merge bool) bool {
+// ThrowStack is ThrowItem for a full stack (name, enchantments, …).
+func (i *Instance) ThrowStack(st itemStack, x, y, z, vx, vy, vz float64) bool {
+	return i.spawnStack(st, x, y, z, vx, vy, vz, itemThrowDelay, false)
+}
+
+func (i *Instance) spawnStack(st itemStack, x, y, z, vx, vy, vz float64, pickupAt int, merge bool) bool {
+	count := int(st.Count)
 	if count <= 0 || i.Server == nil {
 		return false
 	}
-	if _, ok := world.ItemName(itemID); !ok {
+	if _, ok := world.ItemName(st.ID); !ok {
 		return false
 	}
+	limit := maxStackFor(st.ID)
 
 	i.itemsMu.Lock()
 	// Merge into a nearby stack of the same item first (airborne or not — the
 	// distance check already bounds how far apart they can be).
 	if merge {
 		for _, it := range i.items {
-			if it.itemID != itemID || it.count+count > maxStackSize {
+			if !it.stack.sameKind(st) || int(it.stack.Count)+count > limit {
 				continue
 			}
 			if distXZ(it.x, it.z, x, z) <= itemMergeRadius && math.Abs(it.y-y) <= itemMergeRadius {
-				it.count += count
+				it.stack.Count += byte(count)
 				it.ticks = 0 // a topped-up stack is "fresh" again for despawn purposes
 				meta := itemMetadataPayload(it)
 				i.itemsMu.Unlock()
@@ -99,8 +105,7 @@ func (i *Instance) spawnItem(itemID int32, count int, x, y, z, vx, vy, vz float6
 	}
 	it := &itemEntity{
 		eid:      i.Server.nextEntityID.Add(1),
-		itemID:   itemID,
-		count:    count,
+		stack:    st,
 		x:        x,
 		y:        y,
 		z:        z,
@@ -131,8 +136,8 @@ func (i *Instance) DroppedItemsNear(x, y, z, radius float64, itemName string) in
 	defer i.itemsMu.Unlock()
 	total := 0
 	for _, it := range i.items {
-		if it.itemID == itemID && distXZ(it.x, it.z, x, z) <= radius && math.Abs(it.y-y) <= radius {
-			total += it.count
+		if it.stack.ID == itemID && distXZ(it.x, it.z, x, z) <= radius && math.Abs(it.y-y) <= radius {
+			total += int(it.stack.Count)
 		}
 	}
 	return total
@@ -195,10 +200,10 @@ func (i *Instance) itemTick(uint64) {
 		}
 		if it.ticks >= it.pickupAt {
 			if c := i.collectorFor(it, players); c != nil {
-				remaining := c.giveItem(it.itemID, it.count)
-				if taken := it.count - remaining; taken > 0 {
+				remaining := c.giveStack(it.stack)
+				if taken := int(it.stack.Count) - remaining; taken > 0 {
 					pickups = append(pickups, pickup{it: it, collector: c, taken: taken, remaining: remaining})
-					it.count = remaining
+					it.stack.Count = byte(remaining)
 					if remaining == 0 {
 						continue // fully collected — entity goes away
 					}
@@ -338,7 +343,7 @@ func itemMetadataPayload(it *itemEntity) []byte {
 	protocol.WriteVarInt32ToBuffer(&buf, it.eid)
 	buf.WriteByte(8)                        // index: Item
 	protocol.WriteVarInt32ToBuffer(&buf, 7) // type: Slot
-	buf.Write(protocol.WriteSlot(it.itemID, byte(it.count)))
+	writeStack(&buf, it.stack)
 	buf.WriteByte(0xFF) // end of metadata
 	return buf.Bytes()
 }

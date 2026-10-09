@@ -129,6 +129,13 @@ type Instance struct {
 	// /instance set and game logic can toggle them while players fight.
 	combatEnabled  atomic.Bool
 	instantRespawn atomic.Bool
+	// customRespawn: death leaves the player dead for the game to respawn
+	// (game.Instance.SetCustomRespawn). weaponDamage: melee damage from the
+	// held weapon + armour instead of the flat CombatConfig value.
+	// tntAutoPrime: a placed TNT block ignites at once.
+	customRespawn atomic.Bool
+	weaponDamage  atomic.Bool
+	tntAutoPrime  atomic.Bool
 
 	// SpawnPoint is where players respawn after death (and the world spawn
 	// for this instance). Defaults to the origin column.
@@ -231,6 +238,14 @@ type Instance struct {
 	// consume (the core's item-frame default doesn't run).
 	OnEntityInteract func(c *ClientConnection, ei game.EntityInteraction) bool
 
+	// OnItemUse fires for a right-click in the air with the held item before
+	// the core's item behaviours. false = consume.
+	OnItemUse func(c *ClientConnection, use game.ItemUse) bool
+
+	// OnItemConsume fires when eating/drinking finishes. true = the game
+	// handled the effect; the core then only consumes the item.
+	OnItemConsume func(c *ClientConnection, st itemStack) bool
+
 	// OnStop fires once when the instance is being torn down (via
 	// Server.RemoveInstance or Instance.Stop). Use for game cleanup;
 	// the tick loop is still running when this fires.
@@ -263,6 +278,7 @@ func NewInstance(id string, srv *Server, w world.World) *Instance {
 	i.OnTick(i.fluidTick)
 	i.OnTick(i.burnTick)
 	i.OnTick(i.effectsTick)
+	i.OnTick(i.consumeTick)
 	i.OnTick(i.itemTick)
 	i.OnTick(i.tntTick)
 	i.initListeners()
@@ -279,6 +295,15 @@ func (i *Instance) SetPvP(enabled bool) { i.combatEnabled.Store(enabled) }
 // spot, false = vanilla death screen. SetInstantRespawn toggles it.
 func (i *Instance) InstantRespawn() bool           { return i.instantRespawn.Load() }
 func (i *Instance) SetInstantRespawn(enabled bool) { i.instantRespawn.Store(enabled) }
+
+// CustomRespawn / WeaponDamage / TNTAutoPrime are the game-tunable rule
+// switches (see game.Instance). All default to off.
+func (i *Instance) CustomRespawn() bool           { return i.customRespawn.Load() }
+func (i *Instance) SetCustomRespawn(enabled bool) { i.customRespawn.Store(enabled) }
+func (i *Instance) WeaponDamage() bool            { return i.weaponDamage.Load() }
+func (i *Instance) SetWeaponDamage(enabled bool)  { i.weaponDamage.Store(enabled) }
+func (i *Instance) TNTAutoPrime() bool            { return i.tntAutoPrime.Load() }
+func (i *Instance) SetTNTAutoPrime(enabled bool)  { i.tntAutoPrime.Store(enabled) }
 
 // OnTick registers a callback fired once per tick (20 Hz). Concurrent-safe.
 // There is no Unsubscribe yet — destroy the whole instance via Stop when

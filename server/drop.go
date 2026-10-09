@@ -37,7 +37,8 @@ func (c *ClientConnection) dropHeld(all bool) {
 	if all {
 		n = int(st.Count)
 	}
-	itemID := st.ID
+	thrown := st
+	thrown.Count = byte(n)
 	st.Count -= byte(n)
 	if st.Count == 0 {
 		st = itemStack{}
@@ -45,13 +46,23 @@ func (c *ClientConnection) dropHeld(all bool) {
 	c.inv.set(slot, st)
 	_ = c.sendSetSlot(0, slot, st)
 	c.equipmentChanged()
-	c.throwItem(itemID, n)
+	c.throwStack(thrown)
 }
 
-// throwItem spawns count units of itemID flying from the player's eyes in
-// the direction they look (vanilla drop velocity).
+// throwItem spawns count plain units of itemID flying from the player's
+// eyes (used when only the item id is known, e.g. the window-drop deficit).
 func (c *ClientConnection) throwItem(itemID int32, count int) {
-	if count <= 0 || c.instance == nil || c.player == nil {
+	for count > 0 {
+		n := min(count, maxStackSize)
+		c.throwStack(itemStack{ID: itemID, Count: byte(n)})
+		count -= n
+	}
+}
+
+// throwStack spawns the stack flying from the player's eyes in the direction
+// they look (vanilla drop velocity), keeping its NBT.
+func (c *ClientConnection) throwStack(st itemStack) {
+	if st.empty() || c.instance == nil || c.player == nil {
 		return
 	}
 	s := c.player.Snapshot()
@@ -60,7 +71,7 @@ func (c *ClientConnection) throwItem(itemID int32, count int) {
 	vx := -math.Sin(yaw) * math.Cos(pitch) * dropSpeed
 	vz := math.Cos(yaw) * math.Cos(pitch) * dropSpeed
 	vy := -math.Sin(pitch)*dropSpeed + dropLift
-	c.instance.ThrowItem(itemID, count, s.X, s.Y+eyeHeight-0.3, s.Z, vx, vy, vz)
+	c.instance.ThrowStack(st, s.X, s.Y+eyeHeight-0.3, s.Z, vx, vy, vz)
 }
 
 // dropCursor throws whatever the client is carrying on its cursor (window
@@ -71,7 +82,7 @@ func (c *ClientConnection) dropCursor() {
 	}
 	st := c.cursor
 	c.cursor = itemStack{}
-	c.throwItem(st.ID, int(st.Count))
+	c.throwStack(st)
 }
 
 // itemTotals sums the player's modelled items — inventory slots + cursor,

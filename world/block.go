@@ -131,40 +131,56 @@ var (
 	// facing/half/type/connection state from the schematic — not just the
 	// default. Purely decorative blocks without a states.go entry still
 	// render in their default state.
-	Water                           = Block{StateID: 80, Name: "minecraft:water"}
-	Lava                            = Block{StateID: 96, Name: "minecraft:lava"}
-	CherryLog                       = Block{StateID: 146, Name: "minecraft:cherry_log"}
-	DarkOakLog                      = Block{StateID: 149, Name: "minecraft:dark_oak_log"}
-	MangroveRoots                   = Block{StateID: 155, Name: "minecraft:mangrove_roots"}
-	StrippedBambooBlock             = Block{StateID: 187, Name: "minecraft:stripped_bamboo_block"}
-	StrippedSpruceWood              = Block{StateID: 217, Name: "minecraft:stripped_spruce_wood"}
-	OakLeaves                       = Block{StateID: 264, Name: "minecraft:oak_leaves"}
-	SpruceLeaves                    = Block{StateID: 292, Name: "minecraft:spruce_leaves"}
-	CherryLeaves                    = Block{StateID: 404, Name: "minecraft:cherry_leaves"}
-	Chest                           = Block{StateID: 2955, Name: "minecraft:chest"}
-	RedstoneWire                    = Block{StateID: 4138, Name: "minecraft:redstone_wire"}
-	StonePressurePlate              = Block{StateID: 5651, Name: "minecraft:stone_pressure_plate"}
-	RedstoneWallTorch               = Block{StateID: 5740, Name: "minecraft:redstone_wall_torch"}
-	PolishedBasalt                  = Block{StateID: 5857, Name: "minecraft:polished_basalt"}
-	Glowstone                       = Block{StateID: 5864, Name: "minecraft:glowstone"}
-	LightBlueStainedGlass           = Block{StateID: 5949, Name: "minecraft:light_blue_stained_glass"}
+	Water                      = Block{StateID: 80, Name: "minecraft:water"}
+	Lava                       = Block{StateID: 96, Name: "minecraft:lava"}
+	CherryLog                  = Block{StateID: 146, Name: "minecraft:cherry_log"}
+	DarkOakLog                 = Block{StateID: 149, Name: "minecraft:dark_oak_log"}
+	MangroveRoots              = Block{StateID: 155, Name: "minecraft:mangrove_roots"}
+	StrippedBambooBlock        = Block{StateID: 187, Name: "minecraft:stripped_bamboo_block"}
+	StrippedSpruceWood         = Block{StateID: 217, Name: "minecraft:stripped_spruce_wood"}
+	OakLeaves                  = Block{StateID: 264, Name: "minecraft:oak_leaves"}
+	SpruceLeaves               = Block{StateID: 292, Name: "minecraft:spruce_leaves"}
+	CherryLeaves               = Block{StateID: 404, Name: "minecraft:cherry_leaves"}
+	Chest                      = Block{StateID: 2955, Name: "minecraft:chest"}
+	RedstoneWire               = Block{StateID: 4138, Name: "minecraft:redstone_wire"}
+	StonePressurePlate         = Block{StateID: 5651, Name: "minecraft:stone_pressure_plate"}
+	RedstoneWallTorch          = Block{StateID: 5740, Name: "minecraft:redstone_wall_torch"}
+	PolishedBasalt             = Block{StateID: 5857, Name: "minecraft:polished_basalt"}
+	Glowstone                  = Block{StateID: 5864, Name: "minecraft:glowstone"}
+	LightBlueStainedGlass      = Block{StateID: 5949, Name: "minecraft:light_blue_stained_glass"}
+	StoneBricks                = Block{StateID: 6538, Name: "minecraft:stone_bricks"}
+	MossyStoneBricks           = Block{StateID: 6539, Name: "minecraft:mossy_stone_bricks"}
+	PackedMud                  = Block{StateID: 6542, Name: "minecraft:packed_mud"}
+	MudBricks                  = Block{StateID: 6543, Name: "minecraft:mud_bricks"}
+	InfestedStone              = Block{StateID: 6544, Name: "minecraft:infested_stone"}
+	Chain                      = Block{StateID: 6777, Name: "minecraft:chain"}
+	StoneBrickStairs           = Block{StateID: 7120, Name: "minecraft:stone_brick_stairs"}
+	NetherBrickStairs          = Block{StateID: 7316, Name: "minecraft:nether_brick_stairs"}
+	EnderChest                 = Block{StateID: 7514, Name: "minecraft:ender_chest"}
+	SpruceStairs               = Block{StateID: 7677, Name: "minecraft:spruce_stairs"}
+	SkeletonSkull              = Block{StateID: 8827, Name: "minecraft:skeleton_skull"}
+	LightWeightedPressurePlate = Block{StateID: 9003, Name: "minecraft:light_weighted_pressure_plate"}
+	RedstoneBlock              = Block{StateID: 9083, Name: "minecraft:redstone_block"}
+	Ladder                     = Block{StateID: 4655, Name: "minecraft:ladder"} // facing=north, waterlogged=false
+	Sponge                     = Block{StateID: 517, Name: "minecraft:sponge"}
+	WetSponge                  = Block{StateID: 518, Name: "minecraft:wet_sponge"}
+	// Team-colour building blocks (minecraft-data 1.20 default states).
+	WhiteTerracotta                 = Block{StateID: 9216, Name: "minecraft:white_terracotta"}
+	YellowTerracotta                = Block{StateID: 9220, Name: "minecraft:yellow_terracotta"}
+	PinkTerracotta                  = Block{StateID: 9222, Name: "minecraft:pink_terracotta"}
+	GrayTerracotta                  = Block{StateID: 9223, Name: "minecraft:gray_terracotta"}
+	CyanTerracotta                  = Block{StateID: 9225, Name: "minecraft:cyan_terracotta"}
+	BlueTerracotta                  = Block{StateID: 9227, Name: "minecraft:blue_terracotta"}
+	GreenTerracotta                 = Block{StateID: 9229, Name: "minecraft:green_terracotta"}
+	RedTerracotta                   = Block{StateID: 9230, Name: "minecraft:red_terracotta"}
+	WhiteStainedGlass               = Block{StateID: 5946, Name: "minecraft:white_stained_glass"}
+	YellowStainedGlass              = Block{StateID: 5950, Name: "minecraft:yellow_stained_glass"}
+	PinkStainedGlass                = Block{StateID: 5952, Name: "minecraft:pink_stained_glass"}
+	GrayStainedGlass                = Block{StateID: 5953, Name: "minecraft:gray_stained_glass"}
 	CyanStainedGlass                = Block{StateID: 5955, Name: "minecraft:cyan_stained_glass"}
 	BlueStainedGlass                = Block{StateID: 5957, Name: "minecraft:blue_stained_glass"}
+	GreenStainedGlass               = Block{StateID: 5959, Name: "minecraft:green_stained_glass"}
 	RedStainedGlass                 = Block{StateID: 5960, Name: "minecraft:red_stained_glass"}
-	StoneBricks                     = Block{StateID: 6538, Name: "minecraft:stone_bricks"}
-	MossyStoneBricks                = Block{StateID: 6539, Name: "minecraft:mossy_stone_bricks"}
-	PackedMud                       = Block{StateID: 6542, Name: "minecraft:packed_mud"}
-	MudBricks                       = Block{StateID: 6543, Name: "minecraft:mud_bricks"}
-	InfestedStone                   = Block{StateID: 6544, Name: "minecraft:infested_stone"}
-	Chain                           = Block{StateID: 6777, Name: "minecraft:chain"}
-	StoneBrickStairs                = Block{StateID: 7120, Name: "minecraft:stone_brick_stairs"}
-	NetherBrickStairs               = Block{StateID: 7316, Name: "minecraft:nether_brick_stairs"}
-	EnderChest                      = Block{StateID: 7514, Name: "minecraft:ender_chest"}
-	SpruceStairs                    = Block{StateID: 7677, Name: "minecraft:spruce_stairs"}
-	SkeletonSkull                   = Block{StateID: 8827, Name: "minecraft:skeleton_skull"}
-	LightWeightedPressurePlate      = Block{StateID: 9003, Name: "minecraft:light_weighted_pressure_plate"}
-	RedstoneBlock                   = Block{StateID: 9083, Name: "minecraft:redstone_block"}
-	Ladder                          = Block{StateID: 4655, Name: "minecraft:ladder"} // facing=north, waterlogged=false
 	QuartzBlock                     = Block{StateID: 9095, Name: "minecraft:quartz_block"}
 	QuartzStairs                    = Block{StateID: 9111, Name: "minecraft:quartz_stairs"}
 	LightBlueStainedGlassPane       = Block{StateID: 9359, Name: "minecraft:light_blue_stained_glass_pane"}
@@ -274,6 +290,11 @@ func init() {
 		MossyStoneBricks, PackedMud, MudBricks, InfestedStone, Chain,
 		StoneBrickStairs, NetherBrickStairs, EnderChest, SpruceStairs,
 		SkeletonSkull, LightWeightedPressurePlate, RedstoneBlock, Ladder,
+		Sponge, WetSponge,
+		WhiteTerracotta, YellowTerracotta, PinkTerracotta, GrayTerracotta,
+		CyanTerracotta, BlueTerracotta, GreenTerracotta, RedTerracotta,
+		WhiteStainedGlass, YellowStainedGlass, PinkStainedGlass, GrayStainedGlass,
+		GreenStainedGlass,
 		QuartzBlock, QuartzStairs, LightBlueStainedGlassPane, BambooStairs,
 		PrismarineBricks, PrismarineBrickStairs, SeaLantern, CoalBlock,
 		PackedIce, RedWallBanner, BlackWallBanner, SpruceSlab, BambooSlab,

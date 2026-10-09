@@ -16,6 +16,7 @@ package game
 import (
 	"minecraft-server/player"
 	"minecraft-server/world"
+	"time"
 )
 
 // Definition is the static metadata for a mini-game: how it's matched,
@@ -115,7 +116,22 @@ type Logic interface {
 	// drops, or scoreboards here. The respawn (death screen or instant, per
 	// the instance's combat config) is handled by the server around this
 	// call; a game may additionally Teleport the victim to a custom spawn.
+	// With Instance.SetCustomRespawn(true) the server does nothing after
+	// this hook: the player stays dead until the game calls
+	// PlayerHandle.Respawn.
 	OnPlayerDeath(ctx *Ctx, victim, killer PlayerHandle)
+
+	// OnItemUse fires for a right-click in the air with the held item,
+	// before the core's own item behaviours (buckets, throwables, eating).
+	// Return false to consume the click. Games use it for custom items
+	// recognised by their display name (bridge egg, pop-up tower).
+	OnItemUse(ctx *Ctx, p PlayerHandle, use ItemUse) bool
+
+	// OnItemConsume fires when a player finishes eating or drinking the
+	// stack. Return true if the game handled the effect (the core then only
+	// consumes the item); false lets the vanilla default run (golden apple
+	// heal, potion effect from its potion id).
+	OnItemConsume(ctx *Ctx, p PlayerHandle, st ItemStack) bool
 }
 
 // Ctx carries the per-instance handles the Logic needs. Constructed by
@@ -198,6 +214,27 @@ type Instance interface {
 	// instance spawn with no death screen. When false (the default), the
 	// vanilla death screen is shown and the player respawns on click.
 	SetInstantRespawn(enabled bool)
+
+	// SetCustomRespawn makes death leave the player dead (no death screen,
+	// no teleport) so the game runs its own respawn flow via
+	// PlayerHandle.Respawn. Off by default.
+	SetCustomRespawn(enabled bool)
+
+	// SetWeaponDamage switches melee damage from the flat CombatConfig
+	// value to the held weapon's vanilla damage (+Sharpness) with armour
+	// reduction (+Protection). Off by default.
+	SetWeaponDamage(enabled bool)
+
+	// SetTNTAutoPrime makes a placed TNT block ignite immediately
+	// (Hypixel-style) instead of waiting for flint and steel.
+	SetTNTAutoPrime(enabled bool)
+
+	// ThrowProjectile launches item as a projectile from p's eyes along
+	// their look direction at speed blocks/tick, driven by hooks.
+	ThrowProjectile(p PlayerHandle, item string, speed float64, hooks ProjectileHooks)
+
+	// PlaySound plays a positional sound to everyone in range.
+	PlaySound(name string, x, y, z float64, volume, pitch float32)
 }
 
 // Hologram is a floating-text entity created by Instance.SpawnHologram.
@@ -263,4 +300,42 @@ type PlayerHandle interface {
 	// (yet) sent as a Disconnect message — that needs the Play Disconnect
 	// packet, which we haven't wired up.
 	Kick(reason string)
+
+	// GiveStack adds a stack with display/enchantment data, merging only
+	// into identical stacks and respecting per-item stack limits. Returns
+	// how many units did not fit.
+	GiveStack(st ItemStack) int
+
+	// SetSlot overwrites one window-0 slot (see Slot* constants); an empty
+	// stack clears it.
+	SetSlot(slot int, st ItemStack)
+
+	// ClearInventory empties every slot (armour, main, hotbar, offhand).
+	ClearInventory()
+
+	// Inventory returns a snapshot of the non-empty slots with Slot set.
+	Inventory() []ItemStack
+
+	// Health / SetHealth read and write hit points (0..20).
+	Health() float32
+	SetHealth(h float32)
+
+	// ApplyEffect gives a status effect by vanilla name ("speed",
+	// "regeneration", …) at level (1 = I) for d; RemoveEffect ends it.
+	ApplyEffect(name string, level int, d time.Duration)
+	RemoveEffect(name string)
+
+	// SendTitle shows a title/subtitle; times are ticks (≤0 = vanilla
+	// defaults).
+	SendTitle(title, subtitle string, fadeIn, stay, fadeOut int)
+
+	// PlaySound plays a sound only to this player, at their position.
+	PlaySound(name string, volume, pitch float32)
+
+	// Respawn brings a dead player back at (x, y, z) with full health,
+	// re-sending effects and equipment. Used with SetCustomRespawn.
+	Respawn(x, y, z float64)
+
+	// Kill kills the player as an environmental death (void, game rule).
+	Kill()
 }

@@ -158,6 +158,40 @@ func (i *Instance) allowEntityInteract(c *ClientConnection, ei game.EntityIntera
 	return true
 }
 
+// allowItemUse fires OnItemUse for a right-click in the air. false =
+// consumed: the caller must not run bucket/throw/eat behaviour.
+func (i *Instance) allowItemUse(c *ClientConnection, use game.ItemUse) bool {
+	ctx, p := i.pluginCtx(), playerBridge{conn: c}
+	for _, l := range i.listeners {
+		if !safeVeto(i, "listener "+l.Name+" OnItemUse", func() bool { return l.Logic.OnItemUse(ctx, p, use) }) {
+			return false
+		}
+	}
+	if hook := i.OnItemUse; hook != nil {
+		return hook(c, use)
+	}
+	return true
+}
+
+// fireItemConsume fires OnItemConsume when eating/drinking completes. true =
+// some hook handled the effect, so the caller skips the vanilla default.
+// Listeners run first; the first handler wins.
+func (i *Instance) fireItemConsume(c *ClientConnection, st itemStack) bool {
+	ctx, p := i.pluginCtx(), playerBridge{conn: c}
+	gs := toGameStack(st, -1)
+	for _, l := range i.listeners {
+		handled := false
+		safeHook(i, "listener "+l.Name+" OnItemConsume", func() { handled = l.Logic.OnItemConsume(ctx, p, gs) })
+		if handled {
+			return true
+		}
+	}
+	if hook := i.OnItemConsume; hook != nil {
+		return hook(c, st)
+	}
+	return false
+}
+
 func (i *Instance) allowAttack(attacker, target *ClientConnection) bool {
 	ctx := i.pluginCtx()
 	a, t := playerBridge{conn: attacker}, playerBridge{conn: target}
@@ -193,7 +227,6 @@ func (i *Instance) filterChat(c *ClientConnection, msg string) (string, bool) {
 // fireDeath runs listeners' OnPlayerDeath then the instance hook. killer may
 // be nil (environmental death).
 func (i *Instance) fireDeath(victim, killer *ClientConnection) {
-	victim.clearEffects() // vanilla: death ends every potion effect
 	ctx := i.pluginCtx()
 	v := playerBridge{conn: victim}
 	var k game.PlayerHandle

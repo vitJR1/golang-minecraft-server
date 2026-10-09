@@ -4,6 +4,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"minecraft-server/game"
 	"minecraft-server/player"
@@ -39,6 +40,18 @@ func (p *fakePlayer) IsOp() bool                                       { return 
 func (p *fakePlayer) CountItem(string) int                             { return 0 }
 func (p *fakePlayer) TakeItem(string, int) bool                        { return false }
 func (p *fakePlayer) OpenMenu(string, int, []game.MenuItem, func(int)) {}
+func (p *fakePlayer) GiveStack(st game.ItemStack) int                  { p.GiveItem(st.Item, st.Count); return 0 }
+func (p *fakePlayer) SetSlot(int, game.ItemStack)                      {}
+func (p *fakePlayer) ClearInventory()                                  {}
+func (p *fakePlayer) Inventory() []game.ItemStack                      { return nil }
+func (p *fakePlayer) Health() float32                                  { return player.MaxHealth }
+func (p *fakePlayer) SetHealth(float32)                                {}
+func (p *fakePlayer) ApplyEffect(string, int, time.Duration)           {}
+func (p *fakePlayer) RemoveEffect(string)                              {}
+func (p *fakePlayer) SendTitle(string, string, int, int, int)          {}
+func (p *fakePlayer) PlaySound(string, float32, float32)               {}
+func (p *fakePlayer) Respawn(float64, float64, float64)                {}
+func (p *fakePlayer) Kill()                                            {}
 
 type fakeInstance struct {
 	mu     sync.Mutex
@@ -74,16 +87,22 @@ func (i *fakeInstance) GetBlock(p world.Position) world.Block {
 	}
 	return world.Air
 }
-func (i *fakeInstance) BroadcastChat(string, string)                          {}
-func (i *fakeInstance) PlayerCount() int                                      { return 1 }
-func (i *fakeInstance) Players() []game.PlayerHandle                          { return nil }
-func (i *fakeInstance) PlayerByName(string) (game.PlayerHandle, bool)         { return nil, false }
-func (i *fakeInstance) EndGame()                                              {}
-func (i *fakeInstance) SetPvP(bool)                                           {}
-func (i *fakeInstance) SetInstantRespawn(bool)                                {}
-func (i *fakeInstance) DropItem(float64, float64, float64, string, int) bool  { return true }
-func (i *fakeInstance) DroppedItemsNear(_, _, _, _ float64, _ string) int     { return 0 }
-func (i *fakeInstance) SpawnHologram(_, _, _ float64, _ string) game.Hologram { return nil }
+func (i *fakeInstance) BroadcastChat(string, string)                                  {}
+func (i *fakeInstance) PlayerCount() int                                              { return 1 }
+func (i *fakeInstance) Players() []game.PlayerHandle                                  { return nil }
+func (i *fakeInstance) PlayerByName(string) (game.PlayerHandle, bool)                 { return nil, false }
+func (i *fakeInstance) EndGame()                                                      {}
+func (i *fakeInstance) SetPvP(bool)                                                   {}
+func (i *fakeInstance) SetInstantRespawn(bool)                                        {}
+func (i *fakeInstance) DropItem(float64, float64, float64, string, int) bool          { return true }
+func (i *fakeInstance) DroppedItemsNear(_, _, _, _ float64, _ string) int             { return 0 }
+func (i *fakeInstance) SpawnHologram(_, _, _ float64, _ string) game.Hologram         { return nil }
+func (i *fakeInstance) SetCustomRespawn(bool)                                         {}
+func (i *fakeInstance) SetWeaponDamage(bool)                                          {}
+func (i *fakeInstance) SetTNTAutoPrime(bool)                                          {}
+func (i *fakeInstance) PlaySound(string, float64, float64, float64, float32, float32) {}
+func (i *fakeInstance) ThrowProjectile(game.PlayerHandle, string, float64, game.ProjectileHooks) {
+}
 
 func run(t *testing.T, ctx *game.Ctx, pl game.PlayerHandle, line string) {
 	t.Helper()

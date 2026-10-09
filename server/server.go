@@ -543,6 +543,10 @@ type ClientConnection struct {
 	// 0 = not on fire. Atomic: written by the tick loop, cleared on death.
 	fireTicks atomic.Int32
 
+	// using is the eat/drink (or bow draw) in progress, nil when idle
+	// (consume.go). Set from the readLoop, read on the instance tick.
+	using atomic.Pointer[useState]
+
 	// cursor is the stack the client is carrying on its mouse cursor inside
 	// an inventory/chest window, as reported by its last Click Container.
 	// Whatever leaves the modelled slots without reaching the cursor (or

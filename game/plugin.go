@@ -215,10 +215,58 @@ type EntityInteraction struct {
 
 // MenuItem is one slot of a PlayerHandle.OpenMenu GUI.
 type MenuItem struct {
-	Slot  int    // 0 .. rows*9-1
-	Item  string // namespaced item id shown in the slot
-	Count int    // stack size shown (0 → 1)
-	Name  string // hover label
+	Slot  int      // 0 .. rows*9-1
+	Item  string   // namespaced item id shown in the slot
+	Count int      // stack size shown (0 → 1)
+	Name  string   // hover label (§ colour codes allowed)
+	Lore  []string // extra hover lines under the name
+	Glint bool     // enchanted-item shimmer (a "selected" / "upgraded" marker)
+}
+
+// ItemStack describes an inventory stack as games see it: the item id plus
+// the display and enchantment data the server models. Count 0 is an empty
+// slot. Slot is only meaningful in PlayerHandle.Inventory() results.
+type ItemStack struct {
+	Item         string
+	Count        int
+	Name         string         // custom display name ("" = none)
+	Lore         []string       // hover lines
+	Enchantments map[string]int // "minecraft:sharpness" → level
+	Color        int32          // leather armour dye, 0xRRGGBB (0 = undyed)
+	Potion       string         // potion id for minecraft:potion ("minecraft:swiftness")
+	Damage       int            // tool wear
+	Slot         int            // window-0 slot index, Inventory() only
+}
+
+// Empty reports whether the stack is an empty slot.
+func (s ItemStack) Empty() bool { return s.Count <= 0 }
+
+// Window-0 slot indices for PlayerHandle.SetSlot / Inventory().
+const (
+	SlotHelmet     = 5
+	SlotChestplate = 6
+	SlotLeggings   = 7
+	SlotBoots      = 8
+	SlotMainStart  = 9  // 9..35 main inventory
+	SlotHotbar0    = 36 // 36..44 hotbar
+	SlotOffhand    = 45
+)
+
+// ItemUse is the payload of Logic.OnItemUse: a right-click in the air with
+// the held item (not on a block or entity).
+type ItemUse struct {
+	Item string // namespaced item id ("" = empty hand)
+	Name string // custom display name of the stack, if any
+	Slot int    // hotbar index 0..8
+}
+
+// ProjectileHooks lets a game drive a projectile launched through
+// Instance.ThrowProjectile. OnTick runs every tick at the new position and
+// returns false to end the flight early; OnImpact runs when it hits a block
+// or expires. Both run on the instance tick goroutine.
+type ProjectileHooks struct {
+	OnTick   func(x, y, z float64) (keep bool)
+	OnImpact func(x, y, z float64)
 }
 
 // PlacementRewriter is an optional extension a Logic (or listener) can

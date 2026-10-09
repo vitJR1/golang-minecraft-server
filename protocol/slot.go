@@ -39,7 +39,7 @@ func WriteSlotWithName(itemID int32, count byte, displayName string) []byte {
 	// Build NBT: {display: {Name: '{"text":"<displayName>"}'}}
 	root := nbt.Compound{
 		"display": nbt.Compound{
-			"Name": nbt.String(`{"text":"` + escapeJSON(displayName) + `"}`),
+			"Name": nbt.String(`{"text":"` + EscapeJSON(displayName) + `"}`),
 		},
 	}
 	nbtBytes := nbt.Marshal(root)
@@ -69,13 +69,13 @@ func WriteSlotTagged(itemID int32, count byte, tag nbt.Compound) []byte {
 
 // DisplayNameTag builds the {display:{Name:…}} compound for a custom name.
 func DisplayNameTag(displayName string) nbt.Compound {
-	return nbt.Compound{"Name": nbt.String(`{"text":"` + escapeJSON(displayName) + `"}`)}
+	return nbt.Compound{"Name": nbt.String(`{"text":"` + EscapeJSON(displayName) + `"}`)}
 }
 
-// escapeJSON escapes the minimum set of characters that would otherwise
+// EscapeJSON escapes the minimum set of characters that would otherwise
 // break a JSON string literal. Sufficient for our menu labels (ASCII +
 // occasional double-quote); not a general-purpose JSON encoder.
-func escapeJSON(s string) string {
+func EscapeJSON(s string) string {
 	out := make([]byte, 0, len(s))
 	for i := 0; i < len(s); i++ {
 		switch s[i] {

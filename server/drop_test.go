@@ -15,7 +15,7 @@ func itemsIn(inst *Instance) map[int32]int {
 	defer inst.itemsMu.Unlock()
 	out := map[int32]int{}
 	for _, it := range inst.items {
-		out[it.itemID] += it.count
+		out[it.stack.ID] += int(it.stack.Count)
 	}
 	return out
 }

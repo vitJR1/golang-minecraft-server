@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"minecraft-server/game"
 	"minecraft-server/player"
@@ -13,7 +14,10 @@ import (
 
 // --- test doubles ----------------------------------------------------------
 
-// fakePlayer is a minimal game.PlayerHandle for driving the logic.
+// fakePlayer is a minimal game.PlayerHandle for driving the logic. Its
+// inventory is slot-addressed like the real one (window-0 indices) so kit /
+// armour logic can be exercised; `given` is kept as a convenience view used
+// by the older tests (item id → total count across slots).
 type fakePlayer struct {
 	name string
 	eid  int32
@@ -22,7 +26,13 @@ type fakePlayer struct {
 	x, y, z  float64
 	gamemode player.Gamemode
 	messages []string
-	given    map[string]int // namespaced item id → total count granted (= inventory)
+	slots    map[int]game.ItemStack
+	health   float32
+	dead     bool
+	effects  map[string]int // effect name → level (0/absent = none)
+	titles   []string
+	sounds   []string
+	respawns int
 
 	menuTitle string
 	menuItems []game.MenuItem
@@ -30,7 +40,8 @@ type fakePlayer struct {
 }
 
 func newFakePlayer(name string, eid int32) *fakePlayer {
-	return &fakePlayer{name: name, eid: eid, y: baseY + 1, gamemode: player.Adventure}
+	return &fakePlayer{name: name, eid: eid, y: baseY + 1, gamemode: player.Adventure,
+		slots: map[int]game.ItemStack{}, health: player.MaxHealth, effects: map[string]int{}}
 }
 
 func (p *fakePlayer) Name() string    { return p.name }
@@ -38,7 +49,7 @@ func (p *fakePlayer) EntityID() int32 { return p.eid }
 func (p *fakePlayer) Pose() player.Snapshot {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return player.Snapshot{X: p.x, Y: p.y, Z: p.z, Gamemode: p.gamemode}
+	return player.Snapshot{EntityID: p.eid, Name: p.name, X: p.x, Y: p.y, Z: p.z, Gamemode: p.gamemode, Health: p.health, Dead: p.dead}
 }
 func (p *fakePlayer) Teleport(x, y, z float64) {
 	p.mu.Lock()
@@ -57,18 +68,48 @@ func (p *fakePlayer) SetGamemode(g player.Gamemode) {
 }
 func (p *fakePlayer) Kick(string) {}
 func (p *fakePlayer) IsOp() bool  { return false }
-func (p *fakePlayer) CountItem(item string) int {
+
+// given returns item id → total count over the main inventory + hotbar
+// (what CountItem sees).
+func (p *fakePlayer) givenLocked() map[string]int {
+	out := map[string]int{}
+	for slot, st := range p.slots {
+		if slot >= game.SlotMainStart && slot < game.SlotOffhand && !st.Empty() {
+			out[st.Item] += st.Count
+		}
+	}
+	return out
+}
+
+func (p *fakePlayer) given(item string) int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.given[item]
+	return p.givenLocked()[item]
 }
+
+func (p *fakePlayer) CountItem(item string) int { return p.given(item) }
+
 func (p *fakePlayer) TakeItem(item string, n int) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.given[item] < n {
+	if p.givenLocked()[item] < n {
 		return false
 	}
-	p.given[item] -= n
+	// Main inventory first, hotbar last, like the server.
+	for slot := game.SlotOffhand - 1; slot >= game.SlotMainStart && n > 0; slot-- {
+		st := p.slots[slot]
+		if st.Empty() || st.Item != item {
+			continue
+		}
+		take := min(st.Count, n)
+		st.Count -= take
+		n -= take
+		if st.Count == 0 {
+			delete(p.slots, slot)
+		} else {
+			p.slots[slot] = st
+		}
+	}
 	return true
 }
 func (p *fakePlayer) OpenMenu(title string, _ int, items []game.MenuItem, onClick func(int)) {
@@ -77,24 +118,165 @@ func (p *fakePlayer) OpenMenu(title string, _ int, items []game.MenuItem, onClic
 	p.mu.Unlock()
 }
 func (p *fakePlayer) GiveItem(itemName string, count int) {
-	p.mu.Lock()
-	if p.given == nil {
-		p.given = make(map[string]int)
+	p.GiveStack(game.ItemStack{Item: itemName, Count: count})
+}
+
+// sameKind mirrors the server's merge rule: identical item + display data.
+func sameKind(a, b game.ItemStack) bool {
+	if a.Item != b.Item || a.Name != b.Name || a.Color != b.Color || a.Potion != b.Potion || len(a.Enchantments) != len(b.Enchantments) {
+		return false
 	}
-	p.given[itemName] += count
+	for k, v := range a.Enchantments {
+		if b.Enchantments[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+// GiveStack fills hotbar first (36..44) then main (9..35), merging into
+// identical stacks up to 64 (1 for anything with a Name — a crude stand-in
+// for unstackable gear).
+func (p *fakePlayer) GiveStack(st game.ItemStack) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	remaining := st.Count
+	limit := 64
+	if len(st.Enchantments) > 0 || strings.Contains(st.Item, "sword") || strings.Contains(st.Item, "axe") ||
+		strings.Contains(st.Item, "helmet") || strings.Contains(st.Item, "chestplate") || strings.Contains(st.Item, "leggings") ||
+		strings.Contains(st.Item, "boots") || strings.Contains(st.Item, "shears") || strings.Contains(st.Item, "bow") || st.Item == "minecraft:potion" {
+		limit = 1
+	}
+	order := make([]int, 0, 36)
+	for slot := game.SlotHotbar0; slot < game.SlotOffhand; slot++ {
+		order = append(order, slot)
+	}
+	for slot := game.SlotMainStart; slot < game.SlotHotbar0; slot++ {
+		order = append(order, slot)
+	}
+	for pass := 0; pass < 2 && remaining > 0; pass++ {
+		for _, slot := range order {
+			if remaining == 0 {
+				break
+			}
+			cur, ok := p.slots[slot]
+			if pass == 0 {
+				if !ok || !sameKind(cur, st) || cur.Count >= limit {
+					continue
+				}
+			} else {
+				if ok {
+					continue
+				}
+				cur = st
+				cur.Count = 0
+			}
+			add := min(limit-cur.Count, remaining)
+			cur.Count += add
+			remaining -= add
+			cur.Slot = slot
+			p.slots[slot] = cur
+		}
+	}
+	return remaining
+}
+
+func (p *fakePlayer) SetSlot(slot int, st game.ItemStack) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if st.Empty() {
+		delete(p.slots, slot)
+		return
+	}
+	st.Slot = slot
+	p.slots[slot] = st
+}
+
+func (p *fakePlayer) ClearInventory() {
+	p.mu.Lock()
+	p.slots = map[int]game.ItemStack{}
+	p.mu.Unlock()
+}
+
+func (p *fakePlayer) Inventory() []game.ItemStack {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]game.ItemStack, 0, len(p.slots))
+	for slot, st := range p.slots {
+		st.Slot = slot
+		out = append(out, st)
+	}
+	return out
+}
+
+// slot returns the stack at a window-0 index (empty if none).
+func (p *fakePlayer) slot(idx int) game.ItemStack {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.slots[idx]
+}
+
+func (p *fakePlayer) Health() float32 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.health
+}
+func (p *fakePlayer) SetHealth(h float32) {
+	p.mu.Lock()
+	p.health = max(0, min(player.MaxHealth, h))
+	p.mu.Unlock()
+}
+func (p *fakePlayer) ApplyEffect(name string, level int, _ time.Duration) {
+	p.mu.Lock()
+	p.effects[name] = level
+	p.mu.Unlock()
+}
+func (p *fakePlayer) RemoveEffect(name string) {
+	p.mu.Lock()
+	delete(p.effects, name)
+	p.mu.Unlock()
+}
+func (p *fakePlayer) effect(name string) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.effects[name]
+}
+func (p *fakePlayer) SendTitle(title, subtitle string, _, _, _ int) {
+	p.mu.Lock()
+	p.titles = append(p.titles, title+"|"+subtitle)
+	p.mu.Unlock()
+}
+func (p *fakePlayer) PlaySound(name string, _, _ float32) {
+	p.mu.Lock()
+	p.sounds = append(p.sounds, name)
+	p.mu.Unlock()
+}
+func (p *fakePlayer) Respawn(x, y, z float64) {
+	p.mu.Lock()
+	p.x, p.y, p.z = x, y, z
+	p.health = player.MaxHealth
+	p.dead = false
+	p.respawns++
+	p.mu.Unlock()
+}
+func (p *fakePlayer) Kill() {
+	p.mu.Lock()
+	p.health = 0
+	p.dead = true
 	p.mu.Unlock()
 }
 
 // fakeInstance is a minimal game.Instance recording broadcasts and block
 // writes, with a mutable player list the logic can query.
 type fakeInstance struct {
-	mu         sync.Mutex
-	players    map[int32]*fakePlayer
-	blocks     map[world.Position]world.Block
-	broadcasts []string
-	ended      bool
-	drops      []fakeDrop // every DropItem call, in order
-	holos      []*fakeHologram
+	mu          sync.Mutex
+	players     map[int32]*fakePlayer
+	blocks      map[world.Position]world.Block
+	broadcasts  []string
+	ended       bool
+	drops       []fakeDrop // every DropItem call, in order
+	holos       []*fakeHologram
+	projectiles []fakeProjectile
 }
 
 // fakeHologram records the floating text a game asked for.
@@ -196,8 +378,24 @@ func (i *fakeInstance) EndGame() {
 
 // SetPvP / SetInstantRespawn satisfy the game.Instance combat-toggle methods.
 // The fake doesn't model combat, so they're no-ops.
-func (i *fakeInstance) SetPvP(bool)            {}
-func (i *fakeInstance) SetInstantRespawn(bool) {}
+func (i *fakeInstance) SetPvP(bool)                                                   {}
+func (i *fakeInstance) SetInstantRespawn(bool)                                        {}
+func (i *fakeInstance) SetCustomRespawn(bool)                                         {}
+func (i *fakeInstance) SetWeaponDamage(bool)                                          {}
+func (i *fakeInstance) SetTNTAutoPrime(bool)                                          {}
+func (i *fakeInstance) PlaySound(string, float64, float64, float64, float32, float32) {}
+func (i *fakeInstance) ThrowProjectile(p game.PlayerHandle, item string, speed float64, hooks game.ProjectileHooks) {
+	i.mu.Lock()
+	i.projectiles = append(i.projectiles, fakeProjectile{thrower: p.Name(), item: item, hooks: hooks})
+	i.mu.Unlock()
+}
+
+// fakeProjectile records a ThrowProjectile call; tests drive hooks by hand.
+type fakeProjectile struct {
+	thrower string
+	item    string
+	hooks   game.ProjectileHooks
+}
 
 func (i *fakeInstance) DropItem(x, y, z float64, item string, count int) bool {
 	i.mu.Lock()
@@ -539,9 +737,7 @@ func TestGeneratorDropsAtForge(t *testing.T) {
 
 	g.OnTick(ctx, gen.IntervalTicks) // one full interval → iron generator fires once
 
-	red.mu.Lock()
-	given := red.given["minecraft:iron_ingot"]
-	red.mu.Unlock()
+	given := red.given("minecraft:iron_ingot")
 	if given != 0 {
 		t.Errorf("iron went straight to the inventory: %d", given)
 	}
@@ -585,9 +781,7 @@ func TestInventoryGranterStillGives(t *testing.T) {
 
 	g.OnTick(ctx, gen.IntervalTicks)
 
-	red.mu.Lock()
-	got := red.given["minecraft:iron_ingot"]
-	red.mu.Unlock()
+	got := red.given("minecraft:iron_ingot")
 	if got != 1 {
 		t.Errorf("iron granted after one interval: got %d, want 1", got)
 	}

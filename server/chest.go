@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"encoding/json"
 	"sort"
 	"sync"
 
@@ -37,11 +38,42 @@ type itemStack struct {
 	// reaches world.ToolDurability.
 	Damage int
 	// Enchantments maps enchantment id ("minecraft:efficiency") → level,
-	// from the item's NBT "Enchantments" list. Only read, never granted.
+	// from the item's NBT "Enchantments" list.
 	Enchantments map[string]int
+	// Lore is the hover text under the name (NBT display.Lore).
+	Lore []string
+	// Color is a leather-armour dye as 0xRRGGBB (NBT display.color); 0 = none.
+	Color int32
+	// Potion is the potion id of a minecraft:potion stack (NBT "Potion").
+	Potion string
+	// Glint forces the enchanted shimmer without a real enchantment (menu
+	// icons): written as a hidden dummy enchantment.
+	Glint bool
 }
 
 func (s itemStack) empty() bool { return s.Count == 0 }
+
+// sameKind reports whether two stacks can merge: same item and identical
+// display / enchantment / potion data (count and wear aside).
+func (s itemStack) sameKind(o itemStack) bool {
+	if s.ID != o.ID || s.Name != o.Name || s.Color != o.Color || s.Potion != o.Potion || s.Glint != o.Glint {
+		return false
+	}
+	if s.Damage != o.Damage || len(s.Lore) != len(o.Lore) || len(s.Enchantments) != len(o.Enchantments) {
+		return false
+	}
+	for i := range s.Lore {
+		if s.Lore[i] != o.Lore[i] {
+			return false
+		}
+	}
+	for k, v := range s.Enchantments {
+		if o.Enchantments[k] != v {
+			return false
+		}
+	}
+	return true
+}
 
 // enchantLevel returns the level of an enchantment on the stack (0 = none).
 func (s itemStack) enchantLevel(id string) int { return s.Enchantments[id] }
@@ -55,11 +87,28 @@ func (s itemStack) tag() nbt.Compound {
 		}
 		tag[k] = v
 	}
-	if s.Name != "" {
-		set("display", protocol.DisplayNameTag(s.Name))
+	if s.Name != "" || len(s.Lore) > 0 || s.Color != 0 {
+		display := nbt.Compound{}
+		if s.Name != "" {
+			display["Name"] = nbt.String(textJSON(s.Name))
+		}
+		if len(s.Lore) > 0 {
+			lore := nbt.List{ElemTag: nbt.TagString}
+			for _, line := range s.Lore {
+				lore.Items = append(lore.Items, nbt.String(textJSON(line)))
+			}
+			display["Lore"] = lore
+		}
+		if s.Color != 0 {
+			display["color"] = nbt.Int(s.Color)
+		}
+		set("display", display)
 	}
 	if s.Damage > 0 {
 		set("Damage", nbt.Int(int32(s.Damage)))
+	}
+	if s.Potion != "" {
+		set("Potion", nbt.String(s.Potion))
 	}
 	if len(s.Enchantments) > 0 {
 		ids := make([]string, 0, len(s.Enchantments))
@@ -72,8 +121,43 @@ func (s itemStack) tag() nbt.Compound {
 			list.Items = append(list.Items, nbt.Compound{"id": nbt.String(id), "lvl": nbt.Short(int16(s.Enchantments[id]))})
 		}
 		set("Enchantments", list)
+	} else if s.Glint {
+		// A hidden dummy enchantment gives the shimmer without a tooltip line.
+		set("Enchantments", nbt.List{ElemTag: nbt.TagCompound, Items: []nbt.Value{
+			nbt.Compound{"id": nbt.String("minecraft:unbreaking"), "lvl": nbt.Short(1)}}})
+		set("HideFlags", nbt.Int(1))
 	}
 	return tag
+}
+
+// textJSON wraps plain text (§ codes allowed; vanilla renders them) as a
+// chat component. Italic is switched off so names/lore look like vanilla
+// item text rather than the default italic custom name.
+func textJSON(text string) string {
+	return `{"text":"` + protocol.EscapeJSON(text) + `","italic":false}`
+}
+
+// textFromJSON extracts the plain text of a chat component string; a
+// non-JSON value is returned as-is.
+func textFromJSON(raw string) string {
+	var comp struct {
+		Text  string `json:"text"`
+		Extra []struct {
+			Text string `json:"text"`
+		} `json:"extra"`
+	}
+	if err := json.Unmarshal([]byte(raw), &comp); err != nil {
+		var plain string
+		if json.Unmarshal([]byte(raw), &plain) == nil {
+			return plain
+		}
+		return raw
+	}
+	out := comp.Text
+	for _, e := range comp.Extra {
+		out += e.Text
+	}
+	return out
 }
 
 // writeStack appends the wire Slot for st (empty, plain, or tagged).
@@ -85,10 +169,40 @@ func writeStack(buf *bytes.Buffer, st itemStack) {
 	buf.Write(protocol.WriteSlotTagged(st.ID, st.Count, st.tag()))
 }
 
-// stackFromTag fills Damage/Enchantments/Name from a slot's NBT compound.
+// stackFromTag fills Damage/Enchantments/display/Potion from a slot's NBT
+// compound (the client echoes the full tag back in container clicks).
 func stackFromTag(st itemStack, tag nbt.Compound) itemStack {
 	if d, ok := tag["Damage"].(nbt.Int); ok {
 		st.Damage = int(d)
+	}
+	if potion, ok := tag["Potion"].(nbt.String); ok {
+		st.Potion = string(potion)
+	}
+	if display, ok := tag["display"].(nbt.Compound); ok {
+		if name, ok := display["Name"].(nbt.String); ok {
+			st.Name = textFromJSON(string(name))
+		}
+		if lore, ok := display["Lore"].(nbt.List); ok {
+			for _, line := range lore.Items {
+				if sline, ok := line.(nbt.String); ok {
+					st.Lore = append(st.Lore, textFromJSON(string(sline)))
+				}
+			}
+		}
+		if color, ok := display["color"].(nbt.Int); ok {
+			st.Color = int32(color)
+		}
+	}
+	if hide, ok := tag["HideFlags"].(nbt.Int); ok && hide&1 != 0 {
+		// Our glint marker: a hidden single dummy enchantment.
+		if list, ok := tag["Enchantments"].(nbt.List); ok && len(list.Items) == 1 {
+			if ench, ok := list.Items[0].(nbt.Compound); ok {
+				if id, _ := ench["id"].(nbt.String); id == "minecraft:unbreaking" {
+					st.Glint = true
+					return st
+				}
+			}
+		}
 	}
 	if list, ok := tag["Enchantments"].(nbt.List); ok {
 		for _, item := range list.Items {

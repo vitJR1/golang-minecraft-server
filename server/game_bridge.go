@@ -201,6 +201,12 @@ func (s *Server) AttachLogic(inst *Instance, logic game.Logic) *game.Ctx {
 		}
 		logic.OnPlayerDeath(ctx, playerBridge{conn: victim}, killerHandle)
 	}
+	inst.OnItemUse = func(c *ClientConnection, use game.ItemUse) bool {
+		return logic.OnItemUse(ctx, playerBridge{conn: c}, use)
+	}
+	inst.OnItemConsume = func(c *ClientConnection, st itemStack) bool {
+		return logic.OnItemConsume(ctx, playerBridge{conn: c}, toGameStack(st, -1))
+	}
 	inst.OnStop = func() {
 		logic.OnInstanceEnd(ctx)
 	}

@@ -39,8 +39,8 @@ func countOf(inst *Instance, itemID int32) (n, entities int) {
 	inst.itemsMu.Lock()
 	defer inst.itemsMu.Unlock()
 	for _, it := range inst.items {
-		if it.itemID == itemID {
-			n += it.count
+		if it.stack.ID == itemID {
+			n += int(it.stack.Count)
 			entities++
 		}
 	}
@@ -182,7 +182,7 @@ func TestItemDespawns(t *testing.T) {
 }
 
 func TestItemPayloads(t *testing.T) {
-	it := &itemEntity{eid: 9, itemID: 1, count: 3, x: 1, y: 2, z: 3}
+	it := &itemEntity{eid: 9, stack: itemStack{ID: 1, Count: 3}, x: 1, y: 2, z: 3}
 	it.uuid = entityUUID(it.eid)
 	spawn := spawnItemPayload(it)
 	// eid(1) + uuid(16) + type(1) + 3 doubles(24) + 3 angles + data(1) + 3 shorts(6)

@@ -5,7 +5,6 @@ import (
 	"math"
 	"minecraft-server/player"
 	"minecraft-server/world"
-	"sync"
 )
 
 // combat.go implements the PvP model in two flavors selected per instance:
@@ -182,9 +181,19 @@ func (c *ClientConnection) applyKnockback(cfg CombatConfig, aSnap, vSnap player.
 // (no death screen), otherwise the vanilla death screen is shown and the
 // client respawns on click (handled by SbPlayClientCommand → respawn()).
 func (c *ClientConnection) die(killer *ClientConnection) {
-	c.extinguish() // death puts the fire out
+	c.extinguish()   // death puts the fire out
+	c.clearEffects() // …and ends every potion effect
+	c.cancelUse()
 	s := c.player.Snapshot()
 	c.instance.playSound("minecraft:entity.player.death", soundCategoryPlayer, s.X, s.Y, s.Z, 1, 1)
+
+	if c.instance.CustomRespawn() {
+		// The game owns what happens next (spectator, countdown, kit): the
+		// player stays Dead — no Combat Death screen, no Set Health 0, no
+		// teleport — until the game calls Respawn.
+		c.instance.fireDeath(c, killer)
+		return
+	}
 
 	if c.instance.InstantRespawn() {
 		// Heal + teleport to spawn now; no death screen. The hook fires
@@ -258,32 +267,4 @@ func (i *Instance) combatTick(tick uint64) {
 		p.SetHealth(h + 1)
 		_ = c.sendSetHealth(p.Health())
 	})
-}
-
-// --- TEMPORARY weapon-damage switch -----------------------------------------
-// Instance.WeaponDamage / SetWeaponDamage live here until the Instance struct
-// (instance.go, owned by the BedWars session) grows an atomic field; the
-// map keeps combat.go self-contained meanwhile. Delete this block when the
-// field lands.
-
-var weaponDamageMu sync.Mutex
-var weaponDamageOn = map[*Instance]bool{}
-
-// WeaponDamage reports whether hits use the held item's vanilla damage
-// (world.AttackDamage + Sharpness) instead of Combat.BaseDamage.
-func (i *Instance) WeaponDamage() bool {
-	weaponDamageMu.Lock()
-	defer weaponDamageMu.Unlock()
-	return weaponDamageOn[i]
-}
-
-// SetWeaponDamage toggles weapon damage for this instance.
-func (i *Instance) SetWeaponDamage(on bool) {
-	weaponDamageMu.Lock()
-	defer weaponDamageMu.Unlock()
-	if on {
-		weaponDamageOn[i] = true
-	} else {
-		delete(weaponDamageOn, i)
-	}
 }

@@ -218,6 +218,12 @@ func (i *Instance) stepTNT(t *primedTNT) {
 // explode runs a vanilla-shaped explosion of the given power at (x,y,z).
 // igniter is the responsible player (may be nil).
 func (i *Instance) explode(x, y, z, power float64, igniter *ClientConnection) {
+	i.explodeWith(x, y, z, power, 1, igniter)
+}
+
+// explodeWith is explode with the player knockback scaled by knockback
+// (fireballs shove 1.5× harder than their power suggests).
+func (i *Instance) explodeWith(x, y, z, power, knockback float64, igniter *ClientConnection) {
 	actor := igniter
 	if actor != nil && (actor.instance != i || actor.isClosed()) {
 		actor = nil
@@ -227,6 +233,9 @@ func (i *Instance) explode(x, y, z, power float64, igniter *ClientConnection) {
 	i.applyExplosionBlocks(destroyed, power, actor)
 
 	hits := i.explosionPlayers(x, y, z, power, actor)
+	for c, h := range hits {
+		hits[c] = explosionHit{vx: h.vx * knockback, vy: h.vy * knockback, vz: h.vz * knockback}
+	}
 	i.knockbackTNT(x, y, z, power)
 
 	// One Explosion packet per player within explosionPacketRange (vanilla:

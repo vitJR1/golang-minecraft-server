@@ -98,7 +98,7 @@ func (c *ClientConnection) openPluginMenu(title string, rows int, items []game.M
 		if count > 64 {
 			count = 64
 		}
-		entries[int16(it.Slot)] = menuEntry{slot: int16(it.Slot), itemID: id, count: byte(count), name: it.Name, key: it.Name}
+		entries[int16(it.Slot)] = menuEntry{slot: int16(it.Slot), itemID: id, count: byte(count), name: it.Name, key: it.Name, lore: it.Lore, glint: it.Glint}
 	}
 	c.menu.Store(&openMenu{
 		kind:    menuKindPlugin,
@@ -117,9 +117,20 @@ func (c *ClientConnection) openPluginMenu(title string, rows int, items []game.M
 type menuEntry struct {
 	slot   int16
 	itemID int32
-	name   string // display label and the string used in logs / dispatch
-	key    string // stable identifier for code paths (e.g. "ffa", "garden")
-	count  byte   // item stack size (0 → 1); used to show player counts
+	name   string   // display label and the string used in logs / dispatch
+	key    string   // stable identifier for code paths (e.g. "ffa", "garden")
+	count  byte     // item stack size (0 → 1); used to show player counts
+	lore   []string // hover lines under the name (plugin menus)
+	glint  bool     // enchanted shimmer (plugin menus)
+}
+
+// stack renders the entry as the item stack shown in the window.
+func (e menuEntry) stack() itemStack {
+	count := e.count
+	if count == 0 {
+		count = 1
+	}
+	return itemStack{ID: e.itemID, Count: count, Name: e.name, Lore: e.lore, Glint: e.glint}
 }
 
 // hubMenuTargets maps a menu icon's `key` to the lobby instance ID the
@@ -447,11 +458,7 @@ func (c *ClientConnection) sendChestContents(rows int, entries map[int16]menuEnt
 	protocol.WriteVarInt32ToBuffer(&buf, int32(chestSlots+36))
 	for s := int16(0); s < chestSlots; s++ {
 		if e, ok := entries[s]; ok {
-			count := e.count
-			if count == 0 {
-				count = 1
-			}
-			buf.Write(protocol.WriteSlotWithName(e.itemID, count, e.name))
+			writeStack(&buf, e.stack())
 		} else {
 			buf.Write(protocol.WriteEmptySlot())
 		}

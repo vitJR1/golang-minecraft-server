@@ -3,15 +3,38 @@ package server
 import (
 	"bytes"
 	"minecraft-server/player"
+	"strings"
 
 	"minecraft-server/protocol"
 	"minecraft-server/world"
 )
 
-// maxStackSize is the vanilla stack ceiling for the resource items BedWars
-// generators hand out (ingots, diamonds, emeralds). We don't model the
-// per-item max (some items cap at 16), so this is the conservative 64.
+// maxStackSize is the vanilla stack ceiling for plain items (ingots,
+// blocks, …). maxStackFor narrows it for the items that stack to 16 or 1.
 const maxStackSize = 64
+
+// maxStackFor returns the vanilla max stack size of an item: 1 for tools,
+// weapons, armour, bows, shears, buckets and potions; 16 for ender pearls,
+// eggs, snowballs and signs; 64 otherwise.
+func maxStackFor(itemID int32) int {
+	name, ok := world.ItemName(itemID)
+	if !ok {
+		return maxStackSize
+	}
+	short := strings.TrimPrefix(name, "minecraft:")
+	switch short {
+	case "ender_pearl", "egg", "snowball", "oak_sign", "armor_stand", "honey_bottle":
+		return 16
+	case "bow", "crossbow", "shears", "shield", "fishing_rod", "flint_and_steel", "potion",
+		"splash_potion", "lingering_potion", "milk_bucket", "bucket", "water_bucket", "lava_bucket",
+		"elytra", "trident", "totem_of_undying", "saddle", "enchanted_book", "written_book":
+		return 1
+	}
+	if world.ToolDurability(name) > 0 {
+		return 1 // every damageable item (tools, weapons, armour) is unstackable
+	}
+	return maxStackSize
+}
 
 // inventory.go is the per-connection player inventory model. It mirrors the
 // window-0 layout the client uses so the server knows what the player is
@@ -174,7 +197,28 @@ func (c *ClientConnection) giveItem(itemID int32, count int) int {
 		return 0
 	}
 	remaining := count
-	// Pass 0 merges into existing stacks of itemID; pass 1 fills empties.
+	// giveStack takes a byte count; feed it in stack-sized chunks.
+	for remaining > 0 {
+		chunk := min(remaining, maxStackSize)
+		left := c.giveStack(itemStack{ID: itemID, Count: byte(chunk)})
+		remaining -= chunk - left
+		if left > 0 {
+			break
+		}
+	}
+	return remaining
+}
+
+// giveStack adds st (with all its display / enchantment data) to the
+// inventory: first topping up stacks of the same kind, then filling empty
+// slots hotbar-first, like giveItem. Stack limits follow maxStackFor. Every
+// touched slot is synced with its NBT. Returns the units that did not fit.
+func (c *ClientConnection) giveStack(st itemStack) int {
+	if st.empty() {
+		return 0
+	}
+	remaining := int(st.Count)
+	limit := maxStackFor(st.ID)
 	for pass := 0; pass < 2 && remaining > 0; pass++ {
 		for _, slot := range giveSlotOrder {
 			if remaining == 0 {
@@ -182,23 +226,67 @@ func (c *ClientConnection) giveItem(itemID int32, count int) int {
 			}
 			cur := c.inv.get(slot)
 			if pass == 0 {
-				if cur.empty() || cur.ID != itemID || int(cur.Count) >= maxStackSize {
+				if cur.empty() || !cur.sameKind(st) || int(cur.Count) >= limit {
 					continue
 				}
 			} else {
 				if !cur.empty() {
 					continue
 				}
-				cur = itemStack{ID: itemID, Count: 0}
+				cur = st
+				cur.Count = 0
 			}
-			add := min(maxStackSize-int(cur.Count), remaining)
+			add := min(limit-int(cur.Count), remaining)
 			cur.Count += byte(add)
 			remaining -= add
 			c.inv.set(slot, cur)
 			_ = c.sendSetSlot(0, slot, cur)
 		}
 	}
+	c.equipmentChanged()
 	return remaining
+}
+
+// setSlot overwrites one window-0 slot in the model and on the client. An
+// empty stack clears it. Armour / held changes are broadcast as equipment.
+func (c *ClientConnection) setSlot(slot int16, st itemStack) {
+	if slot < 0 || int(slot) >= playerInvSize {
+		return
+	}
+	if st.empty() {
+		st = itemStack{}
+	}
+	c.inv.set(slot, st)
+	_ = c.sendSetSlot(0, slot, st)
+	c.equipmentChanged()
+}
+
+// clearInventory empties every slot (armour, main, hotbar, offhand, cursor)
+// and re-sends the whole window so the client agrees.
+func (c *ClientConnection) clearInventory() {
+	for slot := int16(0); slot < playerInvSize; slot++ {
+		c.inv.set(slot, itemStack{})
+	}
+	c.cursor = itemStack{}
+	_ = c.sendInventoryContents()
+	c.equipmentChanged()
+}
+
+// inventorySnapshot returns a copy of every non-empty slot with its index.
+func (c *ClientConnection) inventorySnapshot() []indexedStack {
+	var out []indexedStack
+	for slot := int16(0); slot < playerInvSize; slot++ {
+		if st := c.inv.get(slot); !st.empty() {
+			out = append(out, indexedStack{slot: slot, stack: st})
+		}
+	}
+	return out
+}
+
+// indexedStack pairs a stack with its window-0 slot.
+type indexedStack struct {
+	slot  int16
+	stack itemStack
 }
 
 // countItem sums the units of itemID across the main inventory + hotbar.
@@ -261,11 +349,7 @@ func (c *ClientConnection) sendSetSlot(windowID byte, slot int16, st itemStack) 
 	buf.WriteByte(windowID)
 	protocol.WriteVarInt32ToBuffer(&buf, 0) // state id
 	buf.Write(protocol.WriteShort(slot))
-	if st.empty() {
-		buf.Write(protocol.WriteEmptySlot())
-	} else {
-		buf.Write(protocol.WriteSlot(st.ID, st.Count))
-	}
+	writeStack(&buf, st) // keeps name / lore / enchantments / damage
 	return c.safeWrite(CbPlaySetContainerSlot, buf.Bytes())
 }
 
