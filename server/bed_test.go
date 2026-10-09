@@ -1,8 +1,10 @@
 package server
 
 import (
+	"strings"
 	"testing"
 
+	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/world"
 )
@@ -68,5 +70,42 @@ func TestBedFromItem(t *testing.T) {
 	}
 	if _, ok := bedFromItem("minecraft:stone"); ok {
 		t.Error("stone is not a bed")
+	}
+}
+
+// recolourLogic implements game.PlacementRewriter: every bed becomes blue.
+type recolourLogic struct{ game.NoopLogic }
+
+func (recolourLogic) RewritePlacedBlock(_ *game.Ctx, _ game.PlayerHandle, _ world.Position, blk world.Block) world.Block {
+	if strings.HasSuffix(blk.Name, "_bed") {
+		return world.BlueBed
+	}
+	return blk
+}
+
+func TestPlacementRewriterRecoloursBeds(t *testing.T) {
+	s := New()
+	inst := NewInstance("arena", s, world.NewMemoryWorld())
+	t.Cleanup(inst.Stop)
+	s.AddInstance(inst)
+	s.AttachLogic(inst, recolourLogic{})
+	cli := pipeClientOn(t, s)
+	completeOfflineLogin(t, cli, "Sleeper")
+	cli.startDiscardDrain()
+	c := findConn(t, s, "Sleeper")
+	if err := s.MovePlayer(c, inst, 0.5, 80, 0.5); err != nil {
+		t.Fatal(err)
+	}
+	foot := world.Position{X: 5, Y: 70, Z: 5}
+	c.placeBed(foot, world.RedBed) // held a red bed, yaw 0 → head at z+1
+	head := world.Position{X: 5, Y: 70, Z: 6}
+	if got := inst.World.GetBlock(foot); got.Name != world.BlueBed.Name {
+		t.Errorf("foot: %+v, want a blue bed", got)
+	}
+	if got := inst.World.GetBlock(head); got.Name != world.BlueBed.Name {
+		t.Errorf("head: %+v, want a blue bed", got)
+	}
+	if hp := world.StateProperties(world.BlueBed.Name, inst.World.GetBlock(head).StateID); hp["part"] != "head" {
+		t.Errorf("head half lost its part: %v", hp)
 	}
 }

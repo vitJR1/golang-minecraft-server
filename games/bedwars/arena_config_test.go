@@ -164,7 +164,13 @@ func TestDuelArenaBuilder(t *testing.T) {
 	if !ok {
 		t.Fatal("bedwars-1x1 arena builder not registered")
 	}
-	def, err := b("duel-test", "Duel", world.NewTemplate(), []byte(fourTeamArenaJSON))
+	// Map beds (all red, like a real map) at every base.
+	mapTmpl := world.NewTemplate()
+	for _, p := range []world.Position{{X: 0, Y: 65, Z: -8}, {X: 8, Y: 65, Z: 0}, {X: 0, Y: 65, Z: 8}, {X: -8, Y: 65, Z: 0}} {
+		mapTmpl.SetBlock(p, world.RedBed)
+		mapTmpl.AddBlockEntity(p, "minecraft:bed")
+	}
+	def, err := b("duel-test", "Duel", mapTmpl, []byte(fourTeamArenaJSON))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,8 +189,9 @@ func TestDuelArenaBuilder(t *testing.T) {
 		t.Errorf("spawns: %+v", g.arena.Spawns)
 	}
 	w := def.Template.Instantiate()
-	// Kept beds are recoloured to the duel teams (Red, Blue); dropped bases'
-	// beds are left untouched (not owned) so the map protection covers them.
+	// Kept beds are recoloured to the duel teams (Red, Blue); the bases that
+	// aren't in play lose their beds entirely, so the map's red beds don't
+	// masquerade as a team's.
 	if got := w.GetBlock(world.Position{X: 0, Y: 65, Z: -8}); got != world.RedBed {
 		t.Errorf("team0 bed: %+v, want RedBed", got)
 	}
@@ -196,7 +203,12 @@ func TestDuelArenaBuilder(t *testing.T) {
 			t.Errorf("dropped base bed %v must not be owned", p)
 		}
 		if got := w.GetBlock(p); got != world.Air {
-			t.Errorf("dropped base bed %v must be left as map block, got %+v", p, got)
+			t.Errorf("dropped base bed %v must be removed, got %+v", p, got)
+		}
+	}
+	if bep, _ := any(w).(world.BlockEntityProvider); bep != nil {
+		if _, still := bep.BlockEntities()[world.Position{X: 8, Y: 65, Z: 0}]; still {
+			t.Error("removed bed must not keep its block-entity marker")
 		}
 	}
 	// Generators: the two kept irons, remapped to 0/1, plus the neutral diamond.
@@ -275,5 +287,54 @@ func TestRealMapDuelFromConfig(t *testing.T) {
 	a, b := g.arena.Spawns[0].Position, g.arena.Spawns[1].Position
 	if a.Z >= 0 || b.Z <= 0 || a.X != 0 || b.X != 0 {
 		t.Errorf("duel spawns should be the opposite -Z/+Z bases, got %v and %v", a, b)
+	}
+}
+
+func TestRecolourKeepsBedFacingAndPart(t *testing.T) {
+	// A blue bed facing east on the map: foot at (1,65,3), head at (2,65,3).
+	foot, head := bedPair(world.BlueBed, "east")
+	tmpl := world.NewTemplate()
+	tmpl.SetBlock(world.Position{X: 1, Y: 65, Z: 3}, foot)
+	tmpl.SetBlock(world.Position{X: 2, Y: 65, Z: 3}, head)
+	cfg, err := parseArenaConfig([]byte(`{"teams":[
+	  {"name":"Red","beds":[{"x":1,"y":65,"z":3},{"x":2,"y":65,"z":3}]},
+	  {"name":"Blue","beds":[{"x":-5,"y":65,"z":3}]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := buildConfigArena(tmpl, cfg, buildTeams(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := a.Template.Instantiate()
+	wantFoot, wantHead := bedPair(world.RedBed, "east")
+	if got := w.GetBlock(world.Position{X: 1, Y: 65, Z: 3}); got != wantFoot {
+		t.Errorf("foot: %+v, want red foot facing east %+v", got, wantFoot)
+	}
+	if got := w.GetBlock(world.Position{X: 2, Y: 65, Z: 3}); got != wantHead {
+		t.Errorf("head: %+v, want red head facing east %+v", got, wantHead)
+	}
+	// No bed on the map at the config position → default team bed.
+	if got := w.GetBlock(world.Position{X: -5, Y: 65, Z: 3}); got != world.BlueBed {
+		t.Errorf("missing map bed: %+v, want default BlueBed", got)
+	}
+	if wantFoot == wantHead || wantFoot.StateID == world.RedBed.StateID && wantHead.StateID == world.RedBed.StateID {
+		t.Error("bedPair must produce distinct foot/head states")
+	}
+}
+
+func TestGeneratedArenaBedsHaveHeadAndFoot(t *testing.T) {
+	a := buildArena(buildTeams(4))
+	w := a.Template.Instantiate()
+	for id, beds := range a.BedBlocks {
+		head, foot := w.GetBlock(beds[0]), w.GetBlock(beds[1])
+		hp := world.StateProperties(head.Name, head.StateID)
+		fp := world.StateProperties(foot.Name, foot.StateID)
+		if hp["part"] != "head" || fp["part"] != "foot" {
+			t.Errorf("team %d: parts head=%v foot=%v", id, hp, fp)
+		}
+		if hp["facing"] != fp["facing"] {
+			t.Errorf("team %d: facing mismatch head=%v foot=%v", id, hp, fp)
+		}
 	}
 }

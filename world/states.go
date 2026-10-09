@@ -197,6 +197,10 @@ var blockStates = map[string]blockStateInfo{
 		{Name: "hanging", Values: []string{"true", "false"}},
 		{Name: "waterlogged", Values: []string{"true", "false"}},
 	}},
+	"minecraft:ladder": {MinStateID: 4654, DefaultStateID: 4655, Properties: []stateProperty{
+		{Name: "facing", Values: []string{"north", "south", "west", "east"}},
+		{Name: "waterlogged", Values: []string{"true", "false"}},
+	}},
 	"minecraft:lava": {MinStateID: 96, DefaultStateID: 96, Properties: []stateProperty{
 		{Name: "level", Values: []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"}},
 	}},
@@ -289,6 +293,81 @@ var blockStates = map[string]blockStateInfo{
 		{Name: "half", Values: []string{"top", "bottom"}},
 		{Name: "shape", Values: []string{"straight", "inner_left", "inner_right", "outer_left", "outer_right"}},
 		{Name: "waterlogged", Values: []string{"true", "false"}},
+	}},
+	"minecraft:white_bed": {MinStateID: 1688, DefaultStateID: 1691, Properties: []stateProperty{
+		{Name: "facing", Values: []string{"north", "south", "west", "east"}},
+		{Name: "occupied", Values: []string{"true", "false"}},
+		{Name: "part", Values: []string{"head", "foot"}},
+	}},
+	"minecraft:orange_bed": {MinStateID: 1704, DefaultStateID: 1707, Properties: []stateProperty{
+		{Name: "facing", Values: []string{"north", "south", "west", "east"}},
+		{Name: "occupied", Values: []string{"true", "false"}},
+		{Name: "part", Values: []string{"head", "foot"}},
+	}},
+	"minecraft:magenta_bed": {MinStateID: 1720, DefaultStateID: 1723, Properties: []stateProperty{
+		{Name: "facing", Values: []string{"north", "south", "west", "east"}},
+		{Name: "occupied", Values: []string{"true", "false"}},
+		{Name: "part", Values: []string{"head", "foot"}},
+	}},
+	"minecraft:light_blue_bed": {MinStateID: 1736, DefaultStateID: 1739, Properties: []stateProperty{
+		{Name: "facing", Values: []string{"north", "south", "west", "east"}},
+		{Name: "occupied", Values: []string{"true", "false"}},
+		{Name: "part", Values: []string{"head", "foot"}},
+	}},
+	"minecraft:yellow_bed": {MinStateID: 1752, DefaultStateID: 1755, Properties: []stateProperty{
+		{Name: "facing", Values: []string{"north", "south", "west", "east"}},
+		{Name: "occupied", Values: []string{"true", "false"}},
+		{Name: "part", Values: []string{"head", "foot"}},
+	}},
+	"minecraft:lime_bed": {MinStateID: 1768, DefaultStateID: 1771, Properties: []stateProperty{
+		{Name: "facing", Values: []string{"north", "south", "west", "east"}},
+		{Name: "occupied", Values: []string{"true", "false"}},
+		{Name: "part", Values: []string{"head", "foot"}},
+	}},
+	"minecraft:pink_bed": {MinStateID: 1784, DefaultStateID: 1787, Properties: []stateProperty{
+		{Name: "facing", Values: []string{"north", "south", "west", "east"}},
+		{Name: "occupied", Values: []string{"true", "false"}},
+		{Name: "part", Values: []string{"head", "foot"}},
+	}},
+	"minecraft:gray_bed": {MinStateID: 1800, DefaultStateID: 1803, Properties: []stateProperty{
+		{Name: "facing", Values: []string{"north", "south", "west", "east"}},
+		{Name: "occupied", Values: []string{"true", "false"}},
+		{Name: "part", Values: []string{"head", "foot"}},
+	}},
+	"minecraft:light_gray_bed": {MinStateID: 1816, DefaultStateID: 1819, Properties: []stateProperty{
+		{Name: "facing", Values: []string{"north", "south", "west", "east"}},
+		{Name: "occupied", Values: []string{"true", "false"}},
+		{Name: "part", Values: []string{"head", "foot"}},
+	}},
+	"minecraft:cyan_bed": {MinStateID: 1832, DefaultStateID: 1835, Properties: []stateProperty{
+		{Name: "facing", Values: []string{"north", "south", "west", "east"}},
+		{Name: "occupied", Values: []string{"true", "false"}},
+		{Name: "part", Values: []string{"head", "foot"}},
+	}},
+	"minecraft:purple_bed": {MinStateID: 1848, DefaultStateID: 1851, Properties: []stateProperty{
+		{Name: "facing", Values: []string{"north", "south", "west", "east"}},
+		{Name: "occupied", Values: []string{"true", "false"}},
+		{Name: "part", Values: []string{"head", "foot"}},
+	}},
+	"minecraft:blue_bed": {MinStateID: 1864, DefaultStateID: 1867, Properties: []stateProperty{
+		{Name: "facing", Values: []string{"north", "south", "west", "east"}},
+		{Name: "occupied", Values: []string{"true", "false"}},
+		{Name: "part", Values: []string{"head", "foot"}},
+	}},
+	"minecraft:brown_bed": {MinStateID: 1880, DefaultStateID: 1883, Properties: []stateProperty{
+		{Name: "facing", Values: []string{"north", "south", "west", "east"}},
+		{Name: "occupied", Values: []string{"true", "false"}},
+		{Name: "part", Values: []string{"head", "foot"}},
+	}},
+	"minecraft:green_bed": {MinStateID: 1896, DefaultStateID: 1899, Properties: []stateProperty{
+		{Name: "facing", Values: []string{"north", "south", "west", "east"}},
+		{Name: "occupied", Values: []string{"true", "false"}},
+		{Name: "part", Values: []string{"head", "foot"}},
+	}},
+	"minecraft:black_bed": {MinStateID: 1928, DefaultStateID: 1931, Properties: []stateProperty{
+		{Name: "facing", Values: []string{"north", "south", "west", "east"}},
+		{Name: "occupied", Values: []string{"true", "false"}},
+		{Name: "part", Values: []string{"head", "foot"}},
 	}},
 	"minecraft:red_bed": {MinStateID: 1912, DefaultStateID: 1915, Properties: []stateProperty{
 		{Name: "facing", Values: []string{"north", "south", "west", "east"}},

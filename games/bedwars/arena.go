@@ -59,8 +59,9 @@ func buildArena(teams []Team) *Arena {
 		// (always on the platform). Two blocks tracked as "the bed".
 		head := world.Position{X: cx, Y: baseY + 1, Z: cz}
 		foot := world.Position{X: cx + in.dx, Y: baseY + 1, Z: cz + in.dz}
-		t.SetBlock(head, tm.Bed)
-		t.SetBlock(foot, tm.Bed)
+		footBlk, headBlk := bedPair(tm.Bed, facingOf(-in.dx, -in.dz)) // head lies outward from the foot
+		t.SetBlock(head, headBlk)
+		t.SetBlock(foot, footBlk)
 		a.BedBlocks[tm.ID] = []world.Position{head, foot}
 		a.bedOwner[head] = tm.ID
 		a.bedOwner[foot] = tm.ID

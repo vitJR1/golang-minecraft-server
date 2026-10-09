@@ -220,3 +220,12 @@ type MenuItem struct {
 	Count int    // stack size shown (0 → 1)
 	Name  string // hover label
 }
+
+// PlacementRewriter is an optional extension a Logic (or listener) can
+// implement to change WHAT gets placed: the server calls it before the
+// OnBlockPlace veto with the block the player is about to put down and
+// places whatever comes back. BedWars uses it to turn any bed a player
+// places into their team's colour. Return blk unchanged to keep it.
+type PlacementRewriter interface {
+	RewritePlacedBlock(ctx *Ctx, p PlayerHandle, pos world.Position, blk world.Block) world.Block
+}

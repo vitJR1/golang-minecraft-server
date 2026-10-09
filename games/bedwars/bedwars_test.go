@@ -466,7 +466,7 @@ func TestSchemArenaFromRealMap(t *testing.T) {
 		}
 		// Beds must be recoloured to the team's colour in the world.
 		for _, bp := range a.BedBlocks[i] {
-			if got := w.GetBlock(bp); got != teams[i].Bed {
+			if got := w.GetBlock(bp); got.Name != teams[i].Bed.Name {
 				t.Errorf("team %d bed at %v: got %s, want %s", i, bp, got.Name, teams[i].Bed.Name)
 			}
 			if owner, ok := a.bedTeam(bp); !ok || owner != i {

@@ -218,6 +218,10 @@ type Instance struct {
 	// respawn (death screen or instant) is finalized.
 	OnPlayerDeath func(victim, killer *ClientConnection)
 
+	// OnRewritePlace, when set, may swap the block a player is about to
+	// place (game.PlacementRewriter). Runs before OnBlockPlace.
+	OnRewritePlace func(c *ClientConnection, pos world.Position, blk world.Block) world.Block
+
 	// OnBlockInteract fires for a left/right click on a block before the
 	// core treats it as a dig / placement / container open. false = consume
 	// (see game.BlockInteraction).

@@ -58,7 +58,7 @@ func buildSchemArena(path string, teams []Team) (*Arena, error) {
 		bc := beds[i]
 		// Recolour both halves to the team's bed and register ownership.
 		for _, p := range bc.positions {
-			tmpl.SetBlock(p, teams[i].Bed)
+			tmpl.SetBlock(p, recolourBed(tmpl.GetBlock(p), teams[i].Bed))
 			a.bedOwner[p] = i
 		}
 		a.BedBlocks[i] = bc.positions

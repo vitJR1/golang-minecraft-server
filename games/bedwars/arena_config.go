@@ -109,8 +109,40 @@ func buildBedwarsDuelArenaDef(arenaID, name string, tmpl *world.Template, config
 	if err != nil {
 		return nil, err
 	}
+	full := cfg
 	cfg = duelConfig(cfg)
-	return buildArenaDef(arenaID, name, tmpl, cfg)
+	def, err := buildArenaDef(arenaID, name, tmpl, cfg)
+	if err != nil {
+		return nil, err
+	}
+	// The bases that aren't in play keep their map blocks — except their
+	// beds, which would otherwise sit there in the map's original colour
+	// looking like somebody's. Clear them so the arena shows exactly the
+	// two team beds.
+	for _, dropped := range droppedTeams(full, cfg) {
+		for _, b := range dropped.Beds {
+			pos := world.Position{X: b.X, Y: b.Y, Z: b.Z}
+			def.Template.SetBlock(pos, world.Air)
+			def.Template.RemoveBlockEntity(pos)
+		}
+	}
+	return def, nil
+}
+
+// droppedTeams returns the teams of full that reduced no longer contains
+// (matched by spawn position, which is unique per base).
+func droppedTeams(full, reduced arenaConfig) []teamConfig {
+	kept := map[vec3]bool{}
+	for _, t := range reduced.Teams {
+		kept[t.Spawn.vec3] = true
+	}
+	var out []teamConfig
+	for _, t := range full.Teams {
+		if !kept[t.Spawn.vec3] {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // parseArenaConfig decodes the JSON layout and validates the team count.
@@ -222,8 +254,8 @@ func buildConfigArena(tmpl *world.Template, cfg arenaConfig, teams []Team) (*Are
 		var beds []world.Position
 		for _, b := range tc.Beds {
 			p := world.Position{X: b.X, Y: b.Y, Z: b.Z}
-			work.SetBlock(p, teams[i].Bed)          // recolour to the team's bed
-			work.AddBlockEntity(p, "minecraft:bed") // keep it visible (BER block)
+			work.SetBlock(p, recolourBed(work.GetBlock(p), teams[i].Bed)) // recolour, keep facing/part
+			work.AddBlockEntity(p, "minecraft:bed")                       // keep it visible (BER block)
 			a.bedOwner[p] = i
 			beds = append(beds, p)
 		}

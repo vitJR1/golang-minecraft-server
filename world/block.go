@@ -164,6 +164,7 @@ var (
 	SkeletonSkull                   = Block{StateID: 8827, Name: "minecraft:skeleton_skull"}
 	LightWeightedPressurePlate      = Block{StateID: 9003, Name: "minecraft:light_weighted_pressure_plate"}
 	RedstoneBlock                   = Block{StateID: 9083, Name: "minecraft:redstone_block"}
+	Ladder                          = Block{StateID: 4655, Name: "minecraft:ladder"} // facing=north, waterlogged=false
 	QuartzBlock                     = Block{StateID: 9095, Name: "minecraft:quartz_block"}
 	QuartzStairs                    = Block{StateID: 9111, Name: "minecraft:quartz_stairs"}
 	LightBlueStainedGlassPane       = Block{StateID: 9359, Name: "minecraft:light_blue_stained_glass_pane"}
@@ -272,7 +273,7 @@ func init() {
 		CyanStainedGlass, BlueStainedGlass, RedStainedGlass, StoneBricks,
 		MossyStoneBricks, PackedMud, MudBricks, InfestedStone, Chain,
 		StoneBrickStairs, NetherBrickStairs, EnderChest, SpruceStairs,
-		SkeletonSkull, LightWeightedPressurePlate, RedstoneBlock,
+		SkeletonSkull, LightWeightedPressurePlate, RedstoneBlock, Ladder,
 		QuartzBlock, QuartzStairs, LightBlueStainedGlassPane, BambooStairs,
 		PrismarineBricks, PrismarineBrickStairs, SeaLantern, CoalBlock,
 		PackedIce, RedWallBanner, BlackWallBanner, SpruceSlab, BambooSlab,

@@ -175,6 +175,11 @@ func (s *Server) AttachLogic(inst *Instance, logic game.Logic) *game.Ctx {
 	inst.OnBlockPlace = func(c *ClientConnection, pos world.Position, blk world.Block) bool {
 		return logic.OnBlockPlace(ctx, playerBridge{conn: c}, pos, blk)
 	}
+	if rw, ok := logic.(game.PlacementRewriter); ok {
+		inst.OnRewritePlace = func(c *ClientConnection, pos world.Position, blk world.Block) world.Block {
+			return rw.RewritePlacedBlock(ctx, playerBridge{conn: c}, pos, blk)
+		}
+	}
 	inst.OnBlockInteract = func(c *ClientConnection, click game.BlockInteraction) bool {
 		return logic.OnBlockInteract(ctx, playerBridge{conn: c}, click)
 	}

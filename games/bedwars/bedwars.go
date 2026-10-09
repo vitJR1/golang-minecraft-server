@@ -22,6 +22,7 @@ package bedwars
 import (
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -221,6 +222,19 @@ func (g *bedWars) OnBlockPlace(_ *game.Ctx, _ game.PlayerHandle, pos world.Posit
 	g.placed[pos] = true
 	g.mu.Unlock()
 	return true
+}
+
+// RewritePlacedBlock (game.PlacementRewriter) turns any bed a player places
+// into their team's colour, so a bought or found bed always matches.
+func (g *bedWars) RewritePlacedBlock(_ *game.Ctx, p game.PlayerHandle, _ world.Position, blk world.Block) world.Block {
+	if !strings.HasSuffix(blk.Name, "_bed") {
+		return blk
+	}
+	team, ok := g.teamOf(p)
+	if !ok {
+		return blk
+	}
+	return team.Bed
 }
 
 // OnTick drives void-death detection, resource generators, and the

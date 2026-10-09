@@ -96,6 +96,24 @@ func (i *Instance) allowBlockBreak(c *ClientConnection, pos world.Position) bool
 	return true
 }
 
+// rewritePlacedBlock lets listeners, then the instance's logic, swap the
+// block about to be placed (game.PlacementRewriter). Listeners that don't
+// implement the interface are skipped.
+func (i *Instance) rewritePlacedBlock(c *ClientConnection, pos world.Position, blk world.Block) world.Block {
+	ctx, p := i.pluginCtx(), playerBridge{conn: c}
+	for _, l := range i.listeners {
+		rw, ok := l.Logic.(game.PlacementRewriter)
+		if !ok {
+			continue
+		}
+		safeHook(i, "listener "+l.Name+" RewritePlacedBlock", func() { blk = rw.RewritePlacedBlock(ctx, p, pos, blk) })
+	}
+	if hook := i.OnRewritePlace; hook != nil {
+		blk = hook(c, pos, blk)
+	}
+	return blk
+}
+
 func (i *Instance) allowBlockPlace(c *ClientConnection, pos world.Position, blk world.Block) bool {
 	ctx, p := i.pluginCtx(), playerBridge{conn: c}
 	for _, l := range i.listeners {

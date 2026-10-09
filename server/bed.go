@@ -59,6 +59,14 @@ func bedFacing(yaw float32) (facingIdx int32, dx, dz int) {
 // the client) and registers bed block entities so the bed renders for late
 // joiners too.
 func (c *ClientConnection) placeBed(pos world.Position, bed world.Block) {
+	// Games may recolour the bed (BedWars: the placer's team). The rewrite
+	// must still be a bed in its default state; anything else keeps the
+	// held colour.
+	if rw := c.instance.rewritePlacedBlock(c, pos, bed); rw.Name != bed.Name {
+		if b, ok := bedFromItem(rw.Name); ok {
+			bed = b
+		}
+	}
 	facingIdx, dx, dz := bedFacing(c.player.Snapshot().Yaw)
 	headPos := world.Position{X: pos.X + dx, Y: pos.Y, Z: pos.Z + dz}
 

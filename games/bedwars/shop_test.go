@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"minecraft-server/game"
+	"minecraft-server/world"
 )
 
 func openShopFor(t *testing.T) (*bedWars, *fakePlayer) {
@@ -86,5 +87,21 @@ func TestShopIgnoresNonVillagers(t *testing.T) {
 	}
 	if red.menuTitle != "" {
 		t.Error("no menu for item frames")
+	}
+}
+
+func TestPlacedBedsTakeTheTeamColour(t *testing.T) {
+	g, inst, ctx := harness(t)
+	red := join(g, inst, ctx, "red", 1)
+	blue := join(g, inst, ctx, "blue", 2)
+	pos := world.Position{X: 3, Y: 65, Z: 3}
+	if got := g.RewritePlacedBlock(ctx, red, pos, world.YellowBed); got != world.RedBed {
+		t.Errorf("red player placing a yellow bed: %+v, want RedBed", got)
+	}
+	if got := g.RewritePlacedBlock(ctx, blue, pos, world.YellowBed); got != world.BlueBed {
+		t.Errorf("blue player placing a yellow bed: %+v, want BlueBed", got)
+	}
+	if got := g.RewritePlacedBlock(ctx, red, pos, world.Stone); got != world.Stone {
+		t.Error("non-bed blocks must pass through")
 	}
 }

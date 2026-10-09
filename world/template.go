@@ -36,6 +36,15 @@ func NewTemplate() *Template {
 
 // SetBlock records a block in the template. Setting Air removes the entry
 // (template stays sparse, mirroring MemoryWorld).
+// GetBlock returns the block at p, or Air when the template holds nothing
+// there.
+func (t *Template) GetBlock(p Position) Block {
+	if b, ok := t.blocks[p]; ok {
+		return b
+	}
+	return Air
+}
+
 func (t *Template) SetBlock(p Position, b Block) {
 	if b == Air {
 		delete(t.blocks, p)
@@ -79,6 +88,10 @@ func (t *Template) AddBlockEntity(p Position, typeName string) {
 }
 
 // SetBiome sets the template's (uniform) biome, e.g. "minecraft:plains".
+// RemoveBlockEntity forgets the block-entity marker at p (after the block
+// itself was cleared), so chunk data doesn't advertise a renderer for air.
+func (t *Template) RemoveBlockEntity(p Position) { delete(t.blockEntities, p) }
+
 func (t *Template) SetBiome(name string) { t.biome = name }
 
 // Biome returns the template's biome name (or "").

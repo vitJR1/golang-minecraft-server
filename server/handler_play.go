@@ -235,6 +235,14 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		if !ok || block == world.Air {
 			break
 		}
+		// Games/plugins may swap the block (BedWars: team-coloured beds).
+		block = c.instance.rewritePlacedBlock(c, placePos, block)
+		// Orientation / attachment rules (ladders hang on a wall).
+		block, ok = c.instance.orientForPlacement(block, placePos, int(face), c.player.Snapshot().Yaw)
+		if !ok {
+			_ = c.sendBlockUpdate(placePos, c.instance.World.GetBlock(placePos))
+			break
+		}
 		// Not into anyone's hitbox (including the placer's own).
 		if c.instance.blockedByPlayer(placePos) {
 			_ = c.sendBlockUpdate(placePos, c.instance.World.GetBlock(placePos))
