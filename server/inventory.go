@@ -128,6 +128,7 @@ func (c *ClientConnection) applyInventoryClick(packet *bytes.Buffer) itemStack {
 	if !ok {
 		return c.cursor
 	}
+	c.equipmentChanged()
 	return cursor
 }
 
@@ -287,6 +288,7 @@ func (c *ClientConnection) consumeHeld() {
 	}
 	c.inv.set(slot, st)
 	_ = c.sendSetSlot(0, slot, st)
+	c.equipmentChanged()
 }
 
 // heldItemName returns the namespaced id of the item in the selected hotbar

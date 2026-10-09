@@ -77,6 +77,7 @@ const (
 	CbPlaySetEntityMetadata  = 0x52 // "entity_metadata": e.g. item-frame item + rotation
 	CbPlayCombatDeath        = 0x38 // "death_combat_event": triggers the death screen
 	CbPlayEntityVelocity     = 0x54 // "entity_velocity": knockback (short units, 1/8000 block/tick)
+	CbPlaySetEquipment       = 0x55 // "entity_equipment": held item + armor as others see them (equipment.go)
 	CbPlaySetHealth          = 0x57 // "update_health": float HP + VarInt food + float saturation
 	CbPlaySoundEffect        = 0x62 // "sound_effect": named or registry-id sound at a position
 	CbPlayUpdateAttributes   = 0x6A // "entity_update_attributes": e.g. generic.attack_speed (cooldown bar)

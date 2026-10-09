@@ -111,6 +111,7 @@ func (c *ClientConnection) swapHeld(item string) {
 	st := itemStack{ID: id, Count: 1}
 	c.inv.set(slot, st)
 	_ = c.sendSetSlot(0, slot, st)
+	c.equipmentChanged()
 }
 
 // lookRay returns the eye position and the unit look vector.

@@ -216,4 +216,5 @@ func (c *ClientConnection) damageHeldTool(n int) {
 	}
 	c.inv.set(slot, st)
 	_ = c.sendSetSlot(0, slot, st)
+	c.equipmentChanged()
 }

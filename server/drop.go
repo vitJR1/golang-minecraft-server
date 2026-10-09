@@ -44,6 +44,7 @@ func (c *ClientConnection) dropHeld(all bool) {
 	}
 	c.inv.set(slot, st)
 	_ = c.sendSetSlot(0, slot, st)
+	c.equipmentChanged()
 	c.throwItem(itemID, n)
 }
 

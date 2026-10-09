@@ -433,6 +433,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		}
 		slot := int16(raw) // signed cast preserves bits; vanilla sends 0..8
 		c.heldSlot.Store(int32(slot))
+		c.equipmentChanged()
 
 	case SbPlaySetCreativeSlot:
 		// Short slot + Slot(item). Creative players send this whenever they

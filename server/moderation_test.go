@@ -98,7 +98,7 @@ func TestCmdMuteSuppressesChat(t *testing.T) {
 
 	// Drain the mutual join announces so we know what's pre-mute baseline.
 	drainExpect(t, modCh, "Mod sees Loud join",
-		CbPlayPlayerInfoUpdate, CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer)
+		CbPlayPlayerInfoUpdate, CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer, CbPlaySetEquipment)
 
 	mod.write(t, SbPlayChatCommand, protocol.WriteString("mute Loud 1m"))
 	// "Muted Loud until …" reply.

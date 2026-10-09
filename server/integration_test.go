@@ -374,9 +374,9 @@ func TestPlayerListRegistersAndBroadcasts(t *testing.T) {
 	// Drain the join announces before the chat broadcast so we know exactly
 	// what to expect afterward.
 	drainExpect(t, aliceCh, "Alice pre-chat",
-		CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer)
+		CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer, CbPlaySetEquipment)
 	drainExpect(t, bobCh, "Bob pre-chat",
-		CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer)
+		CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer, CbPlaySetEquipment)
 
 	chat := append(protocol.WriteString(`{"text":"hello"}`), 0) // overlay = false
 	s.Hub.Players.Broadcast(CbPlaySystemChat, chat, -1)
@@ -417,9 +417,9 @@ func TestPlayerListBroadcastExceptSkipsSender(t *testing.T) {
 	bobCh := cli2.startDrain()
 
 	drainExpect(t, aliceCh, "Alice pre-chat",
-		CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer)
+		CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer, CbPlaySetEquipment)
 	drainExpect(t, bobCh, "Bob pre-chat",
-		CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer)
+		CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer, CbPlaySetEquipment)
 
 	alice, _ := s.Hub.Players.ByName("Alice")
 
@@ -474,10 +474,12 @@ func TestTwoPlayersSeeEachOther(t *testing.T) {
 	drainExpect(t, aliceCh, "Alice",
 		CbPlayPlayerInfoUpdate, // Bob added to tab
 		CbPlaySpawnPlayer,      // Bob spawned
+		CbPlaySetEquipment,     // Bob's hands/armor
 	)
 	drainExpect(t, bobCh, "Bob",
 		CbPlayPlayerInfoUpdate, // tab list (Alice + Bob)
 		CbPlaySpawnPlayer,      // Alice spawned for Bob
+		CbPlaySetEquipment,     // Alice's hands/armor
 	)
 }
 
@@ -494,9 +496,9 @@ func TestPlayerMovementBroadcasts(t *testing.T) {
 	bobCh := cli2.startDrain()
 
 	drainExpect(t, aliceCh, "Alice pre-move",
-		CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer)
+		CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer, CbPlaySetEquipment)
 	drainExpect(t, bobCh, "Bob pre-move",
-		CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer)
+		CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer, CbPlaySetEquipment)
 
 	// Alice sends a position update. Bob should see Teleport Entity for her.
 	var move bytes.Buffer
@@ -530,7 +532,7 @@ func TestPlayerLeaveDespawnsForOthers(t *testing.T) {
 	_ = cli2.startDrain()
 
 	drainExpect(t, aliceCh, "Alice pre-leave",
-		CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer)
+		CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer, CbPlaySetEquipment)
 
 	// Bob disconnects.
 	_ = cli2.conn.Close()
@@ -550,8 +552,8 @@ func TestBlockPlaceBroadcastsAndAcks(t *testing.T) {
 	cli2 := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli2, "Watcher")
 	bobCh := cli2.startDrain()
-	drainExpect(t, aliceCh, "Placer pre-place", CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer)
-	drainExpect(t, bobCh, "Watcher pre-place", CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer)
+	drainExpect(t, aliceCh, "Placer pre-place", CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer, CbPlaySetEquipment)
+	drainExpect(t, bobCh, "Watcher pre-place", CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer, CbPlaySetEquipment)
 
 	// Placer right-clicks the top face of block (0, 63, 0) → server places
 	// at (0, 64, 0). They must be holding a block first.
@@ -623,8 +625,8 @@ func TestSwingArmBroadcasts(t *testing.T) {
 	cli2 := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli2, "Bystander")
 	bobCh := cli2.startDrain()
-	drainExpect(t, aliceCh, "Swinger pre-swing", CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer)
-	drainExpect(t, bobCh, "Bystander pre-swing", CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer)
+	drainExpect(t, aliceCh, "Swinger pre-swing", CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer, CbPlaySetEquipment)
+	drainExpect(t, bobCh, "Bystander pre-swing", CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer, CbPlaySetEquipment)
 
 	cli1.write(t, SbPlaySwingArm, protocol.WriteVarInt32(0)) // main hand
 	drainExpect(t, bobCh, "Bystander sees animation", CbPlayEntityAnimation)
@@ -648,8 +650,8 @@ func TestChatBroadcasts(t *testing.T) {
 	cli2 := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli2, "Listener")
 	bobCh := cli2.startDrain()
-	drainExpect(t, aliceCh, "Speaker pre-chat", CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer)
-	drainExpect(t, bobCh, "Listener pre-chat", CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer)
+	drainExpect(t, aliceCh, "Speaker pre-chat", CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer, CbPlaySetEquipment)
+	drainExpect(t, bobCh, "Listener pre-chat", CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer, CbPlaySetEquipment)
 
 	// 1.20.1 ChatMessage payload is String + Long(timestamp) + Long(salt)
 	// + Optional sig + VarInt(msg count) + FixedBitSet(20). We only need
@@ -927,9 +929,9 @@ func TestMovePlayerNotifiesStayers(t *testing.T) {
 
 	// Both clients see each other appear.
 	drainExpect(t, stayerCh, "Stayer sees Leaver join",
-		CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer)
+		CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer, CbPlaySetEquipment)
 	drainExpect(t, leaverCh, "Leaver bootstrap",
-		CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer)
+		CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer, CbPlaySetEquipment)
 
 	// Leaver moves out — Stayer should see despawn first.
 	leaver.write(t, SbPlayChatCommand, protocol.WriteString("instance join arena"))

@@ -376,11 +376,14 @@ func (i *Instance) JoinAndAnnounce(c *ClientConnection) {
 		_ = c.safeWrite(CbPlaySpawnPlayer, spawnPlayerPayload(other.player))
 	}
 
+	c.sendOthersEquipment()
+
 	// 3. Everyone else in the instance learns about the newcomer.
 	addNewcomer := playerInfoAddPayload([]*ClientConnection{c})
 	spawnNewcomer := spawnPlayerPayload(c.player)
 	i.Players.Broadcast(CbPlayPlayerInfoUpdate, addNewcomer, c.player.EntityID)
 	i.Players.Broadcast(CbPlaySpawnPlayer, spawnNewcomer, c.player.EntityID)
+	i.Players.Broadcast(CbPlaySetEquipment, c.equipmentPayload(), c.player.EntityID)
 
 	i.joinMu.Unlock()
 

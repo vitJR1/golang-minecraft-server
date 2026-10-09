@@ -57,7 +57,10 @@ func (c *ClientConnection) resyncView() error {
 		}
 		_ = c.safeWrite(CbPlaySpawnPlayer, spawnPlayerPayload(other.player))
 	}
-	// 6. Make sure everyone else sees this player at the current position.
+	c.sendOthersEquipment()
+	// 6. Make sure everyone else sees this player at the current position
+	//    and with the current gear.
 	c.broadcastEntityTeleport()
+	c.equipmentChanged()
 	return nil
 }
