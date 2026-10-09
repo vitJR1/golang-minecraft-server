@@ -26,7 +26,10 @@ func withKeepAliveTiming(t *testing.T, interval, timeout time.Duration) {
 // compressed timings: the server should send a Keep Alive, see no reply,
 // then drop the player after KeepAliveTimeout.
 func TestKeepAliveKicksUnresponsiveClient(t *testing.T) {
-	withKeepAliveTiming(t, 30*time.Millisecond, 90*time.Millisecond)
+	// Fast interval from the start, but a lenient timeout until login is
+	// done: the login + chunk stream takes well over 90 ms under the race
+	// detector and must not count as "unresponsive".
+	withKeepAliveTiming(t, 30*time.Millisecond, 20*time.Second)
 
 	s := New()
 	cli := pipeClientOn(t, s)
@@ -42,6 +45,8 @@ func TestKeepAliveKicksUnresponsiveClient(t *testing.T) {
 			}
 		}
 	}()
+	// Now the outstanding keep-alive (never echoed) ages past the ceiling.
+	SetKeepAliveTimeout(90 * time.Millisecond)
 
 	// Interval=30ms, timeout=90ms → first KA goes out at ~30ms, then on the
 	// next ticks it sees the pending ID > timeout and kicks. Allow generous
@@ -61,10 +66,7 @@ func TestKeepAliveKicksUnresponsiveClient(t *testing.T) {
 // Keep Alive it receives and stays in the player list across several
 // intervals.
 func TestKeepAliveAckKeepsClientAlive(t *testing.T) {
-	// A roomy timeout: the echo round trip through net.Pipe can take tens of
-	// milliseconds under the race detector, and a false kick here would be
-	// a timing artefact, not an ack bug (the kick path has its own test).
-	withKeepAliveTiming(t, 40*time.Millisecond, 400*time.Millisecond)
+	withKeepAliveTiming(t, 40*time.Millisecond, 20*time.Second)
 
 	s := New()
 	cli := pipeClientOn(t, s)
@@ -98,6 +100,13 @@ func TestKeepAliveAckKeepsClientAlive(t *testing.T) {
 			}
 		}
 	}()
+
+	// The keep-alive sent during login was drained without an echo: forget
+	// it, then arm a timeout the echo round trip can't trip (it takes tens
+	// of milliseconds under the race detector). From here every keep-alive
+	// is answered by the drainer above.
+	findConn(t, s, "Healthy").keepAlivePendingID.Store(0)
+	SetKeepAliveTimeout(400 * time.Millisecond)
 
 	// Sit through ~7 intervals — if ack logic is broken (acks not clearing
 	// the pending id) the 400 ms timeout kicks the player before this.
