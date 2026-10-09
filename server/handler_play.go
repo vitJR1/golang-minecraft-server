@@ -193,6 +193,11 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			break
 		}
 
+		// Flint and steel / fire charge on a TNT block lights it.
+		if c.tryIgniteTNT(clickedPos, held) {
+			break
+		}
+
 		// Right-clicking a chest opens it instead of placing a block.
 		if isChestBlock(c.instance.World.GetBlock(clickedPos)) {
 			c.openBlockChest(clickedPos)

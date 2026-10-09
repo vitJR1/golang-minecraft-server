@@ -107,6 +107,9 @@ func (c *ClientConnection) sendWorldEntities() error {
 	if err := c.sendItemEntities(); err != nil {
 		return err
 	}
+	if err := c.sendTNTEntities(); err != nil {
+		return err
+	}
 	return c.sendHolograms()
 }
 

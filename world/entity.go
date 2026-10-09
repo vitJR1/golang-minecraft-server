@@ -30,6 +30,7 @@ const (
 	ItemFrameEntityID     int32 = 56
 	GlowItemFrameEntityID int32 = 43
 	VillagerEntityID      int32 = 108
+	TNTEntityID           int32 = 101 // primed TNT ("minecraft:tnt")
 )
 
 // entityTypeIDs maps namespaced entity ids to their protocol type id, for the

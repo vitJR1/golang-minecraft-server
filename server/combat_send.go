@@ -9,8 +9,23 @@ import (
 
 // Sound categories (the VarInt "Sound Source" enum in Sound Effect).
 const (
+	soundCategoryBlocks = 4
 	soundCategoryPlayer = 7
 )
+
+// soundBaseRange is how far a volume-1 sound carries before the client
+// attenuates it to silence; louder sounds scale it (vanilla: 16 * volume).
+const soundBaseRange = 16.0
+
+// playSound broadcasts a positional sound to the players who can hear it.
+func (i *Instance) playSound(name string, category int32, x, y, z float64, volume, pitch float32) {
+	rng := soundBaseRange
+	if volume > 1 {
+		rng *= float64(volume)
+	}
+	i.Players.BroadcastNear(x, y, z, rng, CbPlaySoundEffect,
+		soundEffectPayload(name, category, x, y, z, volume, pitch), -1)
+}
 
 // sendSetHealth writes Set Health (0x57) to this player's own client: the
 // hearts bar (health), hunger (food), and saturation. We have no food

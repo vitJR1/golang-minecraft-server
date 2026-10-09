@@ -69,6 +69,8 @@ var (
 	DiamondBlock = Block{StateID: 4276, Name: "minecraft:diamond_block"}
 	EndStone     = Block{StateID: 7415, Name: "minecraft:end_stone"}
 	EmeraldBlock = Block{StateID: 7665, Name: "minecraft:emerald_block"}
+	// TNT default state (unstable=false), minecraft-data 1.20.
+	TNT = Block{StateID: 2095, Name: "minecraft:tnt"}
 
 	OakLog    = Block{StateID: 131, Name: "minecraft:oak_log"}
 	SpruceLog = Block{StateID: 134, Name: "minecraft:spruce_log"}
@@ -250,7 +252,7 @@ func init() {
 		OakPlanks, SprucePlanks, BirchPlanks, JunglePlanks, AcaciaPlanks, DarkOakPlanks,
 		Bedrock,
 		Sand, Gravel, GoldOre, IronOre, CoalOre, DiamondOre,
-		GoldBlock, IronBlock, Obsidian, DiamondBlock, EndStone, EmeraldBlock,
+		GoldBlock, IronBlock, Obsidian, DiamondBlock, EndStone, EmeraldBlock, TNT,
 		OakLog, SpruceLog, BirchLog,
 		Glass,
 		OakStairs, OakSlab, Beacon, BrownStainedGlass,

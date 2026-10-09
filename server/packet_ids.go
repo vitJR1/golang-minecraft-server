@@ -72,6 +72,7 @@ const (
 	CbPlaySpawnPlayer        = 0x03
 	CbPlayEntityAnimation    = 0x04
 	CbPlayAckBlockChange     = 0x06
+	CbPlayExplosion          = 0x1B // "explode": centre + strength + destroyed block offsets + player motion
 	CbPlayHurtAnimation      = 0x21 // "hurt_animation": entity id + yaw → red flash + recoil tilt
 	CbPlaySetEntityMetadata  = 0x52 // "entity_metadata": e.g. item-frame item + rotation
 	CbPlayCombatDeath        = 0x38 // "death_combat_event": triggers the death screen

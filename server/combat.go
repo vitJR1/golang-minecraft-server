@@ -133,13 +133,11 @@ func (c *ClientConnection) handleAttack(victim *ClientConnection) {
 	c.instance.Players.Broadcast(CbPlayHurtAnimation, hurtAnimationPayload(vSnap.EntityID, hurtYaw), -1)
 
 	// Hurt sound at the victim, audible to everyone nearby.
-	c.instance.Players.Broadcast(CbPlaySoundEffect,
-		soundEffectPayload("minecraft:entity.player.hurt", soundCategoryPlayer, vSnap.X, vSnap.Y, vSnap.Z, 1, 1), -1)
+	c.instance.playSound("minecraft:entity.player.hurt", soundCategoryPlayer, vSnap.X, vSnap.Y, vSnap.Z, 1, 1)
 
 	if crit {
 		c.broadcastEntityAnimation(4) // 4 = critical-hit particles on attacker
-		c.instance.Players.Broadcast(CbPlaySoundEffect,
-			soundEffectPayload("minecraft:entity.player.attack.crit", soundCategoryPlayer, vSnap.X, vSnap.Y, vSnap.Z, 1, 1), -1)
+		c.instance.playSound("minecraft:entity.player.attack.crit", soundCategoryPlayer, vSnap.X, vSnap.Y, vSnap.Z, 1, 1)
 	}
 
 	if killed {
@@ -173,8 +171,7 @@ func (c *ClientConnection) applyKnockback(cfg CombatConfig, aSnap, vSnap player.
 // client respawns on click (handled by SbPlayClientCommand → respawn()).
 func (c *ClientConnection) die(killer *ClientConnection) {
 	s := c.player.Snapshot()
-	c.instance.Players.Broadcast(CbPlaySoundEffect,
-		soundEffectPayload("minecraft:entity.player.death", soundCategoryPlayer, s.X, s.Y, s.Z, 1, 1), -1)
+	c.instance.playSound("minecraft:entity.player.death", soundCategoryPlayer, s.X, s.Y, s.Z, 1, 1)
 
 	if c.instance.InstantRespawn() {
 		// Heal + teleport to spawn now; no death screen. The hook fires

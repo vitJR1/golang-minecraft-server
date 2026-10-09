@@ -159,6 +159,11 @@ type Instance struct {
 	itemsMu sync.Mutex
 	items   []*itemEntity
 
+	// tnts are primed TNT entities counting down to their explosion
+	// (tnt.go). Guarded by tntMu.
+	tntMu sync.Mutex
+	tnts  []*primedTNT
+
 	// holograms are floating-text armor stands (game labels / timers).
 	// Guarded by holoMu.
 	holoMu    sync.Mutex
@@ -247,6 +252,7 @@ func NewInstance(id string, srv *Server, w world.World) *Instance {
 	i.OnTick(i.combatTick)
 	i.OnTick(i.projectileTick)
 	i.OnTick(i.itemTick)
+	i.OnTick(i.tntTick)
 	i.initListeners()
 	go i.tickLoop()
 	return i

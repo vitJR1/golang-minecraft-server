@@ -503,3 +503,89 @@ func BlockDrop(name string) (item string, count int) {
 	}
 	return name, 1
 }
+
+// exactBlastResistance lists vanilla blast resistance for blocks where it
+// differs noticeably from hardness (explosion.go). Unlisted blocks fall back
+// to a name pattern, then to their hardness.
+var exactBlastResistance = map[string]float64{
+	"minecraft:obsidian":          1200,
+	"minecraft:crying_obsidian":   1200,
+	"minecraft:anvil":             1200,
+	"minecraft:enchanting_table":  1200,
+	"minecraft:ender_chest":       600,
+	"minecraft:water":             100,
+	"minecraft:lava":              100,
+	"minecraft:end_stone":         9,
+	"minecraft:stone":             6,
+	"minecraft:cobblestone":       6,
+	"minecraft:mossy_cobblestone": 6,
+	"minecraft:deepslate":         6,
+	"minecraft:cobbled_deepslate": 6,
+	"minecraft:bricks":            6,
+	"minecraft:nether_bricks":     6,
+	"minecraft:stone_bricks":      6,
+	"minecraft:gold_block":        6,
+	"minecraft:iron_block":        6,
+	"minecraft:diamond_block":     6,
+	"minecraft:emerald_block":     6,
+	"minecraft:netherite_block":   1200,
+	"minecraft:coal_block":        6,
+	"minecraft:redstone_block":    6,
+	"minecraft:quartz_block":      0.8,
+	"minecraft:smooth_stone":      6,
+	"minecraft:glowstone":         0.3,
+	"minecraft:sea_lantern":       0.3,
+	"minecraft:chest":             2.5,
+	"minecraft:beacon":            3,
+	"minecraft:netherrack":        0.4,
+	"minecraft:magma_block":       0.5,
+	"minecraft:ice":               0.5,
+	"minecraft:packed_ice":        0.5,
+	"minecraft:blue_ice":          2.8,
+	"minecraft:sand":              0.5,
+	"minecraft:gravel":            0.6,
+	"minecraft:dirt":              0.5,
+	"minecraft:grass_block":       0.6,
+	"minecraft:tnt":               0,
+}
+
+// BlastResistance returns the block's vanilla blast resistance, used by the
+// explosion ray march: each ray loses (resistance + 0.3) * 0.3 per block it
+// crosses. Unbreakable blocks report an effectively infinite value.
+func BlastResistance(name string) float64 {
+	if r, ok := exactBlastResistance[name]; ok {
+		return r
+	}
+	info := BreakInfoFor(name)
+	if info.Hardness < 0 {
+		return 3600000 // bedrock & co.
+	}
+	short := strings.TrimPrefix(name, "minecraft:")
+	switch {
+	case strings.HasSuffix(short, "_wool"):
+		return 0.8
+	case strings.HasSuffix(short, "_planks"):
+		return 3
+	case strings.HasSuffix(short, "_log"), strings.HasSuffix(short, "_wood"), strings.HasPrefix(short, "stripped_"):
+		return 2
+	case strings.HasSuffix(short, "_glass"), strings.HasSuffix(short, "_glass_pane"), short == "glass", short == "glass_pane":
+		return 0.3
+	case strings.HasSuffix(short, "_leaves"):
+		return 0.2
+	case strings.HasSuffix(short, "_bed"):
+		return 0.2
+	case strings.HasSuffix(short, "_concrete_powder"):
+		return 0.5
+	case strings.HasSuffix(short, "_concrete"):
+		return 1.8
+	case strings.HasSuffix(short, "_terracotta"), short == "terracotta":
+		return 4.2
+	case strings.HasSuffix(short, "_ore"):
+		return 3
+	case strings.HasSuffix(short, "_stairs"), strings.HasSuffix(short, "_slab"), strings.HasSuffix(short, "_wall"),
+		strings.HasSuffix(short, "_bricks"), strings.Contains(short, "stone"), strings.Contains(short, "deepslate"),
+		strings.HasSuffix(short, "_block"):
+		return 6
+	}
+	return info.Hardness
+}

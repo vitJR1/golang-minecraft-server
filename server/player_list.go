@@ -28,6 +28,28 @@ func (pl *PlayerList) Add(c *ClientConnection) {
 	pl.mu.Unlock()
 }
 
+// BroadcastNear is Broadcast limited to players within radius blocks of
+// (x, y, z) — for positional effects (sounds, explosions) that the client
+// would attenuate to nothing anyway, so far players needn't get the packet.
+// Players without a position yet are skipped.
+func (pl *PlayerList) BroadcastNear(x, y, z, radius float64, packetID int32, payload []byte, exceptEntityID int32) {
+	r2 := radius * radius
+	for _, c := range pl.snapshot() {
+		if c.player == nil || c.player.EntityID == exceptEntityID {
+			continue
+		}
+		s := c.player.Snapshot()
+		dx, dy, dz := s.X-x, s.Y-y, s.Z-z
+		if dx*dx+dy*dy+dz*dz > r2 {
+			continue
+		}
+		if err := c.safeWrite(packetID, payload); err != nil {
+			slog.Warn("broadcast failed",
+				"player", c.player.Name, "packet_id", packetID, "err", err)
+		}
+	}
+}
+
 // Remove drops a player from the list. No-op if absent.
 func (pl *PlayerList) Remove(entityID int32) {
 	pl.mu.Lock()

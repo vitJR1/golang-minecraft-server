@@ -100,3 +100,24 @@ func TestBreakTicksWithModifiers(t *testing.T) {
 		t.Error("durability table")
 	}
 }
+
+func TestBlastResistance(t *testing.T) {
+	cases := map[string]float64{
+		"minecraft:obsidian":   1200,
+		"minecraft:stone":      6,
+		"minecraft:red_wool":   0.8,
+		"minecraft:oak_planks": 3,
+		"minecraft:tnt":        0,
+		"minecraft:glass":      0.3,
+		"minecraft:red_bed":    0.2,
+		"minecraft:water":      100,
+	}
+	for name, want := range cases {
+		if got := BlastResistance(name); got != want {
+			t.Errorf("BlastResistance(%s) = %v, want %v", name, got, want)
+		}
+	}
+	if got := BlastResistance("minecraft:bedrock"); got < 1e6 {
+		t.Errorf("bedrock should be effectively indestructible, got %v", got)
+	}
+}
