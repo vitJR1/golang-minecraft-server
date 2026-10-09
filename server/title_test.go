@@ -52,12 +52,20 @@ func TestBroadcastTitleReachesEveryoneAndDefaultsTimes(t *testing.T) {
 	b := tntConn(inst, "B", player.Survival, 2, 64, 0)
 	inst.broadcastTitle("Trap!", "", 0, 0, 0)
 	for _, c := range []*ClientConnection{a, b} {
-		times := lastPacket(t, c, CbPlaySetTitleAnimationTimes)
-		if times == nil || binary.BigEndian.Uint32(times[4:8]) != titleStay {
-			t.Errorf("%s: default stay expected, got %v", c.playerName, times)
+		// Read the queue once: lastPacket drains everything it scans.
+		got := map[int32][]byte{}
+		for len(c.outbound) > 0 {
+			buf := bytes.NewBuffer((<-c.outbound).frame)
+			_, _ = protocol.ReadVarInt(buf)
+			id, _ := protocol.ReadVarInt(buf)
+			got[int32(id)] = buf.Bytes()
 		}
-		if lastPacket(t, c, CbPlaySetTitleText) == nil {
-			t.Errorf("%s: no title", c.playerName)
+		times := got[CbPlaySetTitleAnimationTimes]
+		if times == nil || binary.BigEndian.Uint32(times[4:8]) != titleStay {
+			t.Errorf("%s: default stay expected, got %v", c.player.Name, times)
+		}
+		if got[CbPlaySetTitleText] == nil {
+			t.Errorf("%s: no title", c.player.Name)
 		}
 	}
 }
