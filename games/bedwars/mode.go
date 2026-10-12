@@ -70,7 +70,7 @@ var defaultMapPath = templates.SchemFile(templates.Root, templates.BedwarsDotaMa
 var defaultModes = []Mode{
 	// MinStart:2 keeps the flagship mode testable with just two clients;
 	// drop it to require one player per team before a round begins.
-	{ID: "bedwars", Name: "BedWars 4×4", Teams: 4, TeamSize: 4, MinStart: 2, Map: defaultMapPath},
+	{ID: "bedwars", Name: "BedWars 4×4", Teams: 4, TeamSize: 4, MinStart: 8, Map: defaultMapPath},
 	// 1×1 duel: two teams of one. No Map — the shipped DOTA map has four
 	// beds, so the matchmaker duel plays on the generated two-island arena.
 	// (The DOTA map is still playable 1×1 through the arena path: the

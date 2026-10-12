@@ -35,23 +35,25 @@ func (p *fakePlayer) GiveItem(item string, n int) {
 	}
 	p.given[item] += n
 }
-func (p *fakePlayer) Kick(string)                                      {}
-func (p *fakePlayer) IsOp() bool                                       { return p.op }
-func (p *fakePlayer) CountItem(string) int                             { return 0 }
-func (p *fakePlayer) TakeItem(string, int) bool                        { return false }
-func (p *fakePlayer) OpenMenu(string, int, []game.MenuItem, func(int)) {}
-func (p *fakePlayer) GiveStack(st game.ItemStack) int                  { p.GiveItem(st.Item, st.Count); return 0 }
-func (p *fakePlayer) SetSlot(int, game.ItemStack)                      {}
-func (p *fakePlayer) ClearInventory()                                  {}
-func (p *fakePlayer) Inventory() []game.ItemStack                      { return nil }
-func (p *fakePlayer) Health() float32                                  { return player.MaxHealth }
-func (p *fakePlayer) SetHealth(float32)                                {}
-func (p *fakePlayer) ApplyEffect(string, int, time.Duration)           {}
-func (p *fakePlayer) RemoveEffect(string)                              {}
-func (p *fakePlayer) SendTitle(string, string, int, int, int)          {}
-func (p *fakePlayer) PlaySound(string, float32, float32)               {}
-func (p *fakePlayer) Respawn(float64, float64, float64)                {}
-func (p *fakePlayer) Kill()                                            {}
+func (p *fakePlayer) Kick(string)                                                 {}
+func (p *fakePlayer) IsOp() bool                                                  { return p.op }
+func (p *fakePlayer) CountItem(string) int                                        { return 0 }
+func (p *fakePlayer) TakeItem(string, int) bool                                   { return false }
+func (p *fakePlayer) OpenMenu(string, int, []game.MenuItem, func(game.MenuClick)) {}
+func (p *fakePlayer) GiveStack(st game.ItemStack) int                             { p.GiveItem(st.Item, st.Count); return 0 }
+func (p *fakePlayer) SetSlot(int, game.ItemStack)                                 {}
+func (p *fakePlayer) ClearInventory()                                             {}
+func (p *fakePlayer) Inventory() []game.ItemStack                                 { return nil }
+func (p *fakePlayer) Health() float32                                             { return player.MaxHealth }
+func (p *fakePlayer) SetHealth(float32)                                           {}
+func (p *fakePlayer) ApplyEffect(string, int, time.Duration)                      {}
+func (p *fakePlayer) RemoveEffect(string)                                         {}
+func (p *fakePlayer) SendTitle(string, string, int, int, int)                     {}
+func (p *fakePlayer) PlaySound(string, float32, float32)                          {}
+func (p *fakePlayer) SetSidebar(string, []string)                                 {}
+func (p *fakePlayer) ClearSidebar()                                               {}
+func (p *fakePlayer) Respawn(float64, float64, float64)                           {}
+func (p *fakePlayer) Kill()                                                       {}
 
 type fakeInstance struct {
 	mu     sync.Mutex
@@ -100,6 +102,7 @@ func (i *fakeInstance) SpawnHologram(_, _, _ float64, _ string) game.Hologram   
 func (i *fakeInstance) SetCustomRespawn(bool)                                         {}
 func (i *fakeInstance) SetWeaponDamage(bool)                                          {}
 func (i *fakeInstance) SetTNTAutoPrime(bool)                                          {}
+func (i *fakeInstance) SetExplosionDamage(float64)                                    {}
 func (i *fakeInstance) PlaySound(string, float64, float64, float64, float32, float32) {}
 func (i *fakeInstance) ThrowProjectile(game.PlayerHandle, string, float64, game.ProjectileHooks) {
 }

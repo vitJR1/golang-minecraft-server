@@ -38,6 +38,7 @@ const (
 	EnchantKnockback    = "minecraft:knockback"
 	EnchantPower        = "minecraft:power"
 	EnchantPunch        = "minecraft:punch"
+	EnchantInfinity     = "minecraft:infinity"
 )
 
 // enchantOf returns the level of enchantment on st via the server's
@@ -82,11 +83,15 @@ var (
 	EffectRegeneration  = Effect{"regeneration", 10}
 	EffectInvisibility  = Effect{"invisibility", 14}
 	EffectBlindness     = Effect{"blindness", 15}
+	EffectAbsorption    = Effect{"absorption", 22}
 
-	// knownEffects is what /effect and games can grant. Speed / slowness /
-	// jump boost / blindness are applied by the client itself once it has
-	// the Entity Effect packet; haste / mining fatigue feed the dig formula,
-	// regeneration heals on effectsTick, invisibility flips the entity flag.
+	// knownEffects is what /effect and games can grant. Jump boost /
+	// blindness are applied by the client itself once it has the Entity
+	// Effect packet; speed / slowness need the movement_speed attribute
+	// synced as well (attributes.go); haste / mining fatigue feed the dig
+	// formula, regeneration heals on effectsTick, invisibility flips the
+	// entity flag, absorption fills the player's yellow-heart pool (4 HP
+	// per level, synced through player metadata — see absorption.go).
 	knownEffects = map[string]Effect{
 		EffectSpeed.Name:         EffectSpeed,
 		EffectSlowness.Name:      EffectSlowness,
@@ -96,6 +101,7 @@ var (
 		EffectRegeneration.Name:  EffectRegeneration,
 		EffectInvisibility.Name:  EffectInvisibility,
 		EffectBlindness.Name:     EffectBlindness,
+		EffectAbsorption.Name:    EffectAbsorption,
 	}
 )
 
@@ -168,6 +174,12 @@ func (t *effectTable) apply(c *ClientConnection, effect Effect, level int, d tim
 	if effect == EffectInvisibility {
 		c.broadcastEntityFlags()
 	}
+	if effect == EffectAbsorption {
+		c.grantAbsorption(level)
+	}
+	if affectsMovementSpeed(effect) {
+		_ = c.sendMovementAttributes() // the client won't speed up on the effect alone
+	}
 }
 
 // active returns the player's unexpired effects, sorted by name.
@@ -233,7 +245,7 @@ func (c *ClientConnection) sendEffectsRemoved(list []Effect) {
 	if c.player == nil {
 		return
 	}
-	invisible := false
+	invisible, movement, absorption := false, false, false
 	for _, e := range list {
 		var buf bytes.Buffer
 		protocol.WriteVarInt32ToBuffer(&buf, c.player.EntityID)
@@ -242,9 +254,23 @@ func (c *ClientConnection) sendEffectsRemoved(list []Effect) {
 		if e == EffectInvisibility {
 			invisible = true
 		}
+		if affectsMovementSpeed(e) {
+			movement = true
+		}
+		if e == EffectAbsorption {
+			absorption = true
+		}
 	}
 	if invisible {
 		c.broadcastEntityFlags()
+	}
+	if movement {
+		_ = c.sendMovementAttributes()
+	}
+	if absorption {
+		// The effect ending takes the leftover yellow hearts with it.
+		c.player.SetAbsorption(0)
+		c.syncAbsorption(false)
 	}
 }
 
@@ -299,6 +325,8 @@ func (c *ClientConnection) resendEffects() {
 	for _, ae := range c.activeEffects() {
 		_ = c.safeWrite(CbPlayEntityEffect, entityEffectPayload(c.player.EntityID, ae.Effect, ae.Level, ae.Remaining))
 	}
+	_ = c.sendMovementAttributes() // Respawn reset the attribute too
+	c.syncAbsorption(true)         // …and the yellow hearts (player metadata)
 }
 
 // effectsTick runs every tick on the instance: expires effects whose end

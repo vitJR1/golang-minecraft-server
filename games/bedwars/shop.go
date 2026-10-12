@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"minecraft-server/game"
+	"minecraft-server/world"
 )
 
 // shop.go is the villager item shop UI (Hypixel layout): a 6-row chest with
@@ -83,7 +84,7 @@ func (g *bedWars) openShop(ctx *game.Ctx, p game.PlayerHandle, cat int) {
 		}
 	}
 	title := fmt.Sprintf("Item Shop — %s", shopCategories[cat].Name)
-	p.OpenMenu(title, shopRows, items, func(slot int) { g.shopClick(ctx, p, cat, slot) })
+	p.OpenMenu(title, shopRows, items, func(click game.MenuClick) { g.shopClick(ctx, p, cat, click) })
 }
 
 // wareMenuItem renders one catalogue entry for the buyer: resolves team
@@ -130,6 +131,9 @@ func (g *bedWars) wareMenuItem(p game.PlayerHandle, ts *teamState, k *kit, it sh
 		lore = append(lore, "", priceLine(cost, price))
 		if p.CountItem(cost.item()) >= price {
 			lore = append(lore, "§eClick to purchase!")
+			if it.Kind == kindPlain && bulkPurchases(it, icon, world.MaxStackSize*price) > 1 {
+				lore = append(lore, "§eShift-click to buy a stack!")
+			}
 		} else {
 			lore = append(lore, fmt.Sprintf("§cYou don't have enough %s!", cost.String()))
 		}
@@ -149,9 +153,11 @@ func hasEnchant(it shopItem, ts *teamState) bool {
 	return (isSword(it.Icon) && ts.sharpened) || (it.Kind == kindArmor && ts.protection > 0)
 }
 
-// shopClick dispatches a click: tab → switch category, ware → buy. The menu
-// is reopened afterwards so lore reflects the new balance.
-func (g *bedWars) shopClick(ctx *game.Ctx, p game.PlayerHandle, cat, slot int) {
+// shopClick dispatches a click: tab → switch category, ware → buy (a
+// shift-click buys plain goods in bulk, see buyItem). The menu is reopened
+// afterwards so lore reflects the new balance.
+func (g *bedWars) shopClick(ctx *game.Ctx, p game.PlayerHandle, cat int, click game.MenuClick) {
+	slot := click.Slot
 	if slot >= shopTabSlot0 && slot < shopTabSlot0+len(shopCategories) {
 		g.openShop(ctx, p, slot-shopTabSlot0)
 		return
@@ -161,7 +167,7 @@ func (g *bedWars) shopClick(ctx *game.Ctx, p game.PlayerHandle, cat, slot int) {
 			continue
 		}
 		if i < len(shopCategories[cat].Items) {
-			g.buyItem(p, shopCategories[cat].Items[i])
+			g.buyItem(p, shopCategories[cat].Items[i], click.Shift)
 			g.openShop(ctx, p, cat)
 		}
 		return
@@ -169,8 +175,11 @@ func (g *bedWars) shopClick(ctx *game.Ctx, p game.PlayerHandle, cat, slot int) {
 }
 
 // buyItem performs a purchase: price out, goods in (per kind). Messages the
-// buyer on failure.
-func (g *bedWars) buyItem(p game.PlayerHandle, it shopItem) {
+// buyer on failure. bulk (a shift-click) buys plain goods in one go: as
+// many purchases as fill a full stack of the item, or as many as the
+// buyer's resources cover, whichever is less — at least the usual one.
+// Tiered / permanent wares ignore bulk.
+func (g *bedWars) buyItem(p game.PlayerHandle, it shopItem, bulk bool) {
 	ts, k, ok := g.playerState(p)
 	if !ok {
 		return
@@ -223,22 +232,43 @@ func (g *bedWars) buyItem(p game.PlayerHandle, it shopItem) {
 		p.GiveStack(it.Stack(ts.team))
 		p.SendMessage("§aYou purchased §6" + strings.TrimPrefix(it.Label, "§a"))
 	default:
-		if !g.pay(p, it.Cost, it.Price) {
-			return
-		}
 		st := game.ItemStack{Item: resolveGoods(it.Icon, ts.team), Count: it.Count}
 		if it.Stack != nil {
 			st = it.Stack(ts.team)
 		}
+		n := 1
+		if bulk {
+			n = bulkPurchases(it, st.Item, p.CountItem(it.Cost.item()))
+		}
+		if !g.pay(p, it.Cost, it.Price*n) {
+			return
+		}
+		st.Count *= n
 		st = ts.withTeamUpgrades(st)
 		if left := p.GiveStack(st); left > 0 {
 			// Inventory full: drop the remainder at the player's feet.
 			pose := p.Pose()
 			g.ctx.Instance.DropItem(pose.X, pose.Y+0.5, pose.Z, st.Item, left)
 		}
-		p.SendMessage(fmt.Sprintf("§aYou purchased §6%d× %s", it.Count, strings.TrimPrefix(it.Label, "§a")))
+		p.SendMessage(fmt.Sprintf("§aYou purchased §6%d× %s", st.Count, strings.TrimPrefix(it.Label, "§a")))
 	}
 	p.PlaySound("minecraft:entity.item.pickup", 1, 1)
+}
+
+// bulkPurchases is how many times a shift-click buys it: enough purchases
+// to fill one full stack of the goods (64 wool = 4× the 16-pack, 16 ender
+// pearls = 16× the single), capped by what `have` units of the currency
+// afford. Never below 1, so an unaffordable bulk buy fails like a single
+// one.
+func bulkPurchases(it shopItem, item string, have int) int {
+	n := 1
+	if it.Count > 0 {
+		n = world.MaxStackSizeOf(item) / it.Count
+	}
+	if it.Price > 0 && have/it.Price < n {
+		n = have / it.Price
+	}
+	return max(n, 1)
 }
 
 // pay charges price units of cost, or tells the buyer why not.

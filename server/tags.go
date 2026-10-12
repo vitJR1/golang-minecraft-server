@@ -4,6 +4,7 @@ import (
 	"bytes"
 
 	"minecraft-server/protocol"
+	"minecraft-server/world"
 )
 
 // tags.go sends the registry tags the vanilla client needs for client-side
@@ -16,11 +17,14 @@ import (
 //     (that is why lava "looked like water"),
 //   - never treats the player as being in water (FluidTags.WATER): no
 //     swimming, no water slowdown, no bubbles,
-//   - doesn't let players climb ladders/vines (BlockTags.CLIMBABLE).
+//   - doesn't let players climb ladders/vines (BlockTags.CLIMBABLE),
+//   - can't draw a bow in survival: BowItem.use looks for ammo with
+//     ItemTags.ARROWS, finds none and refuses (creative substitutes an
+//     arrow, which is why bows "only worked in creative").
 //
-// We send just those: the fluid registry's two tags and the block
-// registry's climbable tag. Numeric ids are the 1.20.1 REGISTRY ids (not
-// block-state ids), from minecraft-data 1.20.
+// We send just those: the fluid registry's two tags, the block registry's
+// climbable tag and the item registry's arrows tag. Numeric ids are the
+// 1.20.1 REGISTRY ids (not block-state ids), from minecraft-data 1.20.
 
 // Registry ids for the fluid registry (order: empty, flowing_water, water,
 // flowing_lava, lava).
@@ -44,6 +48,24 @@ var climbableBlockIDs = []int32{
 	957, // cave_vines_plant
 }
 
+// arrowItemIDs is the item registry's minecraft:arrows tag (vanilla
+// data/minecraft/tags/items/arrows.json).
+var arrowItemIDs = itemIDs("minecraft:arrow", "minecraft:tipped_arrow", "minecraft:spectral_arrow")
+
+// itemIDs resolves item names through the item registry, panicking at init
+// on a typo so a missing tag entry can't ship silently.
+func itemIDs(names ...string) []int32 {
+	out := make([]int32, 0, len(names))
+	for _, n := range names {
+		id, ok := world.ItemByName(n)
+		if !ok {
+			panic("tags: unknown item " + n)
+		}
+		out = append(out, id)
+	}
+	return out
+}
+
 type tagSet struct {
 	name    string
 	entries []int32
@@ -62,6 +84,9 @@ var serverTags = []taggedRegistry{
 	}},
 	{registry: "minecraft:block", tags: []tagSet{
 		{name: "minecraft:climbable", entries: climbableBlockIDs},
+	}},
+	{registry: "minecraft:item", tags: []tagSet{
+		{name: "minecraft:arrows", entries: arrowItemIDs},
 	}},
 }
 

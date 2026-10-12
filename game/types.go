@@ -229,6 +229,12 @@ type Instance interface {
 	// (Hypixel-style) instead of waiting for flint and steel.
 	SetTNTAutoPrime(enabled bool)
 
+	// SetExplosionDamage scales the player damage of every explosion in
+	// this instance (TNT, fireballs): 1 is vanilla (the default), 0.5
+	// halves it, 0 makes blasts knock back without hurting. Blocks are
+	// unaffected.
+	SetExplosionDamage(scale float64)
+
 	// ThrowProjectile launches item as a projectile from p's eyes along
 	// their look direction at speed blocks/tick, driven by hooks.
 	ThrowProjectile(p PlayerHandle, item string, speed float64, hooks ProjectileHooks)
@@ -291,10 +297,11 @@ type PlayerHandle interface {
 	TakeItem(itemName string, count int) bool
 
 	// OpenMenu shows a chest-style GUI of rows×9 slots titled title. items
-	// fill the slots; onClick fires with the clicked slot index (only for
-	// slots that hold an item) and the menu stays open with its contents
-	// re-sent, so a shop can sell repeatedly. Closing is up to the player.
-	OpenMenu(title string, rows int, items []MenuItem, onClick func(slot int))
+	// fill the slots; onClick fires with the clicked slot (only for slots
+	// that hold an item) plus the click's modifiers (shift / right button)
+	// and the menu stays open with its contents re-sent, so a shop can sell
+	// repeatedly. Closing is up to the player.
+	OpenMenu(title string, rows int, items []MenuItem, onClick func(click MenuClick))
 
 	// Kick closes the player's connection. The reason is logged but not
 	// (yet) sent as a Disconnect message — that needs the Play Disconnect
@@ -331,6 +338,14 @@ type PlayerHandle interface {
 
 	// PlaySound plays a sound only to this player, at their position.
 	PlaySound(name string, volume, pitch float32)
+
+	// SetSidebar shows a scoreboard sidebar (the panel on the right) with
+	// the title and up to 15 lines, top first; §-colour codes work and
+	// lines may repeat (blank lines included). Calling it again replaces
+	// the content, sending only what changed. ClearSidebar takes it down;
+	// the server also clears it when the player leaves the instance.
+	SetSidebar(title string, lines []string)
+	ClearSidebar()
 
 	// Respawn brings a dead player back at (x, y, z) with full health,
 	// re-sending effects and equipment. Used with SetCustomRespawn.

@@ -198,6 +198,19 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			break
 		}
 
+		// A fire charge on any other block is still a fireball throw: the
+		// client sends Use Item On Block, not Use Item, whenever a block is
+		// in reach (looking at your own feet), and it predicts placing fire
+		// on the clicked face — roll that back, then launch like Use Item.
+		if held == "minecraft:fire_charge" {
+			_ = c.sendBlockUpdate(placePos, c.instance.World.GetBlock(placePos))
+			if c.instance.allowItemUse(c, game.ItemUse{Item: held, Name: c.inv.held(c.heldSlot.Load()).Name, Slot: int(c.heldSlot.Load())}) {
+				c.throwFireball()
+				c.consumeHeld()
+			}
+			break
+		}
+
 		// Right-clicking a chest opens it instead of placing a block.
 		if isChestBlock(c.instance.World.GetBlock(clickedPos)) {
 			c.openBlockChest(clickedPos)
@@ -469,9 +482,9 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 
 	case SbPlayClickContainer:
 		// Window ID(UByte) + State ID(VarInt) + Slot(Short) + Button(Byte)
-		// + Mode(VarInt) + array of changed slots + carried item. We only
-		// use Slot — the rest is parsed-then-dropped because we control
-		// every menu (no real player inventory transfers happen).
+		// + Mode(VarInt) + array of changed slots + carried item. Menus use
+		// Slot plus Button/Mode (shift-click, right click); the changed
+		// slots only matter for window 0 and chests.
 		winID, err := packet.ReadByte()
 		if err != nil {
 			return fmt.Errorf("click container: window id: %w", err)
@@ -484,10 +497,9 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		// Slot can be -999 (drop outside window) which arrives as 0xFC19;
 		// the int16 cast preserves the bits and gives us back the sign.
 		slot := int16(slotU)
-		// Drain the rest defensively — we don't care, but a future
-		// handler might if it doesn't get drained first.
-		_, _ = packet.ReadByte()           // button
-		_, _ = protocol.ReadVarInt(packet) // mode
+		button, _ := packet.ReadByte()
+		mode, _ := protocol.ReadVarInt(packet)
+		click := menuClick{button: button, mode: mode}
 		if winID == 0 {
 			// The player's own inventory screen: keep the model in step, and
 			// whatever left the slots+cursor was dropped (click outside the
@@ -513,7 +525,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 				// so the client's ghost pickup / local inventory moves are
 				// undone and the menu stays open for the next click.
 				if entry, ok := m.entries[slot]; ok && m.onClick != nil {
-					m.onClick(c, entry)
+					m.onClick(c, entry, click)
 				}
 				if c.menu.Load() == m {
 					_ = c.sendChestContents(m.rows, m.entries)
@@ -522,7 +534,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 				// Navigation menu: dispatch the clicked icon. The rest of the
 				// packet (changed slots, carried item) is discarded.
 				if entry, ok := m.entries[slot]; ok && m.onClick != nil {
-					m.onClick(c, entry)
+					m.onClick(c, entry, click)
 				}
 			}
 		}

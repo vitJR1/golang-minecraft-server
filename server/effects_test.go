@@ -2,6 +2,8 @@ package server
 
 import (
 	"bytes"
+	"encoding/binary"
+	"encoding/hex"
 	"testing"
 	"time"
 
@@ -126,5 +128,94 @@ func TestResendEffectsAndDeathClearsThem(t *testing.T) {
 	}
 	if len(v.activeEffects()) != 0 {
 		t.Error("death should clear effects")
+	}
+}
+
+// readMovementAttribute parses an Update Attributes body and returns the
+// generic.movement_speed modifiers as (uuid hex → amount).
+func readMovementAttribute(t *testing.T, body []byte) map[string]float64 {
+	t.Helper()
+	buf := bytes.NewBuffer(body)
+	_, _ = protocol.ReadVarInt(buf) // entity id
+	if n, _ := protocol.ReadVarInt(buf); n != 1 {
+		t.Fatalf("property count %d, want 1", n)
+	}
+	l, _ := protocol.ReadVarInt(buf)
+	key := string(buf.Next(int(l)))
+	if key != movementSpeedAttribute {
+		t.Fatalf("attribute %q, want %q", key, movementSpeedAttribute)
+	}
+	var base float64
+	_ = binary.Read(buf, binary.BigEndian, &base)
+	if base != playerBaseMovementSpeed {
+		t.Errorf("base %v, want %v", base, playerBaseMovementSpeed)
+	}
+	n, _ := protocol.ReadVarInt(buf)
+	mods := map[string]float64{}
+	for i := 0; i < int(n); i++ {
+		uuid := hex.EncodeToString(buf.Next(16))
+		var amount float64
+		_ = binary.Read(buf, binary.BigEndian, &amount)
+		op, _ := buf.ReadByte()
+		if op != attributeOpMultiplyTotal {
+			t.Errorf("modifier %s: op %d, want multiply_total", uuid, op)
+		}
+		mods[uuid] = amount
+	}
+	if buf.Len() != 0 {
+		t.Errorf("%d trailing bytes", buf.Len())
+	}
+	return mods
+}
+
+func TestSpeedEffectSyncsMovementAttribute(t *testing.T) {
+	inst := bareInstance(New(), world.NewMemoryWorld())
+	c := tntConn(inst, "Runner", player.Survival, 0, 64, 0)
+	speedUUID := hex.EncodeToString(speedModifierUUID)
+	sprintUUID := hex.EncodeToString(sprintModifierUUID)
+
+	// Speed II → one modifier of 0.4 (0.2 × amplifier+1); the icon packet
+	// alone leaves the 1.20.1 client at normal speed.
+	c.applyEffect(EffectSpeed, 2, time.Minute)
+	body := lastPacket(t, c, CbPlayUpdateAttributes)
+	if body == nil {
+		t.Fatal("Speed must send Update Attributes")
+	}
+	mods := readMovementAttribute(t, body)
+	if len(mods) != 1 || mods[speedUUID] != 0.4 {
+		t.Errorf("Speed II modifiers: %v, want {%s: 0.4}", mods, speedUUID)
+	}
+
+	// Sprinting players keep their sprint boost in the sync, else the
+	// client drops it along with the modifiers it replaces.
+	c.sprinting.Store(true)
+	c.applyEffect(EffectSlowness, 1, time.Minute)
+	mods = readMovementAttribute(t, lastPacket(t, c, CbPlayUpdateAttributes))
+	if len(mods) != 3 || mods[hex.EncodeToString(slownessModifierUUID)] != -0.15 || mods[sprintUUID] != sprintBoost {
+		t.Errorf("Speed II + Slowness I sprinting: %v", mods)
+	}
+
+	// Removal syncs an empty list (plus the sprint boost).
+	c.sprinting.Store(false)
+	c.removeEffect(EffectSpeed)
+	c.removeEffect(EffectSlowness)
+	mods = readMovementAttribute(t, lastPacket(t, c, CbPlayUpdateAttributes))
+	if len(mods) != 0 {
+		t.Errorf("after removal: %v, want none", mods)
+	}
+
+	// Unrelated effects don't touch the attribute.
+	c.applyEffect(EffectJumpBoost, 1, time.Minute)
+	if lastPacket(t, c, CbPlayUpdateAttributes) != nil {
+		t.Error("jump boost must not resend movement attributes")
+	}
+
+	// Expiry through the sweep syncs too.
+	c.applyEffect(EffectSpeed, 1, time.Millisecond)
+	_ = lastPacket(t, c, CbPlayUpdateAttributes)
+	time.Sleep(5 * time.Millisecond)
+	inst.effectsTick(20)
+	if lastPacket(t, c, CbPlayUpdateAttributes) == nil {
+		t.Error("expired Speed must resync movement attributes")
 	}
 }

@@ -289,3 +289,75 @@ func TestExplosionRecordsAreRelativeOffsets(t *testing.T) {
 		}
 	}
 }
+
+// TestExplosionBehindWoolWallWithArmor replays the field report "hid behind
+// one wool block, lit TNT": a survival player in full leather behind a
+// one-block wool wall three blocks from the blast. The wall must go, but
+// the player must be untouched — exposure is cast through the world as it
+// was *before* the blast cleared it (the old order removed the wall first
+// and then found the player fully exposed, 29 damage, dead). Every packet
+// the explosion sends must parse, and nothing may panic.
+func TestExplosionBehindWoolWallWithArmor(t *testing.T) {
+	inst := bareInstance(New(), tntWorld())
+	inst.Combat = DefaultCombatConfig()
+	inst.combatEnabled.Store(true)
+	for y := 64; y <= 65; y++ {
+		inst.World.SetBlock(world.Position{X: 0, Y: y, Z: 2}, world.Block{StateID: 1384, Name: "minecraft:white_wool"})
+	}
+	c := tntConn(inst, "Hider", player.Survival, 0.5, 64, 3.5)
+	for i, name := range []string{"minecraft:leather_helmet", "minecraft:leather_chestplate", "minecraft:leather_leggings", "minecraft:leather_boots"} {
+		id, ok := world.ItemByName(name)
+		if !ok {
+			t.Fatalf("unknown item %s", name)
+		}
+		c.inv.set(int16(5+i), itemStack{ID: id, Count: 1})
+	}
+	pos := world.Position{X: 0, Y: 64, Z: 0}
+	inst.World.SetBlock(pos, world.TNT)
+	if !inst.primeTNT(pos, 1, c) {
+		t.Fatal("prime")
+	}
+	inst.tntTick(1)
+
+	if b := inst.World.GetBlock(world.Position{X: 0, Y: 64, Z: 2}); b != world.Air {
+		t.Errorf("wool wall should be blown away, still %s", b.Name)
+	}
+	if h := c.player.Health(); h != player.MaxHealth {
+		t.Errorf("health after a fully sheltered blast: %v, want untouched %v", h, player.MaxHealth)
+	}
+	// Every packet queued for the player must frame-parse; the explosion
+	// body must round-trip its fields.
+	var explosions int
+	for len(c.outbound) > 0 {
+		msg := <-c.outbound
+		if len(msg.frame) == 0 {
+			continue
+		}
+		buf := bytes.NewBuffer(msg.frame)
+		n, err := protocol.ReadVarInt(buf)
+		if err != nil || n != buf.Len() {
+			t.Fatalf("bad frame: len %d err %v body %d", n, err, buf.Len())
+		}
+		id, _ := protocol.ReadVarInt(buf)
+		if int32(id) != CbPlayExplosion {
+			continue
+		}
+		explosions++
+		buf.Next(8 * 3) // x y z
+		buf.Next(4)     // strength
+		records, _ := protocol.ReadVarInt(buf)
+		if records < 1 {
+			t.Errorf("explosion carries %d records, want the wool among them", records)
+		}
+		if buf.Len() != int(records)*3+12 {
+			t.Errorf("%d bytes for %d records, want %d", buf.Len(), records, int(records)*3+12)
+		}
+		buf.Next(int(records) * 3)
+		if buf.Len() != 12 {
+			t.Errorf("after %d records %d bytes remain, want 12 (player motion)", records, buf.Len())
+		}
+	}
+	if explosions != 1 {
+		t.Errorf("explosion packets: %d, want 1", explosions)
+	}
+}

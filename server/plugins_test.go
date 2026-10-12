@@ -261,6 +261,9 @@ func TestSectionBlocksPayloads(t *testing.T) {
 	if pos != packSectionPos(sectionKey{X: -1, Y: -1, Z: 1}) {
 		t.Errorf("section pos: %x", pos)
 	}
+	// 1.20 (763) has no Suppress Light Updates boolean before the count
+	// (1.19.4 did); an extra byte there reads as "0 entries" and the client
+	// kicks with "packet was larger than I expected".
 	n, _ := protocol.ReadVarInt(r)
 	if n != 1 {
 		t.Errorf("entries: %d, want 1", n)
@@ -279,6 +282,14 @@ func TestSectionBlocksPayloads(t *testing.T) {
 	n, _ = protocol.ReadVarInt(r)
 	if n != 2 {
 		t.Errorf("entries: %d, want 2 (deduped position + second block)", n)
+	}
+	for j := 0; j < 2; j++ {
+		if _, err := protocol.ReadVarLong(r); err != nil {
+			t.Fatalf("entry %d: %v", j, err)
+		}
+	}
+	if r.Len() != 0 {
+		t.Errorf("%d trailing bytes after the entries", r.Len())
 	}
 }
 

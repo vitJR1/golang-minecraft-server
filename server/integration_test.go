@@ -240,6 +240,7 @@ func TestOfflineLoginFlow(t *testing.T) {
 	expected := []expect{
 		{"Login(Play)", CbPlayLogin, 1000},
 		{"UpdateTags", CbPlayUpdateTags, 20},        // fluid water/lava + block climbable
+		{"ClearTitles", CbPlayClearTitles, 1},       // Boolean reset: drop the previous server's title
 		{"SpawnPos", CbPlaySpawnPos, 8},             // packed Position + Float angle
 		{"SetCenterChunk", CbPlaySetCenterChunk, 2}, // two VarInts
 		{"GameEvent(13)", CbPlayGameEvent, 5},       // 1 byte id + 4 byte float

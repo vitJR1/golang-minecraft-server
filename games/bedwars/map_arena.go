@@ -70,7 +70,7 @@ func buildSchemArena(path string, teams []Team) (*Arena, error) {
 
 		// Iron forge on the base (at the spawn spot — granter is a seam).
 		a.Generators = append(a.Generators, Generator{
-			Pos: spawn, Resource: Iron, IntervalTicks: 60, TeamID: i,
+			Pos: spawn, Resource: Iron, IntervalTicks: 40, TeamID: i,
 		})
 	}
 
@@ -87,6 +87,7 @@ func buildSchemArena(path string, teams []Team) (*Arena, error) {
 		TeamID:        neutral,
 	})
 
+	a.Lobby = defaultLobby(a.Generators, a.Spawns)
 	return a, nil
 }
 

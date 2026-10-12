@@ -8,7 +8,7 @@ import (
 	"minecraft-server/world"
 )
 
-func TestGoldenAppleHealsAfterEating(t *testing.T) {
+func TestGoldenAppleEffectsAfterEating(t *testing.T) {
 	inst := bareInstance(New(), world.NewMemoryWorld())
 	c := tntConn(inst, "Eater", player.Survival, 0, 64, 0)
 	c.player.SetHealth(10)
@@ -24,11 +24,17 @@ func TestGoldenAppleHealsAfterEating(t *testing.T) {
 		t.Fatal("nothing should happen before the eat time is up")
 	}
 	inst.consumeTick(100 + consumeTicks)
-	if h := c.player.Health(); h != 14 {
-		t.Errorf("health after golden apple: %v, want 14", h)
+	if h := c.player.Health(); h != 10 {
+		t.Errorf("health right after the apple: %v, want 10 (vanilla heals via Regeneration, not directly)", h)
 	}
 	if c.effectLevel(EffectRegeneration) != 2 {
 		t.Error("golden apple should grant Regeneration II")
+	}
+	if c.effectLevel(EffectAbsorption) != 1 {
+		t.Error("golden apple should grant Absorption I")
+	}
+	if a := c.player.Absorption(); a != 4 {
+		t.Errorf("absorption pool after the apple: %v, want 4 (two yellow hearts)", a)
 	}
 	if st := c.inv.get(hotbarStart); st.Count != 1 {
 		t.Errorf("one apple should be eaten, left %+v", st)

@@ -167,3 +167,29 @@ func TestApplyDamageKillsAndLatchesDead(t *testing.T) {
 		t.Errorf("after respawn: dead=%v health=%v", p.IsDead(), p.Health())
 	}
 }
+
+func TestApplyDamageDrainsAbsorptionFirst(t *testing.T) {
+	p := New(1, "Bob", [16]byte{})
+	p.SetAbsorption(4)
+	applied, health, killed := p.ApplyDamage(3, 100, 10)
+	if applied != 3 || health != MaxHealth || killed {
+		t.Errorf("hit inside the pool: applied=%v health=%v killed=%v", applied, health, killed)
+	}
+	if a := p.Absorption(); a != 1 {
+		t.Errorf("absorption after 3 damage: %v, want 1", a)
+	}
+	// A bigger hit after the window: the pool takes its last point, health the rest.
+	applied, health, _ = p.ApplyDamage(5, 200, 10)
+	if applied != 5 || health != MaxHealth-4 || p.Absorption() != 0 {
+		t.Errorf("hit through the pool: applied=%v health=%v absorption=%v", applied, health, p.Absorption())
+	}
+	p.SetAbsorption(4)
+	p.ApplyDamage(100, 300, 10)
+	if !p.IsDead() {
+		t.Error("a lethal hit still kills through absorption")
+	}
+	p.Respawn()
+	if p.Absorption() != 0 {
+		t.Error("respawn must clear the absorption pool")
+	}
+}

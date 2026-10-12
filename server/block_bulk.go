@@ -20,6 +20,10 @@ type sectionKey struct {
 	X, Y, Z int32 // chunk X, section Y (floor(y/16), may be negative), chunk Z
 }
 
+// Wire format (763): section position Long, VarInt count, VarLong entries
+// (state<<12 | x<<8|z<<4|y). The pre-1.20 suppress-light-updates Boolean
+// is gone.
+//
 // SetBlocks applies changes to the world and broadcasts them per section.
 // Later entries win when a position repeats. An empty list is a no-op.
 func (i *Instance) SetBlocks(changes []world.BlockChange) {
@@ -81,6 +85,10 @@ func sectionBlocksPayloads(changes []world.BlockChange) [][]byte {
 
 		var buf bytes.Buffer
 		buf.Write(protocol.WriteLong(packSectionPos(k)))
+		// No "Suppress Light Updates" boolean here: 1.20 (protocol 763)
+		// dropped it together with Chunk Data's Trust Edges (minecraft-data
+		// 1.19.4 has it, 1.20 doesn't). An extra byte makes the client read
+		// a zero count and kick with "packet was larger than I expected".
 		protocol.WriteVarInt32ToBuffer(&buf, int32(len(entries)))
 		for _, e := range entries {
 			// VarLong: state << 12 | local position.

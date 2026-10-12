@@ -106,7 +106,7 @@ func (b playerBridge) TakeItem(itemName string, count int) bool {
 	return b.conn.takeItem(id, count)
 }
 
-func (b playerBridge) OpenMenu(title string, rows int, items []game.MenuItem, onClick func(slot int)) {
+func (b playerBridge) OpenMenu(title string, rows int, items []game.MenuItem, onClick func(click game.MenuClick)) {
 	b.conn.openPluginMenu(title, rows, items, onClick)
 }
 
@@ -174,6 +174,15 @@ func (s *Server) AttachLogic(inst *Instance, logic game.Logic) *game.Ctx {
 	}
 	inst.OnBlockPlace = func(c *ClientConnection, pos world.Position, blk world.Block) bool {
 		return logic.OnBlockPlace(ctx, playerBridge{conn: c}, pos, blk)
+	}
+	if ev, ok := logic.(game.ExplosionBreakVeto); ok {
+		inst.OnExplosionBreak = func(c *ClientConnection, pos world.Position) bool {
+			var igniter game.PlayerHandle
+			if c != nil {
+				igniter = playerBridge{conn: c}
+			}
+			return ev.OnExplosionBreak(ctx, igniter, pos)
+		}
 	}
 	if rw, ok := logic.(game.PlacementRewriter); ok {
 		inst.OnRewritePlace = func(c *ClientConnection, pos world.Position, blk world.Block) world.Block {

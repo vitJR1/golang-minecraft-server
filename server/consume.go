@@ -1,10 +1,12 @@
 package server
 
 import (
+	"bytes"
 	"strings"
 	"time"
 
 	"minecraft-server/player"
+	"minecraft-server/protocol"
 	"minecraft-server/world"
 )
 
@@ -13,13 +15,18 @@ import (
 // after consumeTicks ticks if the player is still holding the same stack in
 // the same slot and hasn't started digging, switched slots or let go
 // (Player Action 5). The game gets first refusal through fireItemConsume;
-// otherwise the vanilla defaults apply: a golden apple heals 4 and grants
-// Regeneration II for 5 s, a potion applies the effect of its Potion id
+// otherwise the vanilla defaults apply: a golden apple grants Regeneration
+// II for 5 s and Absorption I for 2 min, a potion applies the effect of its Potion id
 // and leaves a glass bottle. The same state carries a bow draw (arrow.go).
 
 const (
 	consumeTicks = 32 // vanilla eat/drink duration (1.6 s)
 	tntAutoFuse  = 50 // ticks before a self-primed TNT block explodes
+
+	// Living-entity metadata index 8 "hand states": 0x01 = a hand is
+	// active (using an item), 0x02 = it's the off hand.
+	handStateIndex  byte = 8
+	handStateActive byte = 0x01
 )
 
 // useState is one use in progress.
@@ -40,11 +47,22 @@ func (c *ClientConnection) startUse(item string) {
 	if c.instance == nil {
 		return
 	}
-	c.using.Store(&useState{slot: c.heldSlot.Load(), item: item, startTick: c.instance.Tick()})
+	c.beginUse(&useState{slot: c.heldSlot.Load(), item: item, startTick: c.instance.Tick()})
+}
+
+// beginUse stores a new use and shows the pose (drawn bow, raised food)
+// to the other players.
+func (c *ClientConnection) beginUse(u *useState) {
+	c.using.Store(u)
+	c.broadcastHandState(true)
 }
 
 // cancelUse forgets a use in progress (slot switch, dig, death).
-func (c *ClientConnection) cancelUse() { c.using.Store(nil) }
+func (c *ClientConnection) cancelUse() {
+	if c.using.Swap(nil) != nil {
+		c.broadcastHandState(false)
+	}
+}
 
 // releaseUse handles Player Action 5 ("release use item"): a bow fires, a
 // consumable is simply abandoned.
@@ -53,9 +71,26 @@ func (c *ClientConnection) releaseUse() {
 	if u == nil {
 		return
 	}
+	c.broadcastHandState(false)
 	if u.bow {
 		c.shootBow(u)
 	}
+}
+
+// broadcastHandState tells the other players in the instance whether this
+// player's main hand is busy using an item: living-entity metadata index 8
+// (bit 0x01), which the client renders as the bow-draw / eating pose. The
+// player's own client tracks its own use and is skipped — a stale "idle"
+// from the server would cut its draw animation short.
+func (c *ClientConnection) broadcastHandState(active bool) {
+	if c.player == nil || c.instance == nil {
+		return
+	}
+	var flags byte
+	if active {
+		flags = handStateActive
+	}
+	c.instance.Players.Broadcast(CbPlaySetEntityMetadata, handStatePayload(c.player.EntityID, flags), c.player.EntityID)
 }
 
 // consumeTick finishes uses that have run their course. Registered on the
@@ -67,7 +102,9 @@ func (i *Instance) consumeTick(tick uint64) {
 			continue
 		}
 		if c.heldSlot.Load() != u.slot || c.heldItemName() != u.item {
-			c.using.CompareAndSwap(u, nil) // let go of the stack
+			if c.using.CompareAndSwap(u, nil) { // let go of the stack
+				c.broadcastHandState(false)
+			}
 			continue
 		}
 		if tick-u.startTick < consumeTicks {
@@ -76,6 +113,7 @@ func (i *Instance) consumeTick(tick uint64) {
 		if !c.using.CompareAndSwap(u, nil) {
 			continue
 		}
+		c.broadcastHandState(false)
 		c.finishConsume(u)
 	}
 }
@@ -90,8 +128,10 @@ func (c *ClientConnection) finishConsume(u *useState) {
 	if !c.instance.fireItemConsume(c, st) {
 		switch u.item {
 		case "minecraft:golden_apple":
-			c.heal(4)
+			// Vanilla: no direct heal — Regeneration II for 5 s plus
+			// Absorption I (two yellow hearts) for 2 minutes.
 			c.applyEffect(EffectRegeneration, 2, 5*time.Second)
+			c.applyEffect(EffectAbsorption, 1, 2*time.Minute)
 		case "minecraft:potion":
 			if e, lvl, d, ok := potionEffect(st.Potion); ok {
 				c.applyEffect(e, lvl, d)
@@ -157,4 +197,15 @@ func potionEffect(potion string) (Effect, int, time.Duration, bool) {
 		return EffectSlowness, 1, 90 * time.Second, true
 	}
 	return Effect{}, 0, 0, false
+}
+
+// handStatePayload builds Set Entity Metadata with just the hand-state byte.
+func handStatePayload(eid int32, flags byte) []byte {
+	var buf bytes.Buffer
+	protocol.WriteVarInt32ToBuffer(&buf, eid)
+	buf.WriteByte(handStateIndex)
+	protocol.WriteVarInt32ToBuffer(&buf, 0) // type: Byte
+	buf.WriteByte(flags)
+	buf.WriteByte(0xFF)
+	return buf.Bytes()
 }

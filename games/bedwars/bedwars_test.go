@@ -33,10 +33,11 @@ type fakePlayer struct {
 	titles   []string
 	sounds   []string
 	respawns int
+	sidebar  []string // last SetSidebar lines (nil after ClearSidebar)
 
 	menuTitle string
 	menuItems []game.MenuItem
-	menuClick func(int)
+	menuClick func(game.MenuClick)
 }
 
 func newFakePlayer(name string, eid int32) *fakePlayer {
@@ -112,7 +113,7 @@ func (p *fakePlayer) TakeItem(item string, n int) bool {
 	}
 	return true
 }
-func (p *fakePlayer) OpenMenu(title string, _ int, items []game.MenuItem, onClick func(int)) {
+func (p *fakePlayer) OpenMenu(title string, _ int, items []game.MenuItem, onClick func(game.MenuClick)) {
 	p.mu.Lock()
 	p.menuTitle, p.menuItems, p.menuClick = title, items, onClick
 	p.mu.Unlock()
@@ -246,6 +247,16 @@ func (p *fakePlayer) SendTitle(title, subtitle string, _, _, _ int) {
 	p.titles = append(p.titles, title+"|"+subtitle)
 	p.mu.Unlock()
 }
+func (p *fakePlayer) SetSidebar(_ string, lines []string) {
+	p.mu.Lock()
+	p.sidebar = append([]string(nil), lines...)
+	p.mu.Unlock()
+}
+func (p *fakePlayer) ClearSidebar() {
+	p.mu.Lock()
+	p.sidebar = nil
+	p.mu.Unlock()
+}
 func (p *fakePlayer) PlaySound(name string, _, _ float32) {
 	p.mu.Lock()
 	p.sounds = append(p.sounds, name)
@@ -277,6 +288,8 @@ type fakeInstance struct {
 	drops       []fakeDrop // every DropItem call, in order
 	holos       []*fakeHologram
 	projectiles []fakeProjectile
+	// explosionDamage is the last SetExplosionDamage value (0 = never set).
+	explosionDamage float64
 }
 
 // fakeHologram records the floating text a game asked for.
@@ -320,6 +333,12 @@ func newFakeInstance() *fakeInstance {
 func (i *fakeInstance) add(p *fakePlayer) {
 	i.mu.Lock()
 	i.players[p.eid] = p
+	i.mu.Unlock()
+}
+
+func (i *fakeInstance) remove(p *fakePlayer) {
+	i.mu.Lock()
+	delete(i.players, p.eid)
 	i.mu.Unlock()
 }
 
@@ -383,11 +402,16 @@ func (i *fakeInstance) EndGame() {
 
 // SetPvP / SetInstantRespawn satisfy the game.Instance combat-toggle methods.
 // The fake doesn't model combat, so they're no-ops.
-func (i *fakeInstance) SetPvP(bool)                                                   {}
-func (i *fakeInstance) SetInstantRespawn(bool)                                        {}
-func (i *fakeInstance) SetCustomRespawn(bool)                                         {}
-func (i *fakeInstance) SetWeaponDamage(bool)                                          {}
-func (i *fakeInstance) SetTNTAutoPrime(bool)                                          {}
+func (i *fakeInstance) SetPvP(bool)            {}
+func (i *fakeInstance) SetInstantRespawn(bool) {}
+func (i *fakeInstance) SetCustomRespawn(bool)  {}
+func (i *fakeInstance) SetWeaponDamage(bool)   {}
+func (i *fakeInstance) SetTNTAutoPrime(bool)   {}
+func (i *fakeInstance) SetExplosionDamage(scale float64) {
+	i.mu.Lock()
+	i.explosionDamage = scale
+	i.mu.Unlock()
+}
 func (i *fakeInstance) PlaySound(string, float64, float64, float64, float32, float32) {}
 func (i *fakeInstance) ThrowProjectile(p game.PlayerHandle, item string, speed float64, hooks game.ProjectileHooks) {
 	i.mu.Lock()
@@ -482,8 +506,8 @@ func TestRegistered(t *testing.T) {
 	if !ok {
 		t.Fatal("bedwars not registered")
 	}
-	if def.MinPlayers != 2 || def.MaxPlayers != 16 {
-		t.Errorf("player bounds: got %d..%d, want 2..16", def.MinPlayers, def.MaxPlayers)
+	if def.MinPlayers != 8 || def.MaxPlayers != 16 {
+		t.Errorf("player bounds: got %d..%d, want 8..16 (two full teams)", def.MinPlayers, def.MaxPlayers)
 	}
 	if def.Template == nil || def.Template.BlockCount() == 0 {
 		t.Fatal("template is empty")
@@ -829,5 +853,39 @@ func TestDuelOneKillAfterBedBreakWins(t *testing.T) {
 	}
 	if !inst.sawBroadcast("Red team wins") {
 		t.Errorf("expected Red win broadcast, got %v", inst.broadcasts)
+	}
+}
+
+// TestExplosionsSpareBedsAndHurtLess: TNT / fireballs never destroy a bed
+// (any team's, including the igniter's enemies'), while map blocks and
+// player-placed blocks go through to the usual rules; the round halves
+// explosion damage on start.
+func TestExplosionsSpareBedsAndHurtLess(t *testing.T) {
+	g, inst, ctx := harness(t)
+	red := join(g, inst, ctx, "red", 1) // team 0
+	_ = join(g, inst, ctx, "blue", 2)   // team 1
+
+	if inst.explosionDamage != explosionDamageScale {
+		t.Errorf("explosion damage scale on start: %v, want %v", inst.explosionDamage, explosionDamageScale)
+	}
+	for team, beds := range g.arena.BedBlocks {
+		for _, bp := range beds {
+			if g.OnExplosionBreak(ctx, red, bp) {
+				t.Errorf("explosion must not break team %d's bed half %v", team, bp)
+			}
+		}
+	}
+	if !g.teams[1].bedAlive {
+		t.Error("asking the veto must not kill the bed")
+	}
+	// An anonymous blast (nil igniter) is refused the same way.
+	if g.OnExplosionBreak(ctx, nil, g.arena.BedBlocks[1][0]) {
+		t.Error("anonymous explosion must not break a bed either")
+	}
+	// Non-bed blocks are left to OnBlockBreak: a placed block is fine.
+	placed := world.Position{X: 50, Y: 70, Z: 50}
+	g.OnBlockPlace(ctx, red, placed, world.Stone)
+	if !g.OnExplosionBreak(ctx, red, placed) {
+		t.Error("explosions may destroy ordinary blocks")
 	}
 }

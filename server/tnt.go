@@ -25,7 +25,8 @@ import (
 //     game rules (BedWars beds, hub protection) hold. Underwater explosions
 //     break nothing.
 //   - players: within 2*power blocks, damage = ((impact²+impact)/2*7*2*power
-//     + 1) where impact = (1 - dist/(2*power)) * exposure (fraction of the
+//     + 1) × the instance's ExplosionDamage multiplier (1 = vanilla),
+//     where impact = (1 - dist/(2*power)) * exposure (fraction of the
 //     hitbox the explosion can see), knockback = direction*impact delivered
 //     through the Explosion packet's player-motion fields. Only when the
 //     instance has combat enabled; creative/spectator players are immune.
@@ -229,13 +230,15 @@ func (i *Instance) explodeWith(x, y, z, power, knockback float64, igniter *Clien
 		actor = nil
 	}
 
+	// Vanilla order: decide which blocks go, hurt the players while those
+	// blocks still stand (exposure is cast through the intact world, so a
+	// wall shelters whoever hides behind it), then clear the blocks.
 	destroyed := i.explosionBlocks(x, y, z, power, actor)
-	i.applyExplosionBlocks(destroyed, power, actor)
-
 	hits := i.explosionPlayers(x, y, z, power, actor)
 	for c, h := range hits {
 		hits[c] = explosionHit{vx: h.vx * knockback, vy: h.vy * knockback, vz: h.vz * knockback}
 	}
+	i.applyExplosionBlocks(destroyed, power, actor)
 	i.knockbackTNT(x, y, z, power)
 
 	// One Explosion packet per player within explosionPacketRange (vanilla:
@@ -307,10 +310,14 @@ func (i *Instance) explosionBlocks(x, y, z, power float64, actor *ClientConnecti
 	return out
 }
 
-// allowExplosionBreak runs the block-break veto chain for an explosion. With
-// no known actor the hooks see a nil player; a hook that can't cope panics,
+// allowExplosionBreak asks the explosion-specific veto (game.ExplosionBreakVeto,
+// e.g. BedWars shielding beds) and then the block-break veto chain. With no
+// known actor the hooks see a nil player; a hook that can't cope panics,
 // which safeVeto turns into "allow" — same policy as every other hook.
 func (i *Instance) allowExplosionBreak(actor *ClientConnection, pos world.Position) bool {
+	if !i.allowExplosionBreakVeto(actor, pos) {
+		return false
+	}
 	if actor != nil {
 		return i.allowBlockBreak(actor, pos)
 	}
@@ -389,7 +396,7 @@ func (i *Instance) explosionPlayers(x, y, z, power float64, actor *ClientConnect
 		if impact <= 0 {
 			continue
 		}
-		damage := float32(math.Floor((impact*impact+impact)/2*7*radius + 1))
+		damage := float32(math.Floor((impact*impact+impact)/2*7*radius+1) * i.ExplosionDamage())
 		applied, newHealth, killed := p.ApplyDamage(c.absorbDamage(damage), now, i.Combat.InvulnTicks)
 		hits[c] = explosionHit{vx: ex * impact, vy: ey * impact, vz: ez * impact}
 		if applied <= 0 {

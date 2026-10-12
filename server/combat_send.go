@@ -30,13 +30,18 @@ func (i *Instance) playSound(name string, category int32, x, y, z float64, volum
 // sendSetHealth writes Set Health (0x57) to this player's own client: the
 // hearts bar (health), hunger (food), and saturation. We have no food
 // system, so food rides at full and saturation at a small constant —
-// enough to keep the client from showing a starving HUD.
+// enough to keep the client from showing a starving HUD. Every health
+// sync also re-syncs the absorption pool when it changed (damage drains
+// absorption before health, see player.ApplyDamage), so the yellow hearts
+// follow the red ones without each damage source having to remember.
 func (c *ClientConnection) sendSetHealth(health float32) error {
 	var buf bytes.Buffer
 	buf.Write(protocol.WriteFloat(health))
 	protocol.WriteVarInt32ToBuffer(&buf, 20) // food
 	buf.Write(protocol.WriteFloat(5))        // saturation
-	return c.safeWrite(CbPlaySetHealth, buf.Bytes())
+	err := c.safeWrite(CbPlaySetHealth, buf.Bytes())
+	c.syncAbsorption(false)
+	return err
 }
 
 // hurtAnimationPayload builds Hurt Animation (0x21): the entity flashes red

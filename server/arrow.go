@@ -14,7 +14,12 @@ import (
 //     held; below 0.1 nothing happens. One arrow leaves the inventory (not
 //     in creative) and the bow wears a point.
 //   - The arrow is a projectile (entity type 3) at 3·f blocks/tick with
-//     gravity 0.05 and drag 0.99. Every tick its path segment is tested
+//     gravity 0.05 and drag 0.99, spawned with the shooter as its owner
+//     (Spawn Entity data) so the client's own arrow simulation doesn't
+//     collide with the shooter and bounce back, and with its yaw/pitch
+//     taken from the velocity so it renders along its path. Other players
+//     see the shooter's draw pose through the living-entity hand-state
+//     metadata (consume.go). Every tick its path segment is tested
 //     against the players' hitboxes (inflated by 0.3, like vanilla); the
 //     shooter, the dead and spectators are skipped, and the game's
 //     OnPlayerAttack veto applies to the shooter→victim pair.
@@ -22,7 +27,12 @@ import (
 //     ×1.5 on a full-draw (critical) shot; then armor. Punch shoves the
 //     victim along the arrow by 0.6·lvl. A lethal arrow kills with the
 //     shooter credited.
-//   - An arrow that hits a block sticks there and vanishes after 60 s.
+//   - An arrow that hits a block sticks there and vanishes after 60 s —
+//     unless a player walks into it first: a survival shot without
+//     Infinity goes back into their inventory (Pickup Item fly-in), a
+//     creative or Infinity shot is only cleared by a creative player.
+//     Infinity itself keeps the arrow in the quiver (one must still be
+//     there).
 const (
 	arrowEntityID   int32   = 3
 	arrowSpeed              = 3.0  // blocks/tick at full draw
@@ -45,7 +55,7 @@ func (c *ClientConnection) startDraw() {
 	if c.gamemode() != player.Creative && c.countItem(arrowItemID()) == 0 {
 		return
 	}
-	c.using.Store(&useState{slot: c.heldSlot.Load(), item: "minecraft:bow", startTick: c.instance.Tick(), bow: true})
+	c.beginUse(&useState{slot: c.heldSlot.Load(), item: "minecraft:bow", startTick: c.instance.Tick(), bow: true})
 }
 
 // drawForce is the vanilla charge curve for a bow held for ticks.
@@ -70,16 +80,32 @@ func (c *ClientConnection) shootBow(u *useState) {
 	if f < arrowMinForce {
 		return
 	}
-	if c.gamemode() != player.Creative && !c.takeItem(arrowItemID(), 1) {
-		return
-	}
 	bow := c.inv.held(u.slot)
+	creative := c.gamemode() == player.Creative
+	infinite := c.enchantOf(bow, EnchantInfinity) > 0
+	switch {
+	case creative:
+	case infinite:
+		// Infinity: the arrow stays in the quiver, but one must be there.
+		if c.countItem(arrowItemID()) == 0 {
+			return
+		}
+	default:
+		if !c.takeItem(arrowItemID(), 1) {
+			return
+		}
+	}
+	pickup := pickupAllowed
+	if creative || infinite {
+		pickup = pickupCreativeOnly // vanilla: nothing to get back
+	}
 	p := &projectile{
+		pickup:  pickup,
 		typeID:  arrowEntityID,
 		item:    "minecraft:arrow",
 		gravity: arrowGravity,
 		drag:    arrowDrag,
-		data:    c.player.EntityID + 1, // vanilla: shooter id + 1
+		data:    c.player.EntityID, // Spawn Entity data = owner id (0 = none) since 1.17's Projectile
 		power:   c.enchantOf(bow, EnchantPower),
 		punch:   c.enchantOf(bow, EnchantPunch),
 		crit:    f >= 1,

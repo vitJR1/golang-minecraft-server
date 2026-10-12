@@ -59,7 +59,7 @@ func (g *bedWars) spawnHolograms(ctx *game.Ctx) {
 		x, y, z := gen.dropPoint()
 		base := y + hologramHeight - nameTagOffset
 		title := ctx.Instance.SpawnHologram(x, base+hologramLineGap, z, gen.Resource.title())
-		timer := ctx.Instance.SpawnHologram(x, base, z, timerText(gen, 0, false))
+		timer := ctx.Instance.SpawnHologram(x, base, z, timerText(gen.IntervalTicks, 0, false))
 		if title == nil || timer == nil {
 			continue
 		}
@@ -76,23 +76,30 @@ func (g *bedWars) spawnHolograms(ctx *game.Ctx) {
 func (g *bedWars) updateHolograms(ctx *game.Ctx, tick uint64) {
 	g.mu.Lock()
 	holos := g.holograms
+	intervals := make([]uint64, len(holos))
+	for i, h := range holos {
+		intervals[i] = g.effectiveIntervalLocked(h.gen) // tier-adjusted
+	}
 	g.mu.Unlock()
-	for _, h := range holos {
+	for i, h := range holos {
 		x, y, z := h.gen.dropPoint()
 		item := resourceItem[h.gen.Resource]
 		full := ctx.Instance.DroppedItemsNear(x, y, z, dropCapRadius, item) >= h.gen.maxStack()
-		h.timer.SetText(timerText(h.gen, tick, full))
+		h.timer.SetText(timerText(intervals[i], tick, full))
 	}
 }
 
 // timerText renders the countdown line: seconds until the generator next
-// fires (on its IntervalTicks grid), or a "full" notice while the pile at the
-// forge is at its cap and the generator idles.
-func timerText(gen Generator, tick uint64, full bool) string {
+// fires (on its current interval grid), or a "full" notice while the pile
+// at the forge is at its cap and the generator idles.
+func timerText(interval, tick uint64, full bool) string {
 	if full {
 		return "§cFull"
 	}
-	remaining := gen.IntervalTicks - tick%gen.IntervalTicks
+	if interval == 0 {
+		return ""
+	}
+	remaining := interval - tick%interval
 	secs := (remaining + 19) / 20
 	return fmt.Sprintf("§eSpawns in §f%ds", secs)
 }

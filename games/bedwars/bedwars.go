@@ -70,7 +70,7 @@ func registerMode(m Mode) {
 		MinPlayers: m.minPlayers(),
 		MaxPlayers: m.maxPlayers(),
 		Template:   arena.Template,
-		New:        func() game.Logic { return newBedWars(arena, teams, m.TeamSize) },
+		New:        func() game.Logic { return newBedWars(arena, teams, m.TeamSize).WithMinPlayers(m.minPlayers()) },
 	})
 }
 
@@ -103,6 +103,19 @@ type bedWars struct {
 	// holograms are the countdown labels over diamond/emerald generators
 	// (see hologram.go); spawned in OnInstanceStart, refreshed on tick.
 	holograms []genHologram
+
+	// stats feeds the sidebar: kills / beds per entity id (sidebar.go).
+	stats map[int32]*playerStats
+
+	// Lobby phase (lobby.go): minPlayers > 0 means the round waits for
+	// that many players; started flips when it begins, startTick anchors
+	// the generator timeline, waiting holds the parked players and
+	// countdownAt is the instance tick the countdown ends (0 = none).
+	minPlayers  int
+	started     bool
+	startTick   uint64
+	waiting     map[int32]game.PlayerHandle
+	countdownAt uint64
 }
 
 func newBedWars(arena *Arena, teams []Team, teamSize int) *bedWars {
@@ -116,6 +129,9 @@ func newBedWars(arena *Arena, teams []Team, teamSize int) *bedWars {
 		placed:   make(map[world.Position]bool),
 		kits:     make(map[int32]*kit),
 		pending:  make(map[int32]pendingRespawn),
+		stats:    make(map[int32]*playerStats),
+		waiting:  make(map[int32]game.PlayerHandle),
+		started:  true, // no lobby unless WithMinPlayers says so
 	}
 	for i, t := range teams {
 		g.teams[i] = newTeamState(t)
@@ -135,21 +151,30 @@ func (g *bedWars) WithGranter(r ResourceGranter) *bedWars {
 func (g *bedWars) OnInstanceStart(ctx *game.Ctx) {
 	g.mu.Lock()
 	g.ctx = ctx
+	started := g.started
 	g.mu.Unlock()
 	// Hypixel rules: real HP from weapons/armour, the game drives respawns,
-	// placed TNT lights itself.
-	ctx.Instance.SetPvP(true)
+	// placed TNT lights itself. PvP waits for the lobby to end.
+	ctx.Instance.SetPvP(started)
 	ctx.Instance.SetWeaponDamage(true)
 	ctx.Instance.SetCustomRespawn(true)
 	ctx.Instance.SetTNTAutoPrime(true)
+	ctx.Instance.SetExplosionDamage(explosionDamageScale)
 	ctx.Instance.BroadcastChat("", "BedWars! Protect your bed, break the others.")
 	g.spawnHolograms(ctx)
 }
 
 // OnPlayerJoin assigns the newcomer to the smallest team, drops them on
 // their island in Survival, and arms the win-check once two teams are live.
+// While the round is still in its lobby the player waits at the centre
+// instead (lobby.go).
 func (g *bedWars) OnPlayerJoin(ctx *game.Ctx, p game.PlayerHandle) {
 	g.mu.Lock()
+	if !g.started {
+		g.mu.Unlock()
+		g.joinLobby(ctx, p)
+		return
+	}
 	ts := g.assignTeamLocked()
 	ts.members[p.EntityID()] = true
 	g.byEntity[p.EntityID()] = ts.team.ID
@@ -159,8 +184,10 @@ func (g *bedWars) OnPlayerJoin(ctx *game.Ctx, p game.PlayerHandle) {
 	spawn := g.arena.Spawns[ts.team.ID]
 	teamName := ts.team.Name
 	k := g.kitOfLocked(p.EntityID())
+	tick := g.tick
 	g.mu.Unlock()
 
+	p.SetSidebar(sidebarTitle, g.sidebarLines(p, tick))
 	p.SetGamemode(player.Survival)
 	teleport(p, spawn)
 	g.equip(p, ts, k)
@@ -170,7 +197,13 @@ func (g *bedWars) OnPlayerJoin(ctx *game.Ctx, p game.PlayerHandle) {
 // OnPlayerLeave drops the player from their team and re-checks the win
 // condition (a disconnect can end the round).
 func (g *bedWars) OnPlayerLeave(ctx *game.Ctx, p game.PlayerHandle) {
+	p.ClearSidebar()
 	g.mu.Lock()
+	if !g.started {
+		g.mu.Unlock()
+		g.leaveLobby(ctx, p)
+		return
+	}
 	g.removeMemberLocked(p.EntityID())
 	delete(g.pending, p.EntityID())
 	winner, decided := g.winnerLocked()
@@ -189,6 +222,9 @@ func (g *bedWars) OnPlayerAttack(_ *game.Ctx, attacker, target game.PlayerHandle
 	at, aok := g.byEntity[attacker.EntityID()]
 	tt, tok := g.byEntity[target.EntityID()]
 	sameTeam := aok && tok && at == tt
+	if !g.started {
+		sameTeam = true // nobody fights in the lobby
+	}
 	g.mu.Unlock()
 	return !sameTeam
 }
@@ -213,6 +249,13 @@ func (g *bedWars) OnPlayerDeath(ctx *game.Ctx, victim, killer game.PlayerHandle)
 		killerTeam, killerKnown = g.byEntity[killer.EntityID()]
 	}
 	enemyKiller := killerKnown && killerTeam != teamID
+	if enemyKiller {
+		st := g.statsLocked(killer.EntityID())
+		st.kills++
+		if !bedAlive {
+			st.finalKills++
+		}
+	}
 	if bedAlive {
 		g.pending[victim.EntityID()] = pendingRespawn{p: victim, at: g.tick + respawnDelayTicks}
 	} else {
@@ -268,6 +311,10 @@ func (g *bedWars) OnPlayerDeath(ctx *game.Ctx, victim, killer game.PlayerHandle)
 //   - breaking anything else (the map) is vetoed.
 func (g *bedWars) OnBlockBreak(ctx *game.Ctx, p game.PlayerHandle, pos world.Position) bool {
 	g.mu.Lock()
+	if !g.started {
+		g.mu.Unlock()
+		return false // the map is frozen while the lobby waits
+	}
 	if owner, isBed := g.arena.bedTeam(pos); isBed {
 		breaker, ok := g.byEntity[p.EntityID()]
 		if ok && breaker == owner {
@@ -278,6 +325,9 @@ func (g *bedWars) OnBlockBreak(ctx *game.Ctx, p game.PlayerHandle, pos world.Pos
 		ts := g.teams[owner]
 		alreadyGone := !ts.bedAlive
 		ts.bedAlive = false
+		if !alreadyGone {
+			g.statsLocked(p.EntityID()).beds++
+		}
 		beds := g.arena.BedBlocks[owner]
 		teamName := ts.team.Name
 		g.mu.Unlock()
@@ -304,13 +354,30 @@ func (g *bedWars) OnBlockBreak(ctx *game.Ctx, p game.PlayerHandle, pos world.Pos
 	return false // protect the original map
 }
 
+// explosionDamageScale halves what TNT and fireballs do to players: blasts
+// are for bed defences and knockback, not kills.
+const explosionDamageScale = 0.5
+
+// OnExplosionBreak (game.ExplosionBreakVeto) keeps every bed out of
+// explosions: TNT / fireballs may clear the defences around a bed but never
+// the bed itself — that takes a player with a tool (OnBlockBreak).
+func (g *bedWars) OnExplosionBreak(_ *game.Ctx, _ game.PlayerHandle, pos world.Position) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	_, isBed := g.arena.bedTeam(pos)
+	return !isBed
+}
+
 // OnBlockPlace records the position so it becomes breakable later. The
 // engine always reports world.Stone (no inventory yet); the type is
 // irrelevant to the placed-block bookkeeping.
 func (g *bedWars) OnBlockPlace(_ *game.Ctx, _ game.PlayerHandle, pos world.Position, _ world.Block) bool {
 	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.started {
+		return false
+	}
 	g.placed[pos] = true
-	g.mu.Unlock()
 	return true
 }
 
@@ -332,15 +399,24 @@ func (g *bedWars) RewritePlacedBlock(_ *game.Ctx, p game.PlayerHandle, _ world.P
 func (g *bedWars) OnTick(ctx *game.Ctx, tick uint64) {
 	g.mu.Lock()
 	g.tick = tick
+	started := g.started
 	g.mu.Unlock()
+	if !started {
+		g.lobbyTick(ctx, tick)
+		return
+	}
 	if tick%voidScanInterval == 0 {
 		g.checkVoid(ctx)
 	}
 	g.processRespawns(ctx, tick)
+	g.announceUpgrades(ctx, tick)
 	g.runGenerators(ctx, tick)
 	g.updateHolograms(ctx, tick)
 	g.healPoolTick(ctx, tick)
 	g.trapTick(ctx, tick)
+	if tick%20 == 0 {
+		g.refreshSidebars(ctx, tick)
+	}
 }
 
 // --- internals -------------------------------------------------------------
@@ -419,17 +495,24 @@ var forgeMultiplier = [...]float64{1, 1.5, 2, 2, 3}
 // drops an emerald at the team's generator.
 var forgeEmeraldInterval = map[int]uint64{3: 1200, 4: 600}
 
-// effectiveInterval is a generator's interval after the owning team's
-// Forge tier (neutral generators are untouched). Caller holds g.mu.
+// effectiveInterval is a generator's interval right now: the configured
+// interval scaled by the shared diamond / emerald tier (sidebar.go) and
+// divided by the owning team's Forge tier (team generators only). Caller
+// holds g.mu.
 func (g *bedWars) effectiveIntervalLocked(gen Generator) uint64 {
-	if gen.IntervalTicks == 0 || gen.TeamID == neutral || gen.TeamID >= len(g.teams) {
-		return gen.IntervalTicks
+	if gen.IntervalTicks == 0 {
+		return 0
 	}
-	tier := g.teams[gen.TeamID].forge
-	if tier <= 0 || tier >= len(forgeMultiplier) {
-		return gen.IntervalTicks
+	interval := float64(gen.IntervalTicks)
+	if gen.Resource.timed() {
+		interval *= genTierSpeed[genTierAt(gen.Resource, g.roundTickLocked(g.tick))]
 	}
-	return max(1, uint64(float64(gen.IntervalTicks)/forgeMultiplier[tier]))
+	if gen.TeamID != neutral && gen.TeamID < len(g.teams) {
+		if tier := g.teams[gen.TeamID].forge; tier > 0 && tier < len(forgeMultiplier) {
+			interval /= forgeMultiplier[tier]
+		}
+	}
+	return max(1, uint64(interval))
 }
 
 // runGenerators fires each generator on its (Forge-adjusted) interval,

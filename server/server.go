@@ -336,8 +336,10 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 	oldUUIDs := old.Players.UUIDs()
 
 	// 1. Tell old instance the player is gone (broadcasts to others +
-	//    removes c from old.Players).
+	//    removes c from old.Players). Whatever sidebar that instance's game
+	//    left up comes down with it, so the next game starts clean.
 	old.LeaveAndAnnounce(c)
+	c.clearSidebar()
 
 	// 2. Wipe c's tab list. Respawn doesn't do this, and the next
 	//    JoinAndAnnounce will rebuild it for the new instance.
@@ -539,6 +541,11 @@ type ClientConnection struct {
 	digPos       *world.Position
 	digStartTick uint64
 
+	// sentAbsorption is the absorption value last written to the clients
+	// as player metadata (absorption.go), so syncAbsorption can skip
+	// no-op updates. Stored as the float's bits.
+	sentAbsorption atomic.Uint32
+
 	// fireTicks is how long the player keeps burning (fluid.go burnTick);
 	// 0 = not on fire. Atomic: written by the tick loop, cleared on death.
 	fireTicks atomic.Int32
@@ -578,6 +585,11 @@ type ClientConnection struct {
 	// reads it to apply the extra sprint knockback ("w-tap") from 1.9. Atomic
 	// because the writer (readLoop) and readers (attack handling) can race.
 	sprinting atomic.Bool
+
+	// sidebar is the scoreboard sidebar this client shows (nil = none);
+	// sidebarMu guards it. See sidebar.go.
+	sidebarMu sidebarMutex
+	sidebar   *sidebarState
 
 	// writerDone is closed by writerLoop on exit. cleanup waits on it
 	// (with a timeout) so any in-flight frames — particularly the Pong that
@@ -761,6 +773,9 @@ func (c *ClientConnection) sendPlayPackets() error {
 		// Registry tags right after Login, like vanilla: the client needs
 		// them to render lava as lava and to swim (tags.go).
 		{"Update Tags", c.sendUpdateTags},
+		// The client carries titles across servers: clear whatever the
+		// previous one left on screen.
+		{"Clear Titles", c.sendClearTitles},
 		{"Set Default Spawn Position", func() error {
 			return c.sendSetDefaultSpawnPosition(int(spawn.X), int(spawn.Y), int(spawn.Z), 0)
 		}},

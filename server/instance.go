@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"minecraft-server/cfg"
 	"minecraft-server/game"
 	"minecraft-server/protocol"
@@ -136,6 +137,10 @@ type Instance struct {
 	customRespawn atomic.Bool
 	weaponDamage  atomic.Bool
 	tntAutoPrime  atomic.Bool
+	// explosionDamage: multiplier on explosion player damage, stored as
+	// float64 bits + 1 so that 0 means "never set" (reads as 1) while an
+	// explicit 0 still round-trips.
+	explosionDamage atomic.Uint64
 
 	// SpawnPoint is where players respawn after death (and the world spawn
 	// for this instance). Defaults to the origin column.
@@ -225,6 +230,11 @@ type Instance struct {
 	// respawn (death screen or instant) is finalized.
 	OnPlayerDeath func(victim, killer *ClientConnection)
 
+	// OnExplosionBreak, when set, is asked before an explosion destroys a
+	// block (game.ExplosionBreakVeto); false keeps it. c is the igniter or
+	// nil.
+	OnExplosionBreak func(c *ClientConnection, pos world.Position) bool
+
 	// OnRewritePlace, when set, may swap the block a player is about to
 	// place (game.PlacementRewriter). Runs before OnBlockPlace.
 	OnRewritePlace func(c *ClientConnection, pos world.Position, blk world.Block) world.Block
@@ -304,6 +314,21 @@ func (i *Instance) WeaponDamage() bool            { return i.weaponDamage.Load()
 func (i *Instance) SetWeaponDamage(enabled bool)  { i.weaponDamage.Store(enabled) }
 func (i *Instance) TNTAutoPrime() bool            { return i.tntAutoPrime.Load() }
 func (i *Instance) SetTNTAutoPrime(enabled bool)  { i.tntAutoPrime.Store(enabled) }
+
+// ExplosionDamage is the multiplier applied to explosion player damage
+// (game.Instance.SetExplosionDamage); 1 until a game sets it.
+func (i *Instance) ExplosionDamage() float64 {
+	v := i.explosionDamage.Load()
+	if v == 0 {
+		return 1
+	}
+	return math.Float64frombits(v - 1)
+}
+
+// SetExplosionDamage sets the explosion damage multiplier (negative → 0).
+func (i *Instance) SetExplosionDamage(scale float64) {
+	i.explosionDamage.Store(math.Float64bits(max(scale, 0)) + 1)
+}
 
 // OnTick registers a callback fired once per tick (20 Hz). Concurrent-safe.
 // There is no Unsubscribe yet — destroy the whole instance via Stop when

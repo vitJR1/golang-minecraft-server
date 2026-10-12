@@ -34,6 +34,14 @@ func (c *ClientConnection) sendTitle(title, subtitle string, fadeIn, stay, fadeO
 	return c.safeWrite(CbPlaySetTitleText, textComponentPayload(title))
 }
 
+// sendClearTitles wipes whatever title / subtitle the client is showing and
+// (reset = true) restores the default animation times. The client keeps a
+// title across server switches, so the join sequence sends this once: a
+// "YOU DIED" from another server would otherwise greet the player here.
+func (c *ClientConnection) sendClearTitles() error {
+	return c.safeWrite(CbPlayClearTitles, []byte{1})
+}
+
 // broadcastTitle shows the title to everyone in the instance.
 func (i *Instance) broadcastTitle(title, subtitle string, fadeIn, stay, fadeOut int) {
 	i.Players.Broadcast(CbPlaySetTitleAnimationTimes, titleTimesPayload(fadeIn, stay, fadeOut), -1)

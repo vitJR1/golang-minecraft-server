@@ -39,10 +39,21 @@ type arenaConfig struct {
 	Generators []generatorConfig `json:"generators"`
 
 	// TeamSize caps players per team (default defaultTeamSize); MinPlayers is
-	// how many the round needs before it counts (default 2). Both optional —
+	// how many players the lobby waits for before the round starts (default
+	// two full teams, i.e. 2×TeamSize — 8 on a 4×4 map). Both optional —
 	// the 1×1 builder overrides them regardless of what the file says.
 	TeamSize   int `json:"teamSize"`
 	MinPlayers int `json:"minPlayers"`
+
+	// Lobby is where players wait before the round (block position + yaw);
+	// optional — the default is the shared diamond generator's spot.
+	Lobby *lobbyConfig `json:"lobby"`
+}
+
+// lobbyConfig is the optional top-level "lobby" entry of the arena JSON.
+type lobbyConfig struct {
+	X, Y, Z int
+	Yaw     float32 `json:"yaw"`
 }
 
 const (
@@ -164,7 +175,7 @@ func parseArenaConfig(config []byte) (arenaConfig, error) {
 		cfg.TeamSize = defaultTeamSize
 	}
 	if cfg.MinPlayers <= 0 {
-		cfg.MinPlayers = 2
+		cfg.MinPlayers = min(2*cfg.TeamSize, len(cfg.Teams)*cfg.TeamSize)
 	}
 	return cfg, nil
 }
@@ -184,7 +195,7 @@ func buildArenaDef(arenaID, name string, tmpl *world.Template, cfg arenaConfig) 
 		MinPlayers: cfg.MinPlayers,
 		MaxPlayers: len(teams) * teamSize,
 		Template:   arena.Template,
-		New:        func() game.Logic { return newBedWars(arena, teams, teamSize) },
+		New:        func() game.Logic { return newBedWars(arena, teams, teamSize).WithMinPlayers(cfg.MinPlayers) },
 	}, nil
 }
 
@@ -312,6 +323,10 @@ func buildConfigArena(tmpl *world.Template, cfg arenaConfig, teams []Team) (*Are
 		})
 	}
 
+	a.Lobby = defaultLobby(a.Generators, a.Spawns)
+	if cfg.Lobby != nil {
+		a.Lobby = world.SpawnPoint{Position: world.Position{X: cfg.Lobby.X, Y: cfg.Lobby.Y, Z: cfg.Lobby.Z}, Yaw: cfg.Lobby.Yaw}
+	}
 	return a, nil
 }
 
@@ -330,15 +345,18 @@ func parseResource(name string) (Resource, error) {
 	}
 }
 
+// defaultGenInterval is the tier-I interval per resource when the config
+// doesn't set one: iron every 2 s, gold every 5 s, diamond 30 s, emerald
+// 45 s. Diamond / emerald speed up with the generator tiers (sidebar.go).
 func defaultGenInterval(r Resource) int {
 	switch r {
 	case Gold:
-		return 140
+		return 100
 	case Diamond:
 		return 600
 	case Emerald:
 		return 900
 	default: // Iron
-		return 60
+		return 40
 	}
 }

@@ -125,6 +125,9 @@ func (b playerBridge) SendTitle(title, subtitle string, fadeIn, stay, fadeOut in
 	_ = b.conn.sendTitle(title, subtitle, fadeIn, stay, fadeOut)
 }
 
+func (b playerBridge) SetSidebar(title string, lines []string) { b.conn.setSidebar(title, lines) }
+func (b playerBridge) ClearSidebar()                           { b.conn.clearSidebar() }
+
 func (b playerBridge) PlaySound(name string, volume, pitch float32) {
 	s := b.conn.player.Snapshot()
 	_ = b.conn.safeWrite(CbPlaySoundEffect,
@@ -158,6 +161,9 @@ func (b playerBridge) Kill() {
 func (b instanceBridge) SetCustomRespawn(enabled bool) { b.inst.SetCustomRespawn(enabled) }
 func (b instanceBridge) SetWeaponDamage(enabled bool)  { b.inst.SetWeaponDamage(enabled) }
 func (b instanceBridge) SetTNTAutoPrime(enabled bool)  { b.inst.SetTNTAutoPrime(enabled) }
+func (b instanceBridge) SetExplosionDamage(scale float64) {
+	b.inst.SetExplosionDamage(scale)
+}
 
 func (b instanceBridge) PlaySound(name string, x, y, z float64, volume, pitch float32) {
 	b.inst.playSound(name, soundCategoryPlayer, x, y, z, volume, pitch)

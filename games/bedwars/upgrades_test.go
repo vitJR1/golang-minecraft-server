@@ -27,12 +27,12 @@ func TestUpgradeSharpenedReenchantsExistingSwords(t *testing.T) {
 	mate := join(g, inst, ctx, "mate", 5) // 5th joiner → back to team 0
 	mate.GiveStack(game.ItemStack{Item: "minecraft:iron_sword", Count: 1})
 
-	red.menuClick(slotSharpened) // 4 diamonds, has 0 → refused
+	red.menuClick(game.MenuClick{Slot: slotSharpened}) // 4 diamonds, has 0 → refused
 	if g.teams[0].sharpened {
 		t.Fatal("must not unlock without diamonds")
 	}
 	red.GiveItem("minecraft:diamond", 4)
-	red.menuClick(slotSharpened)
+	red.menuClick(game.MenuClick{Slot: slotSharpened})
 	if !g.teams[0].sharpened || red.CountItem("minecraft:diamond") != 0 {
 		t.Fatal("Sharpened Swords should be bought for 4 diamonds")
 	}
@@ -52,22 +52,22 @@ func TestUpgradeSharpenedReenchantsExistingSwords(t *testing.T) {
 func TestUpgradeArmorTiersAndManiacMiner(t *testing.T) {
 	g, _, _, red := openUpgradesFor(t)
 	red.GiveItem("minecraft:diamond", 2+4+2)
-	red.menuClick(slotArmor) // Protection I, 2 diamonds
-	red.menuClick(slotArmor) // Protection II, 4 diamonds
+	red.menuClick(game.MenuClick{Slot: slotArmor}) // Protection I, 2 diamonds
+	red.menuClick(game.MenuClick{Slot: slotArmor}) // Protection II, 4 diamonds
 	if g.teams[0].protection != 2 {
 		t.Fatalf("protection tier = %d, want 2", g.teams[0].protection)
 	}
 	if helm := red.slot(game.SlotHelmet); helm.Enchantments["minecraft:protection"] != 2 || helm.Color == 0 {
 		t.Errorf("helmet should carry Protection II and keep its dye: %+v", helm)
 	}
-	red.menuClick(slotMiner) // Haste I, 2 diamonds
+	red.menuClick(game.MenuClick{Slot: slotMiner}) // Haste I, 2 diamonds
 	if g.teams[0].haste != 1 || red.effect("haste") != 1 {
 		t.Errorf("Maniac Miner I: tier=%d effect=%d", g.teams[0].haste, red.effect("haste"))
 	}
 	if red.CountItem("minecraft:diamond") != 0 {
 		t.Errorf("diamonds left: %d", red.CountItem("minecraft:diamond"))
 	}
-	red.menuClick(slotMiner) // Haste II costs 4 — broke
+	red.menuClick(game.MenuClick{Slot: slotMiner}) // Haste II costs 4 — broke
 	if g.teams[0].haste != 1 {
 		t.Error("must not upgrade without diamonds")
 	}
@@ -141,10 +141,10 @@ func TestTrapsFireOnEntryInQueueOrder(t *testing.T) {
 	g, inst, ctx, red := openUpgradesFor(t)
 	blue := join(g, inst, ctx, "blue", 2)
 	red.GiveItem("minecraft:diamond", 1+2+4+8)
-	red.menuClick(slotTrapFirst + int(trapBlind))   // 1
-	red.menuClick(slotTrapFirst + int(trapFatigue)) // 2
-	red.menuClick(slotTrapFirst + int(trapAlarm))   // 4
-	red.menuClick(slotTrapFirst + int(trapCounter)) // queue full → refused
+	red.menuClick(game.MenuClick{Slot: slotTrapFirst + int(trapBlind)})   // 1
+	red.menuClick(game.MenuClick{Slot: slotTrapFirst + int(trapFatigue)}) // 2
+	red.menuClick(game.MenuClick{Slot: slotTrapFirst + int(trapAlarm)})   // 4
+	red.menuClick(game.MenuClick{Slot: slotTrapFirst + int(trapCounter)}) // queue full → refused
 	if n := len(g.teams[0].traps); n != 3 {
 		t.Fatalf("queued traps = %d, want 3", n)
 	}

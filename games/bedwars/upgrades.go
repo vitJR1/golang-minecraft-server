@@ -202,7 +202,7 @@ func (g *bedWars) openUpgradeShop(ctx *game.Ctx, p game.PlayerHandle) {
 	}
 	g.mu.Unlock()
 
-	p.OpenMenu("Team Upgrades", upgradeRows, items, func(slot int) { g.upgradeClick(ctx, p, slot) })
+	p.OpenMenu("Team Upgrades", upgradeRows, items, func(click game.MenuClick) { g.upgradeClick(ctx, p, click.Slot) })
 }
 
 // upgradeClick handles a click in the upgrade menu and reopens it.

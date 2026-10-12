@@ -268,6 +268,13 @@ func (i *Instance) slideItem(it *itemEntity, drag float64) {
 // box (vanilla: the player's hitbox grown by 1 horizontally, 0.5 vertically)
 // contains the item, or nil.
 func (i *Instance) collectorFor(it *itemEntity, players []*ClientConnection) *ClientConnection {
+	return i.pickupCandidate(it.x, it.y, it.z, players)
+}
+
+// pickupCandidate is collectorFor for any point: the first living,
+// non-spectator player whose pickup box contains (x,y,z). Stuck arrows use
+// it too — vanilla's Player.touch sweeps the same inflated box.
+func (i *Instance) pickupCandidate(x, y, z float64, players []*ClientConnection) *ClientConnection {
 	for _, c := range players {
 		if c.player == nil || c.isClosed() {
 			continue
@@ -276,10 +283,10 @@ func (i *Instance) collectorFor(it *itemEntity, players []*ClientConnection) *Cl
 		if s.Dead || s.Gamemode == 3 /* spectator */ {
 			continue
 		}
-		if distXZ(s.X, s.Z, it.x, it.z) > itemPickupRadiusXZ {
+		if distXZ(s.X, s.Z, x, z) > itemPickupRadiusXZ {
 			continue
 		}
-		if it.y < s.Y-itemPickupBelow || it.y > s.Y+itemPickupAbove {
+		if y < s.Y-itemPickupBelow || y > s.Y+itemPickupAbove {
 			continue
 		}
 		return c

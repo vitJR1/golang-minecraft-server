@@ -62,8 +62,11 @@ type Player struct {
 	// recent attack (drives the 1.9 attack-cooldown damage scaling).
 	// lastHurtTick / lastHurtAmount implement vanilla's per-target
 	// invulnerability window: within ~10 ticks of a hit, a new hit only
-	// lands if it's stronger, and only for the difference.
+	// lands if it's stronger, and only for the difference. absorption is
+	// the Absorption effect's "yellow hearts": damage drains it before
+	// health, it never regenerates, and it is cleared on death / respawn.
 	health         float32
+	absorption     float32
 	dead           bool
 	lastAttackTick uint64
 	lastHurtTick   uint64
@@ -173,6 +176,24 @@ func (p *Player) SetHealth(h float32) {
 	p.mu.Unlock()
 }
 
+// Absorption returns the player's absorption (yellow) hit points.
+func (p *Player) Absorption() float32 {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.absorption
+}
+
+// SetAbsorption sets the absorption pool (clamped at 0). Granted by the
+// Absorption effect; drained by ApplyDamage ahead of health.
+func (p *Player) SetAbsorption(a float32) {
+	if a < 0 {
+		a = 0
+	}
+	p.mu.Lock()
+	p.absorption = a
+	p.mu.Unlock()
+}
+
 // ApplyDamage subtracts amount from health under vanilla's per-target
 // invulnerability window. now is the current instance tick; invulnTicks is
 // the window length (vanilla: 10). Within the window a fresh hit only lands
@@ -202,7 +223,12 @@ func (p *Player) ApplyDamage(amount float32, now uint64, invulnTicks uint64) (ap
 		p.lastHurtAmount = amount
 	}
 
-	p.health -= applied
+	// Absorption hearts soak the blow first, like vanilla; applied still
+	// reports the whole amount so hit feedback (sounds, knockback) is
+	// unchanged.
+	absorbed := min(applied, p.absorption)
+	p.absorption -= absorbed
+	p.health -= applied - absorbed
 	if p.health <= 0 {
 		p.health = 0
 		p.dead = true
@@ -227,6 +253,7 @@ func (p *Player) AttackCooldownTick(now uint64) (prev uint64) {
 func (p *Player) Respawn() {
 	p.mu.Lock()
 	p.health = MaxHealth
+	p.absorption = 0
 	p.dead = false
 	p.lastHurtTick = 0
 	p.lastHurtAmount = 0

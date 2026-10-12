@@ -43,7 +43,7 @@ func openCategory(t *testing.T, p *fakePlayer, name string) {
 	if idx < 0 {
 		t.Fatalf("no category %q", name)
 	}
-	p.menuClick(shopTabSlot0 + idx)
+	p.menuClick(game.MenuClick{Slot: shopTabSlot0 + idx})
 	if !strings.Contains(p.menuTitle, name) {
 		t.Fatalf("category %q not opened: title=%q", name, p.menuTitle)
 	}
@@ -51,6 +51,17 @@ func openCategory(t *testing.T, p *fakePlayer, name string) {
 
 // buyKey clicks the ware with the given catalogue key in the open category.
 func buyKey(t *testing.T, p *fakePlayer, key string) {
+	t.Helper()
+	clickKey(t, p, key, false)
+}
+
+// shiftBuyKey shift-clicks the ware (bulk purchase).
+func shiftBuyKey(t *testing.T, p *fakePlayer, key string) {
+	t.Helper()
+	clickKey(t, p, key, true)
+}
+
+func clickKey(t *testing.T, p *fakePlayer, key string, shift bool) {
 	t.Helper()
 	cat := -1
 	for i, c := range shopCategories {
@@ -63,7 +74,7 @@ func buyKey(t *testing.T, p *fakePlayer, key string) {
 	}
 	for i, it := range shopCategories[cat].Items {
 		if it.Key == key {
-			p.menuClick(wareSlots[i])
+			p.menuClick(game.MenuClick{Slot: wareSlots[i], Shift: shift})
 			return
 		}
 	}
@@ -319,4 +330,100 @@ func findItem(p *fakePlayer, item string) *game.ItemStack {
 		}
 	}
 	return nil
+}
+
+// TestShopShiftBuysFullStack: a shift-click on plain goods buys enough
+// purchases to fill a full stack — 64 wool is 4× the 16-pack for 16 iron —
+// and leaves the rest of the balance alone.
+func TestShopShiftBuysFullStack(t *testing.T) {
+	_, red := openShopFor(t)
+	red.GiveItem("minecraft:iron_ingot", 20)
+
+	shiftBuyKey(t, red, "wool")
+
+	if got := red.CountItem("minecraft:red_wool"); got != 64 {
+		t.Errorf("wool: %d, want 64", got)
+	}
+	if got := red.CountItem("minecraft:iron_ingot"); got != 4 {
+		t.Errorf("iron left: %d, want 20-16=4", got)
+	}
+	last := red.messages[len(red.messages)-1]
+	if !strings.Contains(last, "64×") {
+		t.Errorf("purchase message should name the bulk amount: %q", last)
+	}
+}
+
+// TestShopShiftCappedByResources: with fewer resources than a full stack
+// costs, shift buys as many packs as the balance covers; with less than one
+// pack's price it is refused like a plain click and charges nothing.
+func TestShopShiftCappedByResources(t *testing.T) {
+	_, red := openShopFor(t)
+	red.GiveItem("minecraft:iron_ingot", 10) // two 4-iron wool packs, 2 left
+
+	shiftBuyKey(t, red, "wool")
+	if got := red.CountItem("minecraft:red_wool"); got != 32 {
+		t.Errorf("wool: %d, want 32", got)
+	}
+	if got := red.CountItem("minecraft:iron_ingot"); got != 2 {
+		t.Errorf("iron left: %d, want 2", got)
+	}
+
+	shiftBuyKey(t, red, "wool") // 2 iron < 4 → refused
+	if got := red.CountItem("minecraft:red_wool"); got != 32 {
+		t.Errorf("refused shift buy changed wool: %d", got)
+	}
+	if got := red.CountItem("minecraft:iron_ingot"); got != 2 {
+		t.Errorf("refused shift buy charged iron: %d left", got)
+	}
+	last := red.messages[len(red.messages)-1]
+	if !strings.Contains(last, "don't have enough Iron") {
+		t.Errorf("refusal message: %q", last)
+	}
+}
+
+// TestShopShiftRespectsStackLimit: items that stack to 16 (ender pearls)
+// fill a 16-stack, and single-stack wares (a sword) still buy one.
+func TestShopShiftRespectsStackLimit(t *testing.T) {
+	_, red := openShopFor(t)
+	red.GiveItem("minecraft:emerald", 100)
+	red.GiveItem("minecraft:iron_ingot", 100)
+
+	openCategory(t, red, "Utility")
+	shiftBuyKey(t, red, "ender_pearl") // 4 emerald each
+	if got := red.CountItem("minecraft:ender_pearl"); got != 16 {
+		t.Errorf("ender pearls: %d, want 16", got)
+	}
+	if got := red.CountItem("minecraft:emerald"); got != 36 {
+		t.Errorf("emerald left: %d, want 100-64=36", got)
+	}
+
+	openCategory(t, red, "Melee")
+	shiftBuyKey(t, red, "stone_sword") // 10 iron
+	if got := red.CountItem("minecraft:stone_sword"); got != 1 {
+		t.Errorf("stone swords: %d, want 1", got)
+	}
+	if got := red.CountItem("minecraft:iron_ingot"); got != 90 {
+		t.Errorf("iron left: %d, want 90", got)
+	}
+}
+
+// TestShopShiftIgnoredForTiers: shift on armour / tool / permanent wares is
+// a normal single purchase.
+func TestShopShiftIgnoredForTiers(t *testing.T) {
+	g, red := openShopFor(t)
+	red.GiveItem("minecraft:iron_ingot", 200)
+
+	openCategory(t, red, "Tools")
+	shiftBuyKey(t, red, "pickaxe") // wood, 10 iron
+	shiftBuyKey(t, red, "shears")  // 20 iron
+	if got := red.CountItem("minecraft:iron_ingot"); got != 170 {
+		t.Errorf("iron left: %d, want 170", got)
+	}
+	_, k, _ := g.playerState(red)
+	if k.toolTierOf(toolPickaxe) != 1 || !k.shears {
+		t.Errorf("kit after shift buys: pickaxe tier %d, shears %v", k.toolTierOf(toolPickaxe), k.shears)
+	}
+	if got := red.CountItem("minecraft:shears"); got != 1 {
+		t.Errorf("shears: %d, want 1", got)
+	}
 }

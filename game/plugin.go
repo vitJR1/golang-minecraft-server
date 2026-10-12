@@ -213,6 +213,16 @@ type EntityInteraction struct {
 	Item     string  // namespaced id of the held item ("" = empty hand)
 }
 
+// MenuClick is one click in a PlayerHandle.OpenMenu GUI: the slot plus the
+// modifiers the vanilla client sends with it. Shift is a shift-click
+// (Click Container mode 1, "quick move" — shops read it as "buy in bulk"),
+// Right a right-button click (button 1 of mode 0).
+type MenuClick struct {
+	Slot  int
+	Shift bool
+	Right bool
+}
+
 // MenuItem is one slot of a PlayerHandle.OpenMenu GUI.
 type MenuItem struct {
 	Slot  int      // 0 .. rows*9-1
@@ -267,6 +277,16 @@ type ItemUse struct {
 type ProjectileHooks struct {
 	OnTick   func(x, y, z float64) (keep bool)
 	OnImpact func(x, y, z float64)
+}
+
+// ExplosionBreakVeto is an optional extension a Logic (or listener) can
+// implement to shield blocks from explosions: for every block an explosion
+// (TNT, fireball) would destroy, OnExplosionBreak runs before the usual
+// OnBlockBreak chain; false keeps the block standing. igniter is the
+// player whose TNT / fireball it was, or nil when unknown. BedWars uses it
+// so TNT can't take out a bed — only a pickaxe does.
+type ExplosionBreakVeto interface {
+	OnExplosionBreak(ctx *Ctx, igniter PlayerHandle, pos world.Position) bool
 }
 
 // PlacementRewriter is an optional extension a Logic (or listener) can

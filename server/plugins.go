@@ -96,6 +96,30 @@ func (i *Instance) allowBlockBreak(c *ClientConnection, pos world.Position) bool
 	return true
 }
 
+// allowExplosionBreakVeto runs game.ExplosionBreakVeto on the listeners that
+// implement it, then the instance's logic: the first false keeps the block.
+// c is the igniter (nil = unknown → the hooks see a nil PlayerHandle).
+func (i *Instance) allowExplosionBreakVeto(c *ClientConnection, pos world.Position) bool {
+	ctx := i.pluginCtx()
+	var igniter game.PlayerHandle
+	if c != nil {
+		igniter = playerBridge{conn: c}
+	}
+	for _, l := range i.listeners {
+		ev, ok := l.Logic.(game.ExplosionBreakVeto)
+		if !ok {
+			continue
+		}
+		if !safeVeto(i, "listener "+l.Name+" OnExplosionBreak", func() bool { return ev.OnExplosionBreak(ctx, igniter, pos) }) {
+			return false
+		}
+	}
+	if hook := i.OnExplosionBreak; hook != nil {
+		return safeVeto(i, "OnExplosionBreak", func() bool { return hook(c, pos) })
+	}
+	return true
+}
+
 // rewritePlacedBlock lets listeners, then the instance's logic, swap the
 // block about to be placed (game.PlacementRewriter). Listeners that don't
 // implement the interface are skipped.

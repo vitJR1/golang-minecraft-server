@@ -72,9 +72,14 @@ const (
 	CbPlaySpawnPlayer        = 0x03
 	CbPlayEntityAnimation    = 0x04
 	CbPlayAckBlockChange     = 0x06
-	CbPlayExplosion          = 0x1B // "explode": centre + strength + destroyed block offsets + player motion
+	CbPlayClearTitles        = 0x0E // "clear_titles": Boolean reset → drops a title left over from a previous server (title.go)
+	CbPlayExplosion          = 0x1D // "explode" — NOT 0x1B, that is Disguised Chat in 1.20.1 (client then reads the X double as a chat-string length and kicks). Centre + strength + destroyed block offsets + player motion
 	CbPlayHurtAnimation      = 0x21 // "hurt_animation": entity id + yaw → red flash + recoil tilt
+	CbPlayDisplayObjective   = 0x51 // "scoreboard_display_objective": slot (1 = sidebar) + objective (sidebar.go)
 	CbPlaySetEntityMetadata  = 0x52 // "entity_metadata": e.g. item-frame item + rotation
+	CbPlayUpdateObjectives   = 0x58 // "scoreboard_objective": create / remove / retitle an objective
+	CbPlayUpdateTeams        = 0x5A // "teams": scoreboard teams — sidebar line text rides on a team prefix
+	CbPlayUpdateScore        = 0x5B // "scoreboard_score": set / remove a holder's score
 	CbPlayCombatDeath        = 0x38 // "death_combat_event": triggers the death screen
 	CbPlayEntityVelocity     = 0x54 // "entity_velocity": knockback (short units, 1/8000 block/tick)
 	CbPlaySetEquipment       = 0x55 // "entity_equipment": held item + armor as others see them (equipment.go)

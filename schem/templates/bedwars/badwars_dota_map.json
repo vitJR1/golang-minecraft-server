@@ -155,7 +155,7 @@
       "x": 0,
       "y": 68,
       "z": -71,
-      "intervalTicks": 60,
+      "intervalTicks": 40,
       "team": 0
     },
     {
@@ -163,7 +163,7 @@
       "x": 0,
       "y": 68,
       "z": -71,
-      "intervalTicks": 140,
+      "intervalTicks": 100,
       "team": 0
     },
     {
@@ -171,7 +171,7 @@
       "x": 71,
       "y": 68,
       "z": 0,
-      "intervalTicks": 60,
+      "intervalTicks": 40,
       "team": 1
     },
     {
@@ -179,7 +179,7 @@
       "x": 71,
       "y": 68,
       "z": 0,
-      "intervalTicks": 140,
+      "intervalTicks": 100,
       "team": 1
     },
     {
@@ -187,7 +187,7 @@
       "x": 0,
       "y": 68,
       "z": 71,
-      "intervalTicks": 60,
+      "intervalTicks": 40,
       "team": 2
     },
     {
@@ -195,7 +195,7 @@
       "x": 0,
       "y": 68,
       "z": 71,
-      "intervalTicks": 140,
+      "intervalTicks": 100,
       "team": 2
     },
     {
@@ -203,7 +203,7 @@
       "x": -71,
       "y": 68,
       "z": 0,
-      "intervalTicks": 60,
+      "intervalTicks": 40,
       "team": 3
     },
     {
@@ -211,7 +211,7 @@
       "x": -71,
       "y": 68,
       "z": 0,
-      "intervalTicks": 140,
+      "intervalTicks": 100,
       "team": 3
     },
     {
@@ -235,7 +235,7 @@
       "x": -50,
       "y": 69,
       "z": -49,
-      "intervalTicks": 600,
+      "intervalTicks": 400,
       "team": null
     },
     {
@@ -243,7 +243,7 @@
       "x": 50,
       "y": 69,
       "z": -50,
-      "intervalTicks": 600,
+      "intervalTicks": 400,
       "team": null
     },
     {
@@ -251,7 +251,7 @@
       "x": 50,
       "y": 69,
       "z": 50,
-      "intervalTicks": 600,
+      "intervalTicks": 400,
       "team": null
     },
     {
@@ -259,7 +259,7 @@
       "x": -50,
       "y": 69,
       "z": 50,
-      "intervalTicks": 600,
+      "intervalTicks": 400,
       "team": null
     }
   ]

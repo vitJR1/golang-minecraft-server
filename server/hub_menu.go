@@ -59,7 +59,7 @@ const menuWindowID byte = 1
 type openMenu struct {
 	kind    string              // "main" | "ffa" | "bw" | "sw" | "chest"
 	entries map[int16]menuEntry // slot → entry
-	onClick func(c *ClientConnection, e menuEntry)
+	onClick func(c *ClientConnection, e menuEntry, click menuClick)
 
 	// chest is the open chest's storage when kind == "chest" (a block chest
 	// or the player's ender chest), so Click Container changes persist there.
@@ -70,12 +70,26 @@ type openMenu struct {
 	rows int
 }
 
+// menuClick is the button + mode pair of a Click Container packet, as the
+// vanilla client sends it: mode 0 = plain click (button 0 left, 1 right),
+// mode 1 = shift-click ("quick move"), 2 = number key, 3 = middle, 4 = drop,
+// 5 = drag, 6 = double click.
+type menuClick struct {
+	button byte
+	mode   int
+}
+
+// plugin converts the raw pair into the modifiers plugins see.
+func (m menuClick) plugin(slot int) game.MenuClick {
+	return game.MenuClick{Slot: slot, Shift: m.mode == 1, Right: m.mode == 0 && m.button == 1}
+}
+
 // menuKindPlugin marks a GUI opened through game.PlayerHandle.OpenMenu.
 const menuKindPlugin = "plugin"
 
 // openPluginMenu implements PlayerHandle.OpenMenu: a rows×9 chest window
-// whose slots come from items and whose clicks go to onClick(slot).
-func (c *ClientConnection) openPluginMenu(title string, rows int, items []game.MenuItem, onClick func(slot int)) {
+// whose slots come from items and whose clicks go to onClick.
+func (c *ClientConnection) openPluginMenu(title string, rows int, items []game.MenuItem, onClick func(click game.MenuClick)) {
 	if rows < 1 {
 		rows = 1
 	}
@@ -104,9 +118,9 @@ func (c *ClientConnection) openPluginMenu(title string, rows int, items []game.M
 		kind:    menuKindPlugin,
 		rows:    rows,
 		entries: entries,
-		onClick: func(_ *ClientConnection, e menuEntry) {
+		onClick: func(_ *ClientConnection, e menuEntry, click menuClick) {
 			if onClick != nil {
-				onClick(int(e.slot))
+				onClick(click.plugin(int(e.slot)))
 			}
 		},
 	})
@@ -278,7 +292,7 @@ func (c *ClientConnection) openArenaMenu(lobbyID string, arenas []string) {
 // arenaOnClick: arena slot click — logs + system-chat the choice and
 // closes the server-side menu. Future hook: matchmaker.Queue or
 // teleport into the arena instance itself.
-func arenaOnClick(c *ClientConnection, e menuEntry) {
+func arenaOnClick(c *ClientConnection, e menuEntry, _ menuClick) {
 	slog.Info("arena picked",
 		"player", c.playerName, "lobby", e.key, "arena", e.name)
 	_ = c.sendSystemMessage("You picked " + e.key + " — " + e.name)
@@ -360,7 +374,7 @@ func bedwarsArenaEntries(s *Server) map[int16]menuEntry {
 // bedwarsArenaOnClick handles the DOTA arena browser: a "create:<kind>" key
 // spins up a fresh arena of that kind from the DOTA map and joins it; any other
 // key is an existing arena name to join directly.
-func bedwarsArenaOnClick(c *ClientConnection, e menuEntry) {
+func bedwarsArenaOnClick(c *ClientConnection, e menuEntry, _ menuClick) {
 	c.menu.Store(nil)
 	name := e.key
 	if kind, ok := strings.CutPrefix(name, "create:"); ok {
@@ -398,7 +412,7 @@ func (c *ClientConnection) joinArena(name string) {
 // teleports the player into the matching lobby instance. The chest GUI
 // is dismissed implicitly by the Respawn that MovePlayer sends; we
 // only have to clear the server-side menu state.
-func hubMainOnClick(c *ClientConnection, e menuEntry) {
+func hubMainOnClick(c *ClientConnection, e menuEntry, _ menuClick) {
 	lobbyID, ok := hubMenuTargets[e.key]
 	if !ok {
 		return
