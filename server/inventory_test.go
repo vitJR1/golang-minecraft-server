@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"testing"
+	"time"
 
 	"minecraft-server/player"
 	"minecraft-server/world"
@@ -114,7 +115,8 @@ func TestNavigatorStrippedOnGameJoinAndKeptInHub(t *testing.T) {
 		t.Errorf("real items must survive the move, got %+v", st)
 	}
 
-	// Back to the hub: the rod is handed out again, the iron stays.
+	// Back to the hub: the game is over — the loot is gone and the rod is
+	// handed out again.
 	if err := s.MovePlayer(c, s.Hub, 0, 80, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -122,8 +124,77 @@ func TestNavigatorStrippedOnGameJoinAndKeptInHub(t *testing.T) {
 	if c.inv.get(hotbarStart).Name != navigatorName {
 		t.Error("hub join should hand out the navigator again")
 	}
-	if st := c.inv.get(hotbarStart + 1); st.ID != iron {
-		t.Errorf("iron lost on return to hub: %+v", st)
+	if st := c.inv.get(hotbarStart + 1); !st.empty() {
+		t.Errorf("game loot must not follow the player into the hub: %+v", st)
+	}
+}
+
+func TestReturnToHubResetsSpectatorAndState(t *testing.T) {
+	s := New()
+	SetupHubMenu(s)
+	arena := NewInstance("arena", s, world.NewMemoryWorld())
+	t.Cleanup(arena.Stop)
+	s.AddInstance(arena)
+
+	c := offlineHub(s, "Loser")
+	if err := s.MovePlayer(c, arena, 0, 80, 0); err != nil {
+		t.Fatal(err)
+	}
+	drain(c)
+	// What a lost BedWars round leaves behind: spectator, kit, effects, low HP.
+	c.player.SetGamemode(player.Spectator)
+	sword, _ := world.ItemByName("minecraft:diamond_sword")
+	c.inv.set(hotbarStart, itemStack{ID: sword, Count: 1})
+	c.applyEffect(EffectSpeed, 2, time.Minute)
+	c.player.SetHealth(3)
+
+	if err := s.MovePlayer(c, s.Hub, 0, 80, 0); err != nil {
+		t.Fatal(err)
+	}
+	pkts := drainPackets(t, c)
+	if gm := c.gamemode(); gm != player.Adventure {
+		t.Errorf("gamemode in hub %v, want Adventure", gm)
+	}
+	if h := c.player.Health(); h != player.MaxHealth {
+		t.Errorf("health %v, want full", h)
+	}
+	if c.effectLevel(EffectSpeed) != 0 {
+		t.Error("effects must be cleared")
+	}
+	if st := c.inv.get(hotbarStart); st.Name != navigatorName {
+		t.Errorf("hotbar 0 should be the navigator, got %+v", st)
+	}
+	for slot := int16(0); slot < playerInvSize; slot++ {
+		if st := c.inv.get(slot); !st.empty() && st.Name != navigatorName {
+			t.Errorf("slot %d still holds %+v", slot, st)
+		}
+	}
+	// The Respawn packet must already carry Adventure, and the hearts are re-sent.
+	var respawns int
+	for _, p := range pkts {
+		if p.id == CbPlayRespawn {
+			respawns++
+		}
+	}
+	if respawns == 0 || countIDs(pkts, CbPlaySetHealth) == 0 {
+		t.Errorf("respawn=%d setHealth=%d", respawns, countIDs(pkts, CbPlaySetHealth))
+	}
+
+	// A dead player (custom respawn left them Dead) comes back alive too.
+	if err := s.MovePlayer(c, arena, 0, 80, 0); err != nil {
+		t.Fatal(err)
+	}
+	drain(c)
+	c.player.ApplyDamage(player.MaxHealth*10, 0, 0)
+	if !c.player.IsDead() {
+		t.Fatal("setup: player should be dead")
+	}
+	if err := s.MovePlayer(c, s.Hub, 0, 80, 0); err != nil {
+		t.Fatal(err)
+	}
+	drain(c)
+	if c.player.IsDead() || c.player.Health() != player.MaxHealth {
+		t.Error("returning to the hub must revive the player")
 	}
 }
 

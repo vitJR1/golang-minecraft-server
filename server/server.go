@@ -347,6 +347,16 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 		_ = c.safeWrite(CbPlayPlayerInfoRemove, playerInfoRemovePayload(oldUUIDs))
 	}
 
+	// 2b. Landing in the hub or a lobby means the game is over for this
+	//     player: shed whatever it left behind (spectator mode, the kit,
+	//     effects, a pending death) BEFORE the Respawn, which carries the
+	//     gamemode the client will be in.
+	_, lobby := arenasForLobby(target.ID)
+	toHub := target == s.Hub || lobby
+	if toHub {
+		c.resetForHub()
+	}
+
 	// 3. Respawn — client clears world data + every entity it knew.
 	if err := c.sendRespawn(); err != nil {
 		return fmt.Errorf("respawn: %w", err)
@@ -387,7 +397,10 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 	// Hub UI items don't follow the player into a game instance (its hotbar
 	// is the game's economy); hub/lobby joins hand them out again. Then push
 	// the inventory model so the client shows what the server has.
-	if _, lobby := arenasForLobby(target.ID); target != s.Hub && !lobby {
+	if toHub {
+		_ = c.sendSetHealth(player.MaxHealth)
+		c.syncAbsorption(true)
+	} else {
 		c.stripNavigatorItems()
 	}
 	_ = c.sendInventoryContents()
@@ -395,6 +408,35 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 	// 7. Register in target + broadcast tab list and Spawn for everyone.
 	target.JoinAndAnnounce(c)
 	return nil
+}
+
+// resetForHub sheds everything a game may have left on the player before
+// they land in the hub or a lobby: a dead player is revived, health is
+// full, absorption / effects / fire are gone, the inventory is emptied
+// (the hub hands out its own navigator items on join) and the gamemode
+// goes back to the hub's Adventure — except for an op in Creative, who
+// keeps it. Called from MovePlayer before the Respawn packet so the client
+// is told the right gamemode.
+func (c *ClientConnection) resetForHub() {
+	if c.player == nil {
+		return
+	}
+	if c.player.IsDead() {
+		c.player.Respawn()
+	} else {
+		c.player.SetHealth(player.MaxHealth)
+	}
+	c.player.SetAbsorption(0)
+	c.clearEffects()
+	c.extinguish()
+	c.cancelUse()
+	if c.gamemode() != player.Creative || c.server == nil || !c.server.Ops.Has(c.playerName) {
+		c.player.SetGamemode(player.Adventure)
+	}
+	for slot := int16(0); slot < playerInvSize; slot++ {
+		c.inv.set(slot, itemStack{})
+	}
+	c.cursor = itemStack{}
 }
 
 // Name returns the player's chosen username (immutable for the session).

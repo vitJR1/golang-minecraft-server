@@ -1103,6 +1103,7 @@ func TestInstanceDeleteSelfMovesToHub(t *testing.T) {
 	drainExpect(t, ch, "evac + delete post-chunks",
 		CbPlaySyncPos,
 		CbPlayUpdateAttributes,    // cooldown-bar attribute for the hub
+		CbPlaySetHealth,           // hub entry resets the player (resetForHub)
 		CbPlaySetContainerContent, // inventory model re-sent after the move
 		CbPlayPlayerInfoUpdate,    // hub tab list bootstrap
 		CbPlaySystemChat,          // "Deleted instance arena"
