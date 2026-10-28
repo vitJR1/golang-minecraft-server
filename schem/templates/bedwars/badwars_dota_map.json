@@ -82,7 +82,7 @@
         "x": 0,
         "y": 69,
         "z": 57,
-        "yaw": 179.73718
+        "yaw": 180
       },
       "beds": [
         {
@@ -99,17 +99,17 @@
       "villagers": [
         {
           "type": "item",
-          "x": 4,
+          "x": -4,
           "y": 69,
-          "z": 61,
-          "yaw": 90
+          "z": 62,
+          "yaw": 270
         },
         {
           "type": "upgrade",
-          "x": -4,
+          "x": 4,
           "y": 69,
-          "z": 61,
-          "yaw": 270
+          "z": 62,
+          "yaw": 90
         }
       ]
     },
@@ -136,14 +136,14 @@
       "villagers": [
         {
           "type": "item",
-          "x": -62,
+          "x": -63,
           "y": 69,
           "z": -4,
           "yaw": 0
         },
         {
           "type": "upgrade",
-          "x": -62,
+          "x": -63,
           "y": 69,
           "z": 4,
           "yaw": -180
@@ -156,7 +156,7 @@
       "resource": "iron",
       "x": 0,
       "y": 68,
-      "z": -71,
+      "z": -72,
       "intervalTicks": 40,
       "team": 0
     },
@@ -164,13 +164,13 @@
       "resource": "gold",
       "x": 0,
       "y": 68,
-      "z": -71,
+      "z": -72,
       "intervalTicks": 100,
       "team": 0
     },
     {
       "resource": "iron",
-      "x": 71,
+      "x": 72,
       "y": 68,
       "z": 0,
       "intervalTicks": 40,
@@ -178,7 +178,7 @@
     },
     {
       "resource": "gold",
-      "x": 71,
+      "x": 72,
       "y": 68,
       "z": 0,
       "intervalTicks": 100,
@@ -188,7 +188,7 @@
       "resource": "iron",
       "x": 0,
       "y": 68,
-      "z": 71,
+      "z": 72,
       "intervalTicks": 40,
       "team": 2
     },
@@ -196,13 +196,13 @@
       "resource": "gold",
       "x": 0,
       "y": 68,
-      "z": 71,
+      "z": 72,
       "intervalTicks": 100,
       "team": 2
     },
     {
       "resource": "iron",
-      "x": -71,
+      "x": -73,
       "y": 68,
       "z": 0,
       "intervalTicks": 40,
@@ -210,7 +210,7 @@
     },
     {
       "resource": "gold",
-      "x": -71,
+      "x": -73,
       "y": 68,
       "z": 0,
       "intervalTicks": 100,
