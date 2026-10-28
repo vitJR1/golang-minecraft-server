@@ -18,11 +18,14 @@ import (
 type Arena struct {
 	Template *world.Template
 
-	Spawns     []world.SpawnPoint     // Spawns[i] = team i's respawn point
-	BedBlocks  [][]world.Position     // BedBlocks[i] = team i's two bed blocks
-	Generators []Generator            // team forges + central forge
-	Lobby      world.SpawnPoint       // where players wait before the round (lobby.go)
-	bedOwner   map[world.Position]int // bed block → team ID (O(1) lookup)
+	Spawns     []world.SpawnPoint // Spawns[i] = team i's respawn point
+	BedBlocks  [][]world.Position // BedBlocks[i] = team i's two bed blocks
+	Generators []Generator        // team forges + central forge
+	Lobby      world.SpawnPoint   // where players wait before the round (lobby.go)
+	// HologramHeight is how high the diamond/emerald countdown floats above
+	// its generator block (hologram.go); 0 = defaultHologramHeight.
+	HologramHeight float64
+	bedOwner       map[world.Position]int // bed block → team ID (O(1) lookup)
 	// Villagers are the shop NPCs placed by the arena config, keyed by
 	// block position so a click (entity x/y/z) resolves to a team + kind.
 	Villagers map[world.Position]villagerSpot

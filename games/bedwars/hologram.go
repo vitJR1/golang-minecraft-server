@@ -8,16 +8,17 @@ import (
 
 // hologram.go puts a floating countdown over the shared resource generators
 // (diamond / emerald), so players can see how soon the next unit appears.
-// Two lines of floating text hover ~3 blocks above the generator block: the
-// resource name and the timer. Team iron forges fire every few seconds and
-// don't get one.
+// Two lines of floating text hover above the generator block (Arena.
+// HologramHeight, the map JSON's "hologramHeight"): the resource name and the
+// timer. Team iron forges fire every few seconds and don't get one.
 
 const (
-	// hologramHeight is how far above the generator block the countdown
-	// floats. The armor-stand name renders ~0.5 blocks above its position,
-	// so the entity itself sits at hologramHeight-0.5.
-	hologramHeight = 3.0
-	nameTagOffset  = 0.5
+	// defaultHologramHeight is how far above the generator block the
+	// countdown floats when the map doesn't say. The armor-stand name
+	// renders ~0.5 blocks above its position, so the entity itself sits at
+	// the height minus nameTagOffset.
+	defaultHologramHeight = 2.0
+	nameTagOffset         = 0.5
 	// hologramLineGap is the vertical distance between the title and the
 	// timer line.
 	hologramLineGap = 0.3
@@ -51,13 +52,17 @@ func (r Resource) title() string {
 // Called once from OnInstanceStart; holograms are re-streamed to joining
 // players by the server, so the game only has to update the text.
 func (g *bedWars) spawnHolograms(ctx *game.Ctx) {
+	height := g.arena.HologramHeight
+	if height == 0 {
+		height = defaultHologramHeight
+	}
 	var holos []genHologram
 	for _, gen := range g.gens {
 		if !gen.Resource.timed() || gen.IntervalTicks == 0 {
 			continue
 		}
 		x, y, z := gen.dropPoint()
-		base := y + hologramHeight - nameTagOffset
+		base := y + height - nameTagOffset
 		title := ctx.Instance.SpawnHologram(x, base+hologramLineGap, z, gen.Resource.title())
 		timer := ctx.Instance.SpawnHologram(x, base, z, timerText(gen.IntervalTicks, 0, false))
 		if title == nil || timer == nil {

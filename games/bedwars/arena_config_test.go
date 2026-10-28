@@ -115,9 +115,13 @@ func TestRealMapArenaFromConfig(t *testing.T) {
 
 	// Waiting players stand on the glass over the centre fountain: a solid
 	// block under the feet, air at the feet and head.
-	lobby := def.New().(*bedWars).arena.Lobby.Position
+	built := def.New().(*bedWars).arena
+	lobby := built.Lobby.Position
 	if lobby != (world.Position{X: 0, Y: 73, Z: 0}) {
 		t.Errorf("lobby = %v, want (0,73,0) from the config", lobby)
+	}
+	if built.HologramHeight != 2 {
+		t.Errorf("hologram height = %v, want 2 from the config", built.HologramHeight)
 	}
 	if !world.Collidable(w.GetBlock(world.Position{X: lobby.X, Y: lobby.Y - 1, Z: lobby.Z})) ||
 		w.GetBlock(lobby) != world.Air || w.GetBlock(world.Position{X: lobby.X, Y: lobby.Y + 1, Z: lobby.Z}) != world.Air {
@@ -298,6 +302,9 @@ func TestRealMapDuelFromConfig(t *testing.T) {
 	if lobby := g.arena.Lobby.Position; lobby != (world.Position{X: 0, Y: 73, Z: 0}) {
 		t.Errorf("duel lobby = %v, want the config's (0,73,0)", lobby)
 	}
+	if g.arena.HologramHeight != 2 {
+		t.Errorf("duel hologram height = %v, want the config's 2", g.arena.HologramHeight)
+	}
 	a, b := g.arena.Spawns[0].Position, g.arena.Spawns[1].Position
 	if a.Z >= 0 || b.Z <= 0 || a.X != 0 || b.X != 0 {
 		t.Errorf("duel spawns should be the opposite -Z/+Z bases, got %v and %v", a, b)
@@ -363,5 +370,8 @@ func TestMatchmakerArenaUsesConfigLobby(t *testing.T) {
 	}
 	if a.Lobby.Position != (world.Position{X: 0, Y: 73, Z: 0}) {
 		t.Fatalf("matchmaker lobby = %v, want the config's (0,73,0)", a.Lobby.Position)
+	}
+	if a.HologramHeight != 2 {
+		t.Fatalf("matchmaker hologram height = %v, want the config's 2", a.HologramHeight)
 	}
 }

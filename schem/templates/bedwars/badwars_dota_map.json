@@ -1,5 +1,6 @@
 {
   "lobby": {"x": 0, "y": 73, "z": 0},
+  "hologramHeight": 2.0,
   "teams": [
     {
       "name": "Red",

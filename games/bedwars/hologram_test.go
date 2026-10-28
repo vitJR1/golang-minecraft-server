@@ -1,6 +1,7 @@
 package bedwars
 
 import (
+	"minecraft-server/game"
 	"strconv"
 	"strings"
 	"testing"
@@ -19,8 +20,8 @@ func diamondGenerator(t *testing.T, g *bedWars) Generator {
 }
 
 // TestHologramsSpawnOverTimedGenerators checks that OnInstanceStart puts a
-// title + timer pair ~3 blocks above every diamond/emerald generator and
-// nothing over the team iron forges.
+// title + timer pair defaultHologramHeight above every diamond/emerald
+// generator and nothing over the team iron forges.
 func TestHologramsSpawnOverTimedGenerators(t *testing.T) {
 	g, inst, _ := harness(t)
 	timed := 0
@@ -39,9 +40,34 @@ func TestHologramsSpawnOverTimedGenerators(t *testing.T) {
 		t.Fatalf("holograms: got %d, want %d (two per timed generator)", len(holos), 2*timed)
 	}
 
-	dg := diamondGenerator(t, g)
-	x, y, z := dg.dropPoint()
-	var title, timer *fakeHologram
+	title, timer := diamondLines(t, g, holos)
+	_, y, _ := diamondGenerator(t, g).dropPoint()
+	if want := y + defaultHologramHeight - nameTagOffset + hologramLineGap; title.y != want || timer.y >= title.y {
+		t.Errorf("hologram heights: title=%v (want %v) timer=%v over block y=%v", title.y, want, timer.y, y)
+	}
+}
+
+// TestHologramHeightFromArena: an arena's HologramHeight (the map JSON's
+// "hologramHeight") replaces the default.
+func TestHologramHeightFromArena(t *testing.T) {
+	g, _, _ := harness(t)
+	g.arena.HologramHeight = 4
+	inst := newFakeInstance()
+	g.spawnHolograms(&game.Ctx{InstanceID: "test", Instance: inst})
+	inst.mu.Lock()
+	holos := append([]*fakeHologram(nil), inst.holos...)
+	inst.mu.Unlock()
+	title, _ := diamondLines(t, g, holos)
+	_, y, _ := diamondGenerator(t, g).dropPoint()
+	if want := y + 4 - nameTagOffset + hologramLineGap; title.y != want {
+		t.Errorf("title at %v, want %v for a height of 4", title.y, want)
+	}
+}
+
+// diamondLines finds the title and timer lines over the diamond generator.
+func diamondLines(t *testing.T, g *bedWars, holos []*fakeHologram) (title, timer *fakeHologram) {
+	t.Helper()
+	x, _, z := diamondGenerator(t, g).dropPoint()
 	for _, h := range holos {
 		if h.x != x || h.z != z {
 			continue
@@ -56,9 +82,7 @@ func TestHologramsSpawnOverTimedGenerators(t *testing.T) {
 	if title == nil || timer == nil {
 		t.Fatal("diamond generator is missing its title or timer line")
 	}
-	if title.y < y+2.5 || title.y > y+3.5 || timer.y >= title.y {
-		t.Errorf("hologram heights: title=%v timer=%v over block y=%v", title.y, timer.y, y)
-	}
+	return title, timer
 }
 
 // TestHologramTimerCountsDown checks the timer text follows the generator's

@@ -90,27 +90,26 @@ func buildSchemArena(path string, teams []Team) (*Arena, error) {
 	})
 
 	a.Lobby = defaultLobby(a.Generators, a.Spawns)
-	if lobby, ok := configLobby(path); ok {
-		a.Lobby = lobby
+	if cfg, ok := siblingConfig(path); ok {
+		cfg.applyMapSettings(a)
 	}
 	return a, nil
 }
 
-// configLobby reads the waiting spot from the map's sibling arena JSON
-// (<map>.json, the one /arena create uses), so an auto-detected arena on
-// the same map waits at the same place. ok is false without a file or a
-// "lobby" entry; a broken file is ignored here (/arena create reports it).
-func configLobby(mapPath string) (world.SpawnPoint, bool) {
+// siblingConfig reads the map's sibling arena JSON (<map>.json, the one
+// /arena create uses), so an auto-detected arena on the same map shares its
+// map-wide settings (lobby, hologram height). ok is false without a file; a
+// broken file is ignored here (/arena create reports it).
+func siblingConfig(mapPath string) (arenaConfig, bool) {
 	raw, err := os.ReadFile(strings.TrimSuffix(mapPath, filepath.Ext(mapPath)) + ".json")
 	if err != nil {
-		return world.SpawnPoint{}, false
+		return arenaConfig{}, false
 	}
 	cfg, err := parseArenaConfig(raw)
-	if err != nil || cfg.Lobby == nil {
-		return world.SpawnPoint{}, false
+	if err != nil {
+		return arenaConfig{}, false
 	}
-	l := cfg.Lobby
-	return world.SpawnPoint{Position: world.Position{X: l.X, Y: l.Y, Z: l.Z}, Yaw: l.Yaw}, true
+	return cfg, true
 }
 
 // bedCluster is one detected bed: its block positions plus the cluster's

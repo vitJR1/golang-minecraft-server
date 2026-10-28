@@ -48,6 +48,11 @@ type arenaConfig struct {
 	// Lobby is where players wait before the round (block position + yaw);
 	// optional — the default is the shared diamond generator's spot.
 	Lobby *lobbyConfig `json:"lobby"`
+
+	// HologramHeight is how many blocks above its generator block the
+	// diamond/emerald countdown title floats; optional — 0 / absent means
+	// defaultHologramHeight.
+	HologramHeight float64 `json:"hologramHeight"`
 }
 
 // lobbyConfig is the optional top-level "lobby" entry of the arena JSON.
@@ -216,7 +221,8 @@ func duelConfig(cfg arenaConfig) arenaConfig {
 
 // selectTeams returns a copy of cfg with only the teams at the given config
 // indices (in that order), generator team references remapped accordingly,
-// the capacity fields set and the lobby kept. Generators owned by a dropped team are
+// the capacity fields set and the map-wide settings (lobby, hologram height)
+// kept. Generators owned by a dropped team are
 // omitted.
 func selectTeams(cfg arenaConfig, keep []int, teamSize, minPlayers int) arenaConfig {
 	remap := make(map[int]int, len(keep))
@@ -224,7 +230,9 @@ func selectTeams(cfg arenaConfig, keep []int, teamSize, minPlayers int) arenaCon
 		Teams:      make([]teamConfig, 0, len(keep)),
 		TeamSize:   teamSize,
 		MinPlayers: minPlayers,
-		Lobby:      cfg.Lobby, // the map's waiting spot serves every mode
+		// Map-wide settings serve every mode.
+		Lobby:          cfg.Lobby,
+		HologramHeight: cfg.HologramHeight,
 	}
 	for newIdx, oldIdx := range keep {
 		remap[oldIdx] = newIdx
@@ -325,10 +333,20 @@ func buildConfigArena(tmpl *world.Template, cfg arenaConfig, teams []Team) (*Are
 	}
 
 	a.Lobby = defaultLobby(a.Generators, a.Spawns)
+	cfg.applyMapSettings(a)
+	return a, nil
+}
+
+// applyMapSettings copies the map-wide settings that don't depend on the
+// layout — the waiting spot and the hologram height — onto a. Shared by the
+// config builder and the auto-detected arena (configSettings).
+func (cfg arenaConfig) applyMapSettings(a *Arena) {
 	if cfg.Lobby != nil {
 		a.Lobby = world.SpawnPoint{Position: world.Position{X: cfg.Lobby.X, Y: cfg.Lobby.Y, Z: cfg.Lobby.Z}, Yaw: cfg.Lobby.Yaw}
 	}
-	return a, nil
+	if cfg.HologramHeight != 0 {
+		a.HologramHeight = cfg.HologramHeight
+	}
 }
 
 func parseResource(name string) (Resource, error) {
