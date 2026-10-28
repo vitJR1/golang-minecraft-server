@@ -166,13 +166,25 @@ func (c *ClientConnection) handleAttack(victim *ClientConnection) {
 // movement actually changes). Sprinting attackers add the w-tap bonus.
 func (c *ClientConnection) applyKnockback(cfg CombatConfig, aSnap, vSnap player.Snapshot) {
 	strength := cfg.Knockback
-	if c.ac.Sprinting.Load() {
+	if c.sprintHit() {
 		strength += cfg.SprintKnockback
+		// The hit ends the sprint, as vanilla's Player.attack does server-
+		// side: the next bonus needs a fresh "start sprinting" (a w-tap), so
+		// a client that keeps its sprint flag up (KeepSprint) gains nothing.
+		c.ac.Sprinting.Store(false)
 	}
 	strength += 0.5 * float32(c.heldEnchant(EnchantKnockback)) // knockback stick
 	vx, vz := knockbackHoriz(aSnap.X, aSnap.Z, vSnap.X, vSnap.Z, strength)
 	c.instance.Players.Broadcast(CbPlayEntityVelocity,
 		entityVelocityPayload(vSnap.EntityID, vx, float64(cfg.VerticalKnockback), vz), -1)
+}
+
+// sprintHit reports whether c's hit earns the sprint-knockback bonus: the
+// client said it sprints, and nothing a vanilla client can't sprint through
+// is going on — sneaking, Blindness, eating or drawing a bow.
+func (c *ClientConnection) sprintHit() bool {
+	return c.ac.Sprinting.Load() && !c.ac.Sneaking.Load() &&
+		c.effectLevel(EffectBlindness) == 0 && c.using.Load() == nil
 }
 
 // die resolves a lethal blow on c. killer may be nil (environmental death).

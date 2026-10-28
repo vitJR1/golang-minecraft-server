@@ -265,3 +265,45 @@ func TestValidators(t *testing.T) {
 		t.Error("pitch bounds wrong")
 	}
 }
+
+func TestValidChat(t *testing.T) {
+	for _, ok := range []string{"hello", "привет мир 🌍", "/tp 1 2 3", ""} {
+		if !ValidChat(ok) {
+			t.Errorf("%q rejected", ok)
+		}
+	}
+	long := make([]rune, MaxChatLength+1)
+	for i := range long {
+		long[i] = 'a'
+	}
+	for _, bad := range []string{"§cred", "line\nbreak", "tab\there", "nul\x00", "del\x7f", string(long), "\xff\xfe"} {
+		if ValidChat(bad) {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	if !ValidChat(string(long[:MaxChatLength])) {
+		t.Error("exactly the max length rejected")
+	}
+}
+
+func TestChatAndDropBudgets(t *testing.T) {
+	var s State
+	now := time.Unix(0, 0)
+	n := 0
+	for s.AllowChat(now) {
+		n++
+	}
+	if n != int(ChatBurst) {
+		t.Fatalf("chat burst = %d, want %v", n, ChatBurst)
+	}
+	if !s.AllowChat(now.Add(time.Second)) {
+		t.Fatal("one message a second must pass")
+	}
+	n = 0
+	for s.AllowDrop(now) {
+		n++
+	}
+	if n != int(DropBurst) {
+		t.Fatalf("drop burst = %d, want %v", n, DropBurst)
+	}
+}

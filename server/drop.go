@@ -2,6 +2,7 @@ package server
 
 import (
 	"math"
+	"time"
 )
 
 // drop.go turns the two ways a player gets rid of an item into dropped-item
@@ -30,6 +31,11 @@ func (c *ClientConnection) dropHeld(all bool) {
 	st := c.inv.get(slot)
 	if st.empty() || st.Name == navigatorName || st.Name == selectorName {
 		return // hub UI items aren't droppable
+	}
+	if !c.ac.AllowDrop(time.Now()) {
+		// Over the drop budget: keep the item, undo the client's prediction.
+		_ = c.sendSetSlot(0, slot, st)
+		return
 	}
 	n := 1
 	if all {

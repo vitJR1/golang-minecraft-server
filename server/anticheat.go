@@ -46,6 +46,27 @@ func (c *ClientConnection) allowPacket() bool {
 	return false
 }
 
+// acceptChat validates a chat message or command and spends the chat
+// budget. Characters a vanilla chat box can't produce ('§' codes, control
+// characters) or over-long text are flagged and dropped — they would forge
+// coloured or multi-line system lines. Spamming past vanilla's budget (a
+// burst of 10, then one a second) is kicked, as vanilla does; ops are
+// exempt.
+func (c *ClientConnection) acceptChat(text string) bool {
+	if !anticheat.ValidChat(text) {
+		c.flag("badpackets.chat", fmt.Sprintf("%d chars, illegal characters or too long: %.40q", len([]rune(text)), text))
+		return false
+	}
+	if c.server != nil && c.server.Ops.Has(c.playerName) {
+		return true
+	}
+	if !c.ac.AllowChat(time.Now()) {
+		c.kickFor("Kicked for spamming", "chat spam")
+		return false
+	}
+	return true
+}
+
 // onTeleportConfirm handles Confirm Teleportation. A forged id is flagged;
 // it settles nothing, so the movement gate stays closed.
 func (c *ClientConnection) onTeleportConfirm(id int32) {

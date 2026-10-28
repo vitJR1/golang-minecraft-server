@@ -6,7 +6,10 @@
 // anticheat.md in the repo root).
 package anticheat
 
-import "sync/atomic"
+import (
+	"sync/atomic"
+	"time"
+)
 
 // State is one connection's anticheat state. The zero value is ready to use,
 // so it can live by value inside the connection struct. Each component
@@ -32,6 +35,10 @@ type State struct {
 
 	// Packets rate-limits everything the client sends in play state.
 	Packets RateLimiter
+	// Chat rate-limits chat messages and commands (AllowChat); Drops the
+	// items the player throws (AllowDrop).
+	Chat  RateLimiter
+	Drops RateLimiter
 
 	// Sprinting / Sneaking mirror the client's Player Command input. They are
 	// the client's claim, not verified physics.
@@ -51,4 +58,16 @@ type State struct {
 func (s *State) Reset() {
 	s.History.Reset()
 	s.Transactions.NewEpoch()
+}
+
+// AllowChat spends one chat message of the ChatRate/ChatBurst budget.
+func (s *State) AllowChat(now time.Time) bool {
+	s.Chat.Rate, s.Chat.Burst = ChatRate, ChatBurst
+	return s.Chat.Allow(now)
+}
+
+// AllowDrop spends one thrown item stack of the DropRate/DropBurst budget.
+func (s *State) AllowDrop(now time.Time) bool {
+	s.Drops.Rate, s.Drops.Burst = DropRate, DropBurst
+	return s.Drops.Allow(now)
 }

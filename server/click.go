@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+	"time"
 
 	"minecraft-server/player"
 	"minecraft-server/protocol"
@@ -664,10 +665,16 @@ func (c *ClientConnection) clickChest(store chestStore, slot, button, mode int, 
 }
 
 // dropsAllowed refuses a click that would throw a hub UI item (navigator,
-// arena selector) — those never leave the inventory.
+// arena selector) — those never leave the inventory — or exceed the drop
+// budget (anticheat.DropRate); the caller re-sends the window.
 func (c *ClientConnection) dropsAllowed(drops []itemStack) bool {
 	for _, st := range drops {
 		if st.Name == navigatorName || st.Name == selectorName {
+			return false
+		}
+	}
+	for range drops {
+		if !c.ac.AllowDrop(time.Now()) {
 			return false
 		}
 	}

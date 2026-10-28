@@ -44,6 +44,9 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		if err != nil {
 			return fmt.Errorf("reading chat message: %w", err)
 		}
+		if !c.acceptChat(message) {
+			break
+		}
 		// Auth gate: until /login or /register succeeds, chat is silent
 		// for everyone else. Player gets a reminder line.
 		if !gateAuth(c, "Please /login or /register before chatting.") {
@@ -75,6 +78,9 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		raw, err := protocol.ReadStringFromBuf(packet)
 		if err != nil {
 			return fmt.Errorf("reading chat command: %w", err)
+		}
+		if !c.acceptChat(raw) {
+			break
 		}
 		// The vanilla client sends the text after the first slash, so a
 		// WorldEdit-style "//set stone" arrives as "/set stone" — the leading

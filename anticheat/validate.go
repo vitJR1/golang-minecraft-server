@@ -1,6 +1,9 @@
 package anticheat
 
-import "time"
+import (
+	"time"
+	"unicode/utf8"
+)
 
 // Packet budget: a vanilla client sends ~20 movement + ~20 Pong packets a
 // second plus bursts of clicks; a few hundred per second is already absurd.
@@ -53,4 +56,39 @@ func ValidHotbarSlot(slot int) bool {
 // ValidPitch: the vanilla client clamps its pitch to [-90, 90].
 func ValidPitch(pitch float32) bool {
 	return pitch >= -90 && pitch <= 90
+}
+
+// Chat budget, vanilla's chatSpamTickCount: +20 per message, −1 per tick,
+// kick above 200 — i.e. a burst of 10, then one message a second.
+const (
+	ChatRate  = 1.0
+	ChatBurst = 10.0
+)
+
+// Drop budget: items thrown per second (Q, ctrl+Q, window throws). Dumping
+// a whole inventory stack by stack still fits; an item-entity flood doesn't.
+const (
+	DropRate  = 20.0
+	DropBurst = 40.0
+)
+
+// MaxChatLength is vanilla's limit on a chat message or command (256
+// characters).
+const MaxChatLength = 256
+
+// ValidChat reports whether text could come from a vanilla chat box: at
+// most MaxChatLength characters, none of them '§' (formatting codes),
+// control characters or DEL — SharedConstants.isAllowedChatCharacter. A
+// '§' or newline would let a player forge coloured or multi-line system
+// text.
+func ValidChat(text string) bool {
+	if utf8.RuneCountInString(text) > MaxChatLength || !utf8.ValidString(text) {
+		return false
+	}
+	for _, r := range text {
+		if r == '§' || r < ' ' || r == 0x7f {
+			return false
+		}
+	}
+	return true
 }
