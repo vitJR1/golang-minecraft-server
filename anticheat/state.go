@@ -35,6 +35,10 @@ type State struct {
 
 	// Packets rate-limits everything the client sends in play state.
 	Packets RateLimiter
+	// Timer balances movement packets against real time (timer.go).
+	Timer Timer
+	// Move is the server's view of the player's movement (read loop only).
+	Move MoveState
 	// Chat rate-limits chat messages and commands (AllowChat); Drops the
 	// items the player throws (AllowDrop).
 	Chat  RateLimiter
@@ -48,6 +52,14 @@ type State struct {
 	// Detected is set by the first detection of the session: one detection
 	// moves the ladder one step, however many checks fire before the kick.
 	Detected atomic.Bool
+}
+
+// MoveState is what the server worked out about the player's movement from
+// the accepted positions, instead of trusting the packet's flags.
+type MoveState struct {
+	// LastDY is the vertical change of the latest accepted move: below zero
+	// the player is falling (a critical hit needs that).
+	LastDY float64
 }
 
 // Reset forgets everything tied to the current world: positions and the

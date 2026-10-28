@@ -16,6 +16,9 @@ func digWorld(t *testing.T, blk world.Block) (*Instance, *ClientConnection, worl
 	inst := bareInstance(New(), world.NewMemoryWorld())
 	inst.World.SetBlock(pos, blk)
 	inst.tickCount.Store(1000)
+	// The floor the miner stands on: airborne digging is 5× slower, and the
+	// server decides "airborne" from the blocks, not the packet's flag.
+	inst.World.SetBlock(world.Position{X: 3, Y: 68, Z: 3}, world.Stone)
 	c := offlineConn(inst, "Miner", player.Survival, 3.5, 69, 3.5)
 	return inst, c, pos
 }

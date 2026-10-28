@@ -420,7 +420,7 @@ func (c *ClientConnection) digContext() world.DigContext {
 	}
 	if c.player != nil {
 		s := c.player.Snapshot()
-		ctx.OnGround = s.OnGround
+		ctx.OnGround = c.serverOnGround() // not the packet's flag
 		ctx.InWater = c.instance != nil &&
 			c.instance.World.GetBlock(world.Position{X: floorF(s.X), Y: floorF(s.Y + eyeHeight), Z: floorF(s.Z)}).Name == world.Water.Name
 	}

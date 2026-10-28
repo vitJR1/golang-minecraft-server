@@ -80,15 +80,19 @@ func TestEffectCommand(t *testing.T) {
 
 func TestAirAndWaterSlowTheDig(t *testing.T) {
 	inst := bareInstance(New(), world.NewMemoryWorld())
+	inst.World.SetBlock(world.Position{X: 0, Y: 63, Z: 0}, world.Stone) // floor
 	c := offlineConn(inst, "Diver", player.Survival, 0.5, 64, 0.5)
 	ctx := c.digContext()
 	if !ctx.OnGround || ctx.InWater {
 		t.Fatalf("baseline context: %+v", ctx)
 	}
-	c.player.MoveTo(0.5, 64, 0.5, false)
+	// Airborne is the server's call from the blocks: a packet claiming
+	// "on ground" doesn't matter.
+	c.player.MoveTo(0.5, 66, 0.5, true)
 	if c.digContext().OnGround {
 		t.Error("airborne player should not be on ground")
 	}
+	c.player.MoveTo(0.5, 64, 0.5, false)
 	inst.World.SetBlock(world.Position{X: 0, Y: 65, Z: 0}, world.Water) // eye level
 	if !c.digContext().InWater {
 		t.Error("head in water should be detected")

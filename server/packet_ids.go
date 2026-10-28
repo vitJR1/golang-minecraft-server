@@ -51,6 +51,7 @@ const (
 	SbPlaySetPos            = 0x14
 	SbPlaySetPosRot         = 0x15
 	SbPlaySetRot            = 0x16
+	SbPlayMoveStatus        = 0x17 // "flying": onGround only — counted by the timer check
 	SbPlayPlayerAbilities   = 0x1C // flags byte: flying / invulnerable / etc.
 	SbPlayPlayerAction      = 0x1D // NOT 0x1C — that's Player Abilities in 1.20.1
 	SbPlayPlayerCommand     = 0x1E // sneak / sprint / jump_boost

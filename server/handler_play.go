@@ -90,6 +90,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		c.server.RunCommand(c, raw)
 
 	case SbPlaySetPos:
+		c.countMove()
 		x, y, z, onGround, err := readPosOnGround(packet)
 		if err != nil {
 			return fmt.Errorf("set player position: %w", err)
@@ -105,6 +106,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		c.broadcastEntityTeleport()
 
 	case SbPlaySetPosRot:
+		c.countMove()
 		x, y, z, err := readXYZ(packet)
 		if err != nil {
 			return fmt.Errorf("set player position+rotation: %w", err)
@@ -125,6 +127,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		c.broadcastHeadRotation()
 
 	case SbPlaySetRot:
+		c.countMove()
 		yaw, pitch, onGround, err := readYawPitchOnGround(packet)
 		if err != nil {
 			return fmt.Errorf("set player rotation: %w", err)
@@ -139,6 +142,11 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		c.player.LookAt(yaw, pitch, onGround)
 		c.broadcastEntityTeleport()
 		c.broadcastHeadRotation()
+
+	case SbPlayMoveStatus:
+		// On-ground flag only, sent when it changes; the server works out
+		// ground itself (movement.go), so it only counts for the timer.
+		c.countMove()
 
 	case SbPlayTeleportConfirm:
 		id, err := protocol.ReadVarInt(packet)

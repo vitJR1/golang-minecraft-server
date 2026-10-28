@@ -96,6 +96,11 @@ var Thresholds = map[string]float64{
 	// Reach is a measurement with lag compensation, not an impossible
 	// packet: a few borderline hits pass before it counts.
 	"combat.reach": 4,
+	// Timer measures packet timing over the network and phase relies on
+	// the server's block model matching the client's — both are evidence,
+	// not proof, until repeated.
+	"movement.timer": 5,
+	"movement.phase": 5,
 }
 
 // Threshold is the detection level for check.

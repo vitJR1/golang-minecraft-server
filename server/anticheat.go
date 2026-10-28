@@ -72,7 +72,11 @@ func (c *ClientConnection) acceptChat(text string) bool {
 func (c *ClientConnection) onTeleportConfirm(id int32) {
 	if _, ok := c.ac.Teleports.Confirm(id); !ok {
 		c.flag("badpackets.teleport", fmt.Sprintf("confirmed unknown teleport id %d", id))
+		return
 	}
+	// The vanilla client follows every confirm with an extra position
+	// packet in the same tick; it isn't a timer.
+	c.ac.Timer.Credit()
 }
 
 // awaitingTeleport reports whether a server teleport is still unconfirmed.

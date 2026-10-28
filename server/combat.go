@@ -113,10 +113,12 @@ func (c *ClientConnection) handleAttack(victim *ClientConnection) {
 	}
 	damage := scaledDamage(base, strength)
 
-	// Critical hit: attacker airborne (1.9 additionally requires a fully
-	// charged swing). Vanilla also forbids sprinting, but we don't gate on
-	// that to keep it forgiving.
-	crit := !aSnap.OnGround
+	// Critical hit: attacker airborne and falling, by the server's own
+	// ground test — the packet's onGround flag is the client's word, and a
+	// modified client says "airborne" on every swing (1.9 additionally
+	// requires a fully charged swing). Vanilla also forbids sprinting, but
+	// we don't gate on that to keep it forgiving.
+	crit := !c.serverOnGround() && c.ac.Move.LastDY < 0
 	if cfg.Version == PvP19 {
 		crit = crit && strength > 0.9
 	}

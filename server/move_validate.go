@@ -8,10 +8,9 @@ import (
 	"minecraft-server/anticheat"
 )
 
-// Movement sanity limits. The client is fully trusted about physics
-// otherwise (no collision or speed simulation server-side), so these are
-// deliberately generous — the goal is stopping garbage and teleport hacks,
-// not catching subtle speed cheats.
+// Movement sanity limits — deliberately generous, they stop garbage and
+// teleport hacks. Walking into or through walls is caught by the phase check
+// (movement.go); speed and flight are the next stage there.
 const (
 	// maxMoveSqPerPacket is the squared per-packet travel cap: 10 blocks per
 	// movement packet, vanilla's "moved too quickly" threshold. Sprinting,
@@ -73,7 +72,16 @@ func (c *ClientConnection) acceptMove(x, y, z float64) bool {
 	outOfBounds := math.Abs(x) > maxWorldXZ || math.Abs(z) > maxWorldXZ || math.Abs(y) > maxWorldY
 	tooFast := dx*dx+dy*dy+dz*dz > maxMoveSqPerPacket
 	if !outOfBounds && !tooFast {
-		return true
+		from, to := anticheat.Vec{X: snap.X, Y: snap.Y, Z: snap.Z}, anticheat.Vec{X: x, Y: y, Z: z}
+		if !c.phased(from, to) {
+			c.moved(from, to)
+			return true
+		}
+		// Into or through a full block (movement.go): vanilla's "moved
+		// wrongly" — back to where the player was.
+		c.flag("movement.phase", fmt.Sprintf("%.2f,%.2f,%.2f → %.2f,%.2f,%.2f", snap.X, snap.Y, snap.Z, x, y, z))
+		_ = c.sendSetback(snap.X, snap.Y, snap.Z)
+		return false
 	}
 
 	slog.Debug("movement rejected",
