@@ -113,6 +113,17 @@ func TestRealMapArenaFromConfig(t *testing.T) {
 	}
 	w := def.Template.Instantiate()
 
+	// Waiting players stand on the glass over the centre fountain: a solid
+	// block under the feet, air at the feet and head.
+	lobby := def.New().(*bedWars).arena.Lobby.Position
+	if lobby != (world.Position{X: 0, Y: 73, Z: 0}) {
+		t.Errorf("lobby = %v, want (0,73,0) from the config", lobby)
+	}
+	if !world.Collidable(w.GetBlock(world.Position{X: lobby.X, Y: lobby.Y - 1, Z: lobby.Z})) ||
+		w.GetBlock(lobby) != world.Air || w.GetBlock(world.Position{X: lobby.X, Y: lobby.Y + 1, Z: lobby.Z}) != world.Air {
+		t.Errorf("lobby %v isn't a free spot with a floor", lobby)
+	}
+
 	// Villagers from config are present.
 	var villagers int
 	for _, e := range w.Entities() {
@@ -284,6 +295,9 @@ func TestRealMapDuelFromConfig(t *testing.T) {
 	if len(g.arena.Spawns) != 2 {
 		t.Fatalf("spawns: %d, want 2", len(g.arena.Spawns))
 	}
+	if lobby := g.arena.Lobby.Position; lobby != (world.Position{X: 0, Y: 73, Z: 0}) {
+		t.Errorf("duel lobby = %v, want the config's (0,73,0)", lobby)
+	}
 	a, b := g.arena.Spawns[0].Position, g.arena.Spawns[1].Position
 	if a.Z >= 0 || b.Z <= 0 || a.X != 0 || b.X != 0 {
 		t.Errorf("duel spawns should be the opposite -Z/+Z bases, got %v and %v", a, b)
@@ -336,5 +350,18 @@ func TestGeneratedArenaBedsHaveHeadAndFoot(t *testing.T) {
 		if hp["facing"] != fp["facing"] {
 			t.Errorf("team %d: facing mismatch head=%v foot=%v", id, hp, fp)
 		}
+	}
+}
+
+// TestMatchmakerArenaUsesConfigLobby: /play bedwars builds the DOTA map by
+// auto-detection, without the arena JSON's layout — but waits at the JSON's
+// lobby, like /arena create's arenas on the same map.
+func TestMatchmakerArenaUsesConfigLobby(t *testing.T) {
+	a, err := buildSchemArena("../../"+defaultMapPath, buildTeams(4))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Lobby.Position != (world.Position{X: 0, Y: 73, Z: 0}) {
+		t.Fatalf("matchmaker lobby = %v, want the config's (0,73,0)", a.Lobby.Position)
 	}
 }

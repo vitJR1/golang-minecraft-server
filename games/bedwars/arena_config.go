@@ -216,7 +216,7 @@ func duelConfig(cfg arenaConfig) arenaConfig {
 
 // selectTeams returns a copy of cfg with only the teams at the given config
 // indices (in that order), generator team references remapped accordingly,
-// and the capacity fields set. Generators owned by a dropped team are
+// the capacity fields set and the lobby kept. Generators owned by a dropped team are
 // omitted.
 func selectTeams(cfg arenaConfig, keep []int, teamSize, minPlayers int) arenaConfig {
 	remap := make(map[int]int, len(keep))
@@ -224,6 +224,7 @@ func selectTeams(cfg arenaConfig, keep []int, teamSize, minPlayers int) arenaCon
 		Teams:      make([]teamConfig, 0, len(keep)),
 		TeamSize:   teamSize,
 		MinPlayers: minPlayers,
+		Lobby:      cfg.Lobby, // the map's waiting spot serves every mode
 	}
 	for newIdx, oldIdx := range keep {
 		remap[oldIdx] = newIdx
