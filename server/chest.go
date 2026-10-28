@@ -12,10 +12,8 @@ import (
 )
 
 // chest.go gives chest blocks a stored, persistent inventory. Opening a chest
-// streams its saved contents; the player rearranging items (any click mode)
-// is persisted by trusting the client's "changed slots" array in the Click
-// Container packet — fine for a creative/from-scratch server with no anti-
-// cheat. Regular chests store per (instance, block position); an ender chest
+// streams its saved contents; the player rearranging items is simulated by
+// the server (click.go) and the result stored. Regular chests store per (instance, block position); an ender chest
 // is one 27-slot inventory per player, shared by every ender chest block in
 // every instance (enderChestStore on Server). There's no item NBT model, so
 // stacks are just (item id, count) plus the tool fields below.
@@ -246,6 +244,9 @@ type chestStore interface {
 	contents() [chestSlotCount]itemStack
 	// setSlot stores st at idx (0..26); out-of-range is ignored.
 	setSlot(idx int, st itemStack)
+	// update runs fn on the stored slots under the store's lock: a click
+	// reads and writes the chest atomically (click.go).
+	update(fn func(*[chestSlotCount]itemStack))
 	// title is the GUI window title.
 	title() string
 }
@@ -259,6 +260,9 @@ type blockChest struct {
 func (b blockChest) contents() [chestSlotCount]itemStack { return b.inst.chestAt(b.pos) }
 func (b blockChest) setSlot(idx int, st itemStack)       { b.inst.setChestSlot(b.pos, idx, st) }
 func (b blockChest) title() string                       { return "Chest" }
+func (b blockChest) update(fn func(*[chestSlotCount]itemStack)) {
+	b.inst.updateChest(b.pos, fn)
+}
 
 // enderChest is a player's private 27 slots. One record per player UUID lives
 // on the Server so it follows them across instances; every ender chest block
@@ -287,6 +291,12 @@ func (e *enderChest) setSlot(idx int, st itemStack) {
 }
 
 func (e *enderChest) title() string { return "Ender Chest" }
+
+func (e *enderChest) update(fn func(*[chestSlotCount]itemStack)) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	fn(&e.slots)
+}
 
 // enderChestFor returns the player's ender chest, creating it on first use.
 func (s *Server) enderChestFor(uuid [16]byte) *enderChest {
@@ -336,6 +346,22 @@ func (i *Instance) setChestSlot(pos world.Position, idx int, stack itemStack) {
 	inv.slots[idx] = stack
 }
 
+// updateChest runs fn on chest pos's slots under chestsMu, creating the
+// record on first use.
+func (i *Instance) updateChest(pos world.Position, fn func(*[chestSlotCount]itemStack)) {
+	i.chestsMu.Lock()
+	defer i.chestsMu.Unlock()
+	if i.chests == nil {
+		i.chests = make(map[world.Position]*chestInventory)
+	}
+	inv := i.chests[pos]
+	if inv == nil {
+		inv = &chestInventory{}
+		i.chests[pos] = inv
+	}
+	fn(&inv.slots)
+}
+
 // openBlockChest opens the chest block at pos for this client: a regular
 // chest binds the menu to that position; an ender chest binds it to the
 // player's own ender inventory. Then the stored contents are streamed.
@@ -349,6 +375,7 @@ func (c *ClientConnection) openBlockChest(pos world.Position) {
 
 // openChestStore shows store's contents in the chest GUI.
 func (c *ClientConnection) openChestStore(store chestStore) {
+	c.drag.reset()
 	c.menu.Store(&openMenu{kind: "chest", chest: store})
 	_ = c.sendOpenScreen(store.title(), chestRows)
 	_ = c.sendChestInventory(store.contents())
@@ -356,7 +383,7 @@ func (c *ClientConnection) openChestStore(store chestStore) {
 
 // sendChestInventory streams a chest's contents (Set Container Content): the 27
 // chest slots from `slots`, then the player's real inventory (main + hotbar
-// mirror from c.inv), then the empty cursor.
+// mirror from c.inv), then the cursor.
 func (c *ClientConnection) sendChestInventory(slots [chestSlotCount]itemStack) error {
 	var buf bytes.Buffer
 	buf.WriteByte(menuWindowID)
@@ -366,48 +393,8 @@ func (c *ClientConnection) sendChestInventory(slots [chestSlotCount]itemStack) e
 		writeStack(&buf, slots[s])
 	}
 	c.writeInventoryMirror(&buf)
-	buf.Write(protocol.WriteEmptySlot()) // cursor
+	writeStack(&buf, c.cursor)
 	return c.safeWrite(CbPlaySetContainerContent, buf.Bytes())
-}
-
-// applyChestClick parses a Click Container packet's changed-slots array (after
-// the window/state/slot/button/mode header has been read) and persists any
-// changes to chest slots (0..26) of the open chest store; slots in the player
-// inventory range update the player's own inventory model. The client
-// computes the result of every click mode, so trusting its array gives
-// correct chest contents without re-implementing inventory logic.
-//
-// Returns the carried (cursor) stack the client reports after the click, so
-// the caller can track what the player is holding between clicks.
-func (c *ClientConnection) applyChestClick(packet *bytes.Buffer, store chestStore) itemStack {
-	count, err := protocol.ReadVarInt(packet)
-	if err != nil || count < 0 {
-		return c.cursor
-	}
-	for n := 0; n < count; n++ {
-		raw, err := protocol.ReadUShortFromBuf(packet)
-		if err != nil {
-			return c.cursor
-		}
-		slot := int16(raw)
-		st, ok := readSlot(packet)
-		if !ok {
-			return c.cursor // malformed slot — stop, leave what we have
-		}
-		switch {
-		case slot >= 0 && slot < chestSlotCount:
-			store.setSlot(int(slot), st)
-		case slot >= chestSlotCount:
-			// Player-inventory side of the chest window: slot chestSlotCount+i
-			// maps to window-0 slot mainInvStart+i — keep the held item in sync.
-			c.inv.set(slot-chestSlotCount+mainInvStart, c.inv.withKnownName(st))
-		}
-	}
-	cursor, ok := readSlot(packet)
-	if !ok {
-		return c.cursor
-	}
-	return cursor
 }
 
 // readSlot reads one wire Slot from buf: present bool, then (item id, count,
@@ -430,8 +417,9 @@ func readSlot(buf *bytes.Buffer) (itemStack, bool) {
 		return itemStack{}, false
 	}
 	// Measure the item's optional NBT, then decode it for the fields we
-	// model (Damage, Enchantments); the custom name is re-attached by the
-	// inventory model (withKnownName) for server-given items.
+	// model (Damage, Enchantments, display). Client stacks are only ever
+	// compared against the model (click.go), never stored, except a
+	// creative player's Set Creative Mode Slot.
 	r := bytes.NewReader(buf.Bytes())
 	before := r.Len()
 	if err := nbt.SkipTag(r); err != nil {

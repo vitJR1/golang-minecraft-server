@@ -76,14 +76,28 @@ func placeOn(t *testing.T, c *ClientConnection, clicked world.Position, face int
 }
 
 // clickSlot sends a window-0 Click Container with the given changed slots
-// and resulting cursor.
-func clickSlot(t *testing.T, c *ClientConnection, slot int16, mode int32, changed map[int16]itemStack, cursor itemStack) {
+// and resulting cursor — the client's prediction, which the server only
+// compares against its own simulation (click.go).
+func clickSlot(t *testing.T, c *ClientConnection, slot int16, button byte, mode int32, changed map[int16]itemStack, cursor itemStack) {
+	t.Helper()
+	clickWith(t, c, 0, slot, button, mode, changed, cursor)
+}
+
+// clickIn sends a Click Container on window with no prediction (empty
+// changed slots + cursor): the server simulates it and, since the
+// "prediction" disagrees, re-sends the window — drained by play.
+func clickIn(t *testing.T, c *ClientConnection, window byte, slot int16, button byte, mode int32) {
+	t.Helper()
+	clickWith(t, c, window, slot, button, mode, nil, itemStack{})
+}
+
+func clickWith(t *testing.T, c *ClientConnection, window byte, slot int16, button byte, mode int32, changed map[int16]itemStack, cursor itemStack) {
 	t.Helper()
 	var p bytes.Buffer
-	p.WriteByte(0)
+	p.WriteByte(window)
 	protocol.WriteVarInt32ToBuffer(&p, 0)
 	p.Write(protocol.WriteShort(slot))
-	p.WriteByte(0)
+	p.WriteByte(button)
 	protocol.WriteVarInt32ToBuffer(&p, mode)
 	protocol.WriteVarInt32ToBuffer(&p, int32(len(changed)))
 	for s, st := range changed {

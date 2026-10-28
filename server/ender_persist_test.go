@@ -70,9 +70,8 @@ func TestEnderChestPersistsThroughFileStore(t *testing.T) {
 	s := New()
 	s.EnderChests = fs
 	owner := [16]byte{7}
-	c := enderTestConn(s, s.Hub, "Owner", owner)
 	e := s.enderChestFor(owner)
-	c.applyChestClick(changedSlots(t, map[int16]itemStack{4: {ID: 764, Count: 5}}), e)
+	e.setSlot(4, itemStack{ID: 764, Count: 5})
 	s.saveEnderChest(e)
 
 	if _, err := os.Stat(path); err != nil {

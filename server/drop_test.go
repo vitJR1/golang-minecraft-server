@@ -76,7 +76,7 @@ func TestCursorDropOutsideWindowAndOnClose(t *testing.T) {
 	c.inv.set(hotbarStart, itemStack{ID: iron, Count: 8})
 
 	// Pick the stack up onto the cursor: nothing dropped yet.
-	clickSlot(t, c, int16(hotbarStart), 0, map[int16]itemStack{int16(hotbarStart): {}}, itemStack{ID: iron, Count: 8})
+	clickSlot(t, c, int16(hotbarStart), 0, 0, map[int16]itemStack{int16(hotbarStart): {}}, itemStack{ID: iron, Count: 8})
 	if c.cursor.Count != 8 {
 		t.Fatalf("cursor should hold 8, got %+v", c.cursor)
 	}
@@ -85,7 +85,7 @@ func TestCursorDropOutsideWindowAndOnClose(t *testing.T) {
 	}
 
 	// Right-click outside the window: one unit leaves the cursor.
-	clickSlot(t, c, -999, 0, nil, itemStack{ID: iron, Count: 7})
+	clickSlot(t, c, -999, 1, 0, nil, itemStack{ID: iron, Count: 7})
 	if itemsIn(inst)[iron] != 1 {
 		t.Errorf("one unit should drop from the cursor, ground has %v", itemsIn(inst))
 	}
@@ -109,7 +109,7 @@ func TestDropKeyOverSlotInWindow(t *testing.T) {
 	c.inv.set(mainInvStart, itemStack{ID: iron, Count: 5})
 
 	// Drop key over the slot (mode 4): the client reports the slot shrunk.
-	clickSlot(t, c, int16(mainInvStart), 4, map[int16]itemStack{int16(mainInvStart): {ID: iron, Count: 4}}, itemStack{})
+	clickSlot(t, c, int16(mainInvStart), 0, 4, map[int16]itemStack{int16(mainInvStart): {ID: iron, Count: 4}}, itemStack{})
 	if itemsIn(inst)[iron] != 1 {
 		t.Errorf("drop key should drop one, ground has %v", itemsIn(inst))
 	}

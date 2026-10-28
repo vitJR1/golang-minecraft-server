@@ -11,10 +11,8 @@ import (
 //     (the whole stack) from the selected hotbar slot.
 //   - Inside an inventory or chest window: clicking outside the window
 //     (slot -999) drops the cursor stack, the drop key over a slot drops
-//     from that slot, and closing the window with something on the cursor
-//     drops it. The client reports the slots it changed plus the new cursor
-//     after every click; the server models all of those, so whatever is
-//     missing afterwards (per item id) is what left the player's hands.
+//     from that slot (both simulated in click.go), and closing the window
+//     with something on the cursor drops it.
 //
 // Thrown items leave from eye height along the look direction with the
 // vanilla speed, and can't be picked back up for itemThrowDelay ticks.
@@ -49,16 +47,6 @@ func (c *ClientConnection) dropHeld(all bool) {
 	c.throwStack(thrown)
 }
 
-// throwItem spawns count plain units of itemID flying from the player's
-// eyes (used when only the item id is known, e.g. the window-drop deficit).
-func (c *ClientConnection) throwItem(itemID int32, count int) {
-	for count > 0 {
-		n := min(count, maxStackSize)
-		c.throwStack(itemStack{ID: itemID, Count: byte(n)})
-		count -= n
-	}
-}
-
 // throwStack spawns the stack flying from the player's eyes in the direction
 // they look (vanilla drop velocity), keeping its NBT.
 func (c *ClientConnection) throwStack(st itemStack) {
@@ -83,36 +71,4 @@ func (c *ClientConnection) dropCursor() {
 	st := c.cursor
 	c.cursor = itemStack{}
 	c.throwStack(st)
-}
-
-// itemTotals sums the player's modelled items — inventory slots + cursor,
-// plus the open chest's slots when chest is non-nil — per item id.
-func (c *ClientConnection) itemTotals(chest chestStore) map[int32]int {
-	totals := map[int32]int{}
-	for _, st := range c.inv.slots {
-		if !st.empty() {
-			totals[st.ID] += int(st.Count)
-		}
-	}
-	if !c.cursor.empty() {
-		totals[c.cursor.ID] += int(c.cursor.Count)
-	}
-	if chest != nil {
-		for _, st := range chest.contents() {
-			if !st.empty() {
-				totals[st.ID] += int(st.Count)
-			}
-		}
-	}
-	return totals
-}
-
-// dropDeficit throws every unit that was in before but isn't in after: the
-// client's view of a click where items left all modelled containers.
-func (c *ClientConnection) dropDeficit(before, after map[int32]int) {
-	for id, n := range before {
-		if missing := n - after[id]; missing > 0 {
-			c.throwItem(id, missing)
-		}
-	}
 }

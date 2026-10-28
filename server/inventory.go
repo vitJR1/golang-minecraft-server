@@ -25,8 +25,9 @@ func maxStackFor(itemID int32) int {
 // inventory.go is the per-connection player inventory model. It mirrors the
 // window-0 layout the client uses so the server knows what the player is
 // actually holding — used to place only a held block (no more always-stone)
-// and to pick the right throwable. It's kept in sync from creative slot edits
-// and container clicks; survival pickup/crafting isn't modelled yet.
+// and to pick the right throwable. It is authoritative: container clicks are
+// simulated on it (click.go), creative slot edits are taken from creative
+// players only; crafting isn't modelled.
 //
 // Window-0 slot layout (1.20.1):
 //
@@ -68,23 +69,6 @@ func (inv *playerInventory) held(heldSlot int32) itemStack {
 	return inv.get(int16(hotbarStart) + int16(heldSlot))
 }
 
-// withKnownName re-attaches the custom display name of a server-given UI item
-// to a stack the client reported back (the wire reader drops item NBT, so a
-// moved "Navigator" rod would otherwise come back nameless and stop opening
-// the menu). Only IDs that currently carry a name in the inventory qualify.
-func (inv *playerInventory) withKnownName(st itemStack) itemStack {
-	if st.empty() || st.Name != "" {
-		return st
-	}
-	for _, cur := range inv.slots {
-		if cur.ID == st.ID && !cur.empty() && cur.Name != "" {
-			st.Name = cur.Name
-			break
-		}
-	}
-	return st
-}
-
 // writeInventoryMirror appends the 36 player-inventory slots (main 9..35 then
 // hotbar 36..44) of a container window, from the server-side model, so an
 // open chest/menu shows the player's real items instead of blanks.
@@ -105,40 +89,8 @@ func (c *ClientConnection) sendInventoryContents() error {
 	for slot := int16(0); slot < playerInvSize; slot++ {
 		writeStack(&buf, c.inv.get(slot))
 	}
-	buf.Write(protocol.WriteEmptySlot()) // cursor
+	writeStack(&buf, c.cursor)
 	return c.safeWrite(CbPlaySetContainerContent, buf.Bytes())
-}
-
-// applyInventoryClick applies a window-0 Click Container (the player moving
-// stacks around their own inventory: pick up, place, merge, shift-click) to
-// the model by trusting the client's changed-slots array, exactly like chest
-// windows. packet is positioned after the window/state/slot/button/mode
-// header. Without this the model drifts from the client as soon as a stack
-// is moved, and the next server-side give would overwrite the wrong slot.
-//
-// Returns the carried (cursor) stack the client reports after the click.
-func (c *ClientConnection) applyInventoryClick(packet *bytes.Buffer) itemStack {
-	count, err := protocol.ReadVarInt(packet)
-	if err != nil || count < 0 {
-		return c.cursor
-	}
-	for n := 0; n < count; n++ {
-		raw, err := protocol.ReadUShortFromBuf(packet)
-		if err != nil {
-			return c.cursor
-		}
-		st, ok := readSlot(packet)
-		if !ok {
-			return c.cursor
-		}
-		c.inv.set(int16(raw), c.inv.withKnownName(st))
-	}
-	cursor, ok := readSlot(packet)
-	if !ok {
-		return c.cursor
-	}
-	c.equipmentChanged()
-	return cursor
 }
 
 // stripNavigatorItems removes the server-given hub UI items (navigator rod,

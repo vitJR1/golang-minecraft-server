@@ -611,6 +611,10 @@ type ClientConnection struct {
 	// item entity — see drop.go. Only touched from the readLoop goroutine.
 	cursor itemStack
 
+	// drag is the drag-click (Click Container mode 5) in progress across
+	// packets (click.go). Only touched from the readLoop goroutine.
+	drag dragState
+
 	// authed gates the connection through the offline-mode auth plugin.
 	// True = player has run /register or /login successfully (or auth
 	// is disabled — see auth.go EnableAuth). False = chat + commands

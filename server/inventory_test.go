@@ -206,10 +206,11 @@ func TestWindowZeroClickUpdatesModel(t *testing.T) {
 	c.inv.set(hotbarStart, itemStack{ID: iron, Count: 1})
 	c.inv.set(hotbarStart+1, itemStack{ID: iron, Count: 63})
 
-	// Client merged slot 36 into slot 37: window 0, changed slots
-	// {36: empty, 37: 64 iron}, empty cursor.
-	clickSlot(t, c, int16(hotbarStart), 0,
-		map[int16]itemStack{int16(hotbarStart): {}, int16(hotbarStart + 1): {ID: iron, Count: 64}}, itemStack{})
+	// Pick up the single iron, then left-click the 63 stack: they merge.
+	clickSlot(t, c, int16(hotbarStart), 0, 0,
+		map[int16]itemStack{int16(hotbarStart): {}}, itemStack{ID: iron, Count: 1})
+	clickSlot(t, c, int16(hotbarStart+1), 0, 0,
+		map[int16]itemStack{int16(hotbarStart + 1): {ID: iron, Count: 64}}, itemStack{})
 	if !c.inv.get(hotbarStart).empty() || c.inv.get(hotbarStart+1).Count != 64 {
 		t.Errorf("model after merge: %+v / %+v", c.inv.get(hotbarStart), c.inv.get(hotbarStart+1))
 	}

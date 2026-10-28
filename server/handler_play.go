@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"minecraft-server/anticheat"
 	"minecraft-server/game"
+	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/world"
 	"strings"
@@ -561,22 +562,36 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		mode, _ := protocol.ReadVarInt(packet)
 		click := menuClick{button: button, mode: mode}
 		if winID == 0 {
-			// The player's own inventory screen: keep the model in step, and
-			// whatever left the slots+cursor was dropped (click outside the
-			// window, drop key over a slot).
-			before := c.itemTotals(nil)
-			c.cursor = c.applyInventoryClick(packet)
-			c.dropDeficit(before, c.itemTotals(nil))
+			// The player's own inventory screen: simulated on the model
+			// (click.go); the client's predicted result is only compared.
+			claim, err := readClickClaim(packet)
+			if err != nil {
+				c.flag("badpackets.click", err.Error())
+				_ = c.sendInventoryContents()
+				break
+			}
+			if c.gamemode() == player.Spectator {
+				_ = c.sendInventoryContents() // spectators only look
+				break
+			}
+			c.clickInventory(int(slot), int(button), int(mode), claim)
 			break
 		}
 		if m := c.menu.Load(); m != nil && winID == menuWindowID {
 			switch {
 			case m.kind == "chest":
-				// Persist the client's computed slot changes to the chest;
-				// anything that left chest+inventory+cursor was dropped.
-				before := c.itemTotals(m.chest)
-				c.cursor = c.applyChestClick(packet, m.chest)
-				c.dropDeficit(before, c.itemTotals(m.chest))
+				// Simulated against the chest + inventory (click.go).
+				claim, err := readClickClaim(packet)
+				if err != nil {
+					c.flag("badpackets.click", err.Error())
+					_ = c.sendChestInventory(m.chest.contents())
+					break
+				}
+				if c.gamemode() == player.Spectator {
+					_ = c.sendChestInventory(m.chest.contents())
+					break
+				}
+				c.clickChest(m.chest, int(slot), int(button), int(mode), claim)
 				if e, ok := m.chest.(*enderChest); ok && c.server != nil {
 					c.server.saveEnderChest(e)
 				}
@@ -609,8 +624,13 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			return fmt.Errorf("close container: window id: %w", err)
 		}
 		// Closing any window (the inventory screen is window 0) with a stack
-		// still on the cursor drops it, like vanilla.
+		// still on the cursor drops it, like vanilla; the inventory screen
+		// also hands back its 2×2 crafting grid.
+		c.drag.reset()
 		c.dropCursor()
+		if winID == 0 {
+			c.returnCraftGrid()
+		}
 		if winID == menuWindowID {
 			c.menu.Store(nil)
 			_ = c.sendInventoryContents()

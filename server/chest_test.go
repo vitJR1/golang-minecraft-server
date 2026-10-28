@@ -82,54 +82,58 @@ func TestReadSlotEmpty(t *testing.T) {
 	}
 }
 
-func TestApplyChestClickPersists(t *testing.T) {
-	inst := NewInstance("chest-test", New(), world.NewMemoryWorld())
-	t.Cleanup(inst.Stop)
-	c := &ClientConnection{instance: inst}
+// chestHotbar0 is hotbar slot 0 inside a chest window (27 chest slots, then
+// the player's main inventory, then the hotbar).
+const chestHotbar0 = chestSlotCount + 27
+
+func TestChestClickPersists(t *testing.T) {
+	inst := bareInstance(New(), world.NewMemoryWorld())
+	c := offlineConn(inst, "Stasher", player.Survival, 0, 64, 0)
 	pos := world.Position{X: 2, Y: 64, Z: 3}
+	c.inv.set(hotbarStart, itemStack{ID: 764, Count: 3})
+	c.openBlockChest(pos)
+	drain(c)
 
-	// Client reports: chest slot 0 now holds diamond(764) ×3; cursor empty.
-	put := changedSlots(t, map[int16]itemStack{0: {ID: 764, Count: 3}})
-	c.applyChestClick(put, blockChest{inst, pos})
-
-	got := inst.chestAt(pos)
-	if got[0].ID != 764 || got[0].Count != 3 {
-		t.Fatalf("slot 0 = %+v, want diamond×3", got[0])
+	// Pick the diamonds up from the hotbar, drop them into chest slot 0.
+	clickIn(t, c, menuWindowID, chestHotbar0, 0, clickPickup)
+	clickIn(t, c, menuWindowID, 0, 0, clickPickup)
+	if got := inst.chestAt(pos)[0]; got.ID != 764 || got.Count != 3 {
+		t.Fatalf("chest slot 0 = %+v, want diamond×3", got)
+	}
+	if !c.inv.get(hotbarStart).empty() || !c.cursor.empty() {
+		t.Fatalf("diamonds duplicated: hotbar %+v cursor %+v", c.inv.get(hotbarStart), c.cursor)
 	}
 
-	// Now the client empties slot 0 (took the item out).
-	clear := changedSlots(t, map[int16]itemStack{0: {}})
-	c.applyChestClick(clear, blockChest{inst, pos})
+	// Shift-click them back: into the player's inventory, chest empty.
+	clickIn(t, c, menuWindowID, 0, 0, clickQuickMove)
 	if !inst.chestAt(pos)[0].empty() {
-		t.Errorf("slot 0 should be empty after removal: %+v", inst.chestAt(pos)[0])
+		t.Errorf("chest slot 0 should be empty after shift-click: %+v", inst.chestAt(pos)[0])
 	}
-
-	// Player-inventory slots (>= 27) are ignored, not stored as chest slots.
-	inv := changedSlots(t, map[int16]itemStack{30: {ID: 1, Count: 1}})
-	c.applyChestClick(inv, blockChest{inst, pos})
-	for _, s := range inst.chestAt(pos) {
-		if !s.empty() {
-			t.Errorf("inventory-slot change leaked into chest: %+v", s)
-		}
+	if got := c.countItem(764); got != 3 {
+		t.Errorf("player holds %d diamonds, want 3", got)
 	}
 }
 
-// changedSlots builds a Click Container changed-slots array + empty cursor,
-// the suffix applyChestClick parses (after the header).
-func changedSlots(t *testing.T, slots map[int16]itemStack) *bytes.Buffer {
-	t.Helper()
-	var buf bytes.Buffer
-	protocol.WriteVarInt32ToBuffer(&buf, int32(len(slots)))
-	for slot, st := range slots {
-		buf.Write(protocol.WriteShort(slot))
-		if st.empty() {
-			buf.Write(protocol.WriteEmptySlot())
-		} else {
-			buf.Write(protocol.WriteSlot(st.ID, st.Count))
-		}
+// TestChestClickIgnoresClaimedItems: the client's "changed slots" can't put
+// anything into a chest — only the simulated click counts.
+func TestChestClickIgnoresClaimedItems(t *testing.T) {
+	inst := bareInstance(New(), world.NewMemoryWorld())
+	c := offlineConn(inst, "Forger", player.Survival, 0, 64, 0)
+	pos := world.Position{X: 2, Y: 64, Z: 3}
+	c.openBlockChest(pos)
+	drain(c)
+
+	// Empty cursor, empty slot — the click does nothing, whatever the
+	// packet claims.
+	clickWith(t, c, menuWindowID, 0, 0, clickPickup,
+		map[int16]itemStack{0: {ID: 764, Count: 64}, chestHotbar0: {ID: 764, Count: 64}},
+		itemStack{ID: 764, Count: 64})
+	if got := inst.chestAt(pos)[0]; !got.empty() {
+		t.Fatalf("claimed diamonds stored in the chest: %+v", got)
 	}
-	buf.Write(protocol.WriteEmptySlot()) // cursor
-	return &buf
+	if c.countItem(764) != 0 || !c.cursor.empty() {
+		t.Fatalf("claimed diamonds reached the player: %d, cursor %+v", c.countItem(764), c.cursor)
+	}
 }
 
 // enderTestConn builds an offline connection (no network goroutines) for a
@@ -160,7 +164,8 @@ func TestEnderChestSharedPerPlayer(t *testing.T) {
 	owner := [16]byte{1}
 	c := enderTestConn(s, s.Hub, "Owner", owner)
 
-	// Open the hub ender chest and put a diamond in slot 0.
+	// Open the hub ender chest and put the player's diamonds in slot 0.
+	c.inv.set(hotbarStart, itemStack{ID: 764, Count: 3})
 	c.openBlockChest(hubPos)
 	m := c.menu.Load()
 	if m == nil || m.kind != "chest" {
@@ -169,7 +174,8 @@ func TestEnderChestSharedPerPlayer(t *testing.T) {
 	if _, ok := m.chest.(*enderChest); !ok {
 		t.Fatalf("ender chest block should open an enderChest store, got %T", m.chest)
 	}
-	c.applyChestClick(changedSlots(t, map[int16]itemStack{0: {ID: 764, Count: 3}}), m.chest)
+	clickIn(t, c, menuWindowID, chestHotbar0, 0, clickPickup)
+	clickIn(t, c, menuWindowID, 0, 0, clickPickup)
 
 	// The same player in another instance sees the same slots; the hub
 	// block's own position holds nothing as a regular chest.
