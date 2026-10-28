@@ -440,7 +440,7 @@ func readSlot(buf *bytes.Buffer) (itemStack, bool) {
 	raw := buf.Next(before - r.Len())
 	st := itemStack{ID: int32(id), Count: count}
 	if len(raw) > 1 {
-		if tag, err := nbt.Unmarshal(raw); err == nil {
+		if tag, err := nbt.UnmarshalNetwork(raw); err == nil {
 			st = stackFromTag(st, tag)
 		}
 	}
