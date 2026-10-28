@@ -305,6 +305,20 @@ func TestRealMapDuelFromConfig(t *testing.T) {
 	if g.arena.HologramHeight != 2 {
 		t.Errorf("duel hologram height = %v, want the config's 2", g.arena.HologramHeight)
 	}
+	// Each generator keeps the hologram height its config entry gives it.
+	parsed, err := parseArenaConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[world.Position]float64{}
+	for _, gc := range parsed.Generators {
+		want[world.Position{X: gc.X, Y: gc.Y, Z: gc.Z}] = gc.HologramHeight
+	}
+	for _, gen := range g.arena.Generators {
+		if h, ok := want[gen.Pos]; ok && gen.Resource.timed() && gen.HologramHeight != h {
+			t.Errorf("duel %v generator at %v: hologram height %v, want the config's %v", gen.Resource, gen.Pos, gen.HologramHeight, h)
+		}
+	}
 	a, b := g.arena.Spawns[0].Position, g.arena.Spawns[1].Position
 	if a.Z >= 0 || b.Z <= 0 || a.X != 0 || b.X != 0 {
 		t.Errorf("duel spawns should be the opposite -Z/+Z bases, got %v and %v", a, b)

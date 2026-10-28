@@ -10,7 +10,9 @@ import (
 // (diamond / emerald), so players can see how soon the next unit appears.
 // Two lines of floating text hover above the generator block (Arena.
 // HologramHeight, the map JSON's "hologramHeight"): the resource name and the
-// timer. Team iron forges fire every few seconds and don't get one.
+// timer. A generator may set its own height (Generator.HologramHeight, the
+// generator entry's "hologramHeight"). Team iron forges fire every few
+// seconds and don't get one.
 
 const (
 	// defaultHologramHeight is how far above the generator block the
@@ -52,17 +54,13 @@ func (r Resource) title() string {
 // Called once from OnInstanceStart; holograms are re-streamed to joining
 // players by the server, so the game only has to update the text.
 func (g *bedWars) spawnHolograms(ctx *game.Ctx) {
-	height := g.arena.HologramHeight
-	if height == 0 {
-		height = defaultHologramHeight
-	}
 	var holos []genHologram
 	for _, gen := range g.gens {
 		if !gen.Resource.timed() || gen.IntervalTicks == 0 {
 			continue
 		}
 		x, y, z := gen.dropPoint()
-		base := y + height - nameTagOffset
+		base := y + g.hologramHeight(gen) - nameTagOffset
 		title := ctx.Instance.SpawnHologram(x, base+hologramLineGap, z, gen.Resource.title())
 		timer := ctx.Instance.SpawnHologram(x, base, z, timerText(gen.IntervalTicks, 0, false))
 		if title == nil || timer == nil {
@@ -73,6 +71,18 @@ func (g *bedWars) spawnHolograms(ctx *game.Ctx) {
 	g.mu.Lock()
 	g.holograms = holos
 	g.mu.Unlock()
+}
+
+// hologramHeight is how high gen's countdown floats over its block: the
+// generator's own height, else the arena's, else defaultHologramHeight.
+func (g *bedWars) hologramHeight(gen Generator) float64 {
+	switch {
+	case gen.HologramHeight != 0:
+		return gen.HologramHeight
+	case g.arena.HologramHeight != 0:
+		return g.arena.HologramHeight
+	}
+	return defaultHologramHeight
 }
 
 // updateHolograms refreshes every countdown line for the current tick. The

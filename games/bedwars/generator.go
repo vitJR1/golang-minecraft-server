@@ -53,6 +53,9 @@ type Generator struct {
 	// the generator idles while the pile is at the cap. 0 = the per-resource
 	// default (defaultGenMaxStack).
 	MaxStack int
+	// HologramHeight overrides Arena.HologramHeight for this generator's
+	// countdown (hologram.go); 0 = use the arena's.
+	HologramHeight float64
 }
 
 // defaultGenMaxStack is the uncollected-pile cap per resource when the

@@ -91,6 +91,9 @@ type generatorConfig struct {
 	// MaxStack caps the uncollected pile at the generator (0 → per-resource
 	// default: iron 48, gold 16, diamond 8, emerald 4).
 	MaxStack int `json:"maxStack,omitempty"`
+	// HologramHeight is how high this generator's countdown title floats
+	// above it (diamond / emerald only); 0 → the map's "hologramHeight".
+	HologramHeight float64 `json:"hologramHeight,omitempty"`
 }
 
 type villagerConfig struct {
@@ -324,11 +327,12 @@ func buildConfigArena(tmpl *world.Template, cfg arenaConfig, teams []Team) (*Are
 			interval = uint64(gc.IntervalTicks)
 		}
 		a.Generators = append(a.Generators, Generator{
-			Pos:           world.Position{X: gc.X, Y: gc.Y, Z: gc.Z},
-			Resource:      res,
-			IntervalTicks: interval,
-			TeamID:        team,
-			MaxStack:      gc.MaxStack,
+			Pos:            world.Position{X: gc.X, Y: gc.Y, Z: gc.Z},
+			Resource:       res,
+			IntervalTicks:  interval,
+			TeamID:         team,
+			MaxStack:       gc.MaxStack,
+			HologramHeight: gc.HologramHeight,
 		})
 	}
 

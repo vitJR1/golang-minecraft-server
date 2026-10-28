@@ -222,7 +222,8 @@
       "y": 73,
       "z": -15,
       "intervalTicks": 900,
-      "team": null
+      "team": null,
+      "hologramHeight": 2.0
     },
     {
       "resource": "emerald",
@@ -230,7 +231,8 @@
       "y": 73,
       "z": 14,
       "intervalTicks": 900,
-      "team": null
+      "team": null,
+      "hologramHeight": 2.0
     },
     {
       "resource": "diamond",
@@ -238,7 +240,8 @@
       "y": 69,
       "z": -49,
       "intervalTicks": 400,
-      "team": null
+      "team": null,
+      "hologramHeight": 3.0
     },
     {
       "resource": "diamond",
@@ -246,7 +249,8 @@
       "y": 69,
       "z": -50,
       "intervalTicks": 400,
-      "team": null
+      "team": null,
+      "hologramHeight": 3.0
     },
     {
       "resource": "diamond",
@@ -254,7 +258,8 @@
       "y": 69,
       "z": 50,
       "intervalTicks": 400,
-      "team": null
+      "team": null,
+      "hologramHeight": 3.0
     },
     {
       "resource": "diamond",
@@ -262,7 +267,8 @@
       "y": 69,
       "z": 50,
       "intervalTicks": 400,
-      "team": null
+      "team": null,
+      "hologramHeight": 3.0
     }
   ]
 }

@@ -123,3 +123,69 @@ func TestHologramTimerCountsDown(t *testing.T) {
 		t.Errorf("timer with a full pile: %q, want §cFull", got)
 	}
 }
+
+// TestGeneratorHologramHeightOverrides: a generator's own height beats the
+// arena's; generators without one keep the arena's.
+func TestGeneratorHologramHeightOverrides(t *testing.T) {
+	g, _, _ := harness(t)
+	g.arena.HologramHeight = 3
+	var own, other *Generator
+	for i := range g.gens {
+		if !g.gens[i].Resource.timed() {
+			continue
+		}
+		if own == nil {
+			own = &g.gens[i]
+		} else if other == nil {
+			other = &g.gens[i]
+		}
+	}
+	if own == nil {
+		t.Fatal("no timed generator")
+	}
+	own.HologramHeight = 5
+	if got := g.hologramHeight(*own); got != 5 {
+		t.Errorf("own height: %v, want 5", got)
+	}
+	if other != nil {
+		if got := g.hologramHeight(*other); got != 3 {
+			t.Errorf("arena height for a generator without one: %v, want 3", got)
+		}
+	}
+	g.arena.HologramHeight = 0
+	if got := g.hologramHeight(Generator{}); got != defaultHologramHeight {
+		t.Errorf("fallback: %v, want %v", got, defaultHologramHeight)
+	}
+
+	// And the spawned title sits at the generator's own height.
+	inst := newFakeInstance()
+	g.spawnHolograms(&game.Ctx{InstanceID: "test", Instance: inst})
+	x, y, z := own.dropPoint()
+	want := y + 5 - nameTagOffset + hologramLineGap
+	found := false
+	for _, h := range inst.holos {
+		if h.x == x && h.z == z && h.y == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no title at y=%v over the overridden generator", want)
+	}
+}
+
+func TestGeneratorHologramHeightFromConfig(t *testing.T) {
+	cfg, err := parseArenaConfig([]byte(`{"teams":[{"name":"Red"},{"name":"Blue"}],
+	  "generators":[
+	    {"resource":"diamond","x":1,"y":64,"z":1,"hologramHeight":4.5},
+	    {"resource":"emerald","x":2,"y":64,"z":2}
+	  ]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Generators[0].HologramHeight; got != 4.5 {
+		t.Fatalf("parsed height %v, want 4.5", got)
+	}
+	if got := cfg.Generators[1].HologramHeight; got != 0 {
+		t.Fatalf("absent height parsed as %v", got)
+	}
+}
