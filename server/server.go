@@ -621,6 +621,11 @@ type ClientConnection struct {
 	// item entity — see drop.go. Only touched from the readLoop goroutine.
 	cursor itemStack
 
+	// canFly is /fly's permission; flyGrace keeps the movement checks off
+	// until the client confirmed flight was taken away (fly.go).
+	canFly   atomic.Bool
+	flyGrace atomic.Bool
+
 	// drag is the drag-click (Click Container mode 5) in progress across
 	// packets (click.go). Only touched from the readLoop goroutine.
 	drag dragState

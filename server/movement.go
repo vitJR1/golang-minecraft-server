@@ -205,10 +205,11 @@ func (i *Instance) motionExempt(feet anticheat.Vec, sneaking bool) bool {
 
 // checkMotion is the speed and flight check for an accepted (non-phasing)
 // move from → to. It returns the violated check and its evidence, or "".
-// Creative and spectator players fly legitimately and are skipped.
+// Creative and spectator players fly legitimately and are skipped, as are
+// players with /fly (fly.go).
 func (c *ClientConnection) checkMotion(from, to anticheat.Vec) (check, detail string) {
 	gm := c.gamemode()
-	if gm == player.Creative || gm == player.Spectator || c.player.IsDead() {
+	if gm == player.Creative || gm == player.Spectator || c.player.IsDead() || c.flightExempt() {
 		c.landedAt(to.Y)
 		c.ac.Move.Knock.Active = false
 		return "", ""

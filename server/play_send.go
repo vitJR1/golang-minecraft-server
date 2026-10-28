@@ -107,6 +107,7 @@ func (c *ClientConnection) sendAckBlockChange(sequence int32) error {
 // no chunks (a brief loading flash) and the caller re-streams the world after.
 // Used for cross-instance teleport (MovePlayer) and respawn.
 func (c *ClientConnection) sendRespawn() error {
+	c.dropFlight() // Respawn resets the client's abilities
 	if err := c.sendRespawnTo("minecraft:the_end"); err != nil {
 		return err
 	}

@@ -466,9 +466,13 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		}
 
 	case SbPlayPlayerAbilities:
-		// 1-byte flags. Bit 0x02 = flying (creative double-tap-space).
-		// No server-side enforcement yet — accept whatever the client says.
-		_, _ = packet.ReadByte()
+		// 1-byte flags. Bit 0x02 = flying (creative double-tap-space, /fly).
+		// Flying without permission is a fly module (fly.go).
+		flags, err := packet.ReadByte()
+		if err != nil {
+			return fmt.Errorf("player abilities: %w", err)
+		}
+		c.onClientAbilities(flags)
 
 	case SbPlayPlayerCommand:
 		// entity_id (VarInt) + action (VarInt) + jump_boost (VarInt).

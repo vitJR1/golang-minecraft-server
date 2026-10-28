@@ -95,7 +95,7 @@ const (
 	CbPlayKeepAlive          = 0x23
 	CbPlayChunkData          = 0x24
 	CbPlayLogin              = 0x28
-	CbPlayPlayerAbil         = 0x34 // best guess; not actively used yet
+	CbPlayPlayerAbil         = 0x34 // "abilities": flags Byte + fly speed Float + FOV modifier Float (minecraft-data 1.20; fly.go)
 	// NOTE 0x35 = Player Chat Message in 1.20.1, NOT Player Info Remove.
 	// Sending PI-Remove bytes to 0x35 crashes the client (Player Chat Message
 	// expects UUID + Index + sig fields).

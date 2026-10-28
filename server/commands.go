@@ -118,6 +118,12 @@ func init() {
 		Run:     cmdBan,
 	})
 	registerCommand(&Command{
+		Name:    "fly",
+		NeedsOp: true,
+		Help:    "/fly [player] — toggle flight (until the next gamemode change or instance move)",
+		Run:     cmdFly,
+	})
+	registerCommand(&Command{
 		Name: "leave",
 		Help: "/leave — leave the game for its mode's lobby (BedWars, FFA, …)",
 		Run:  cmdLeave,
@@ -866,7 +872,9 @@ func (c *ClientConnection) sendGameModeChange(mode player.Gamemode) error {
 	var payload []byte
 	payload = append(payload, 3) // event id: Change Game Mode
 	payload = append(payload, protocol.WriteFloat(float32(mode))...)
-	return c.safeWrite(CbPlayGameEvent, payload)
+	err := c.safeWrite(CbPlayGameEvent, payload)
+	c.dropFlight() // the client resets its abilities to the new gamemode's
+	return err
 }
 
 // --- /effect ---
