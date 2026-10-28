@@ -25,6 +25,7 @@ type fakePlayer struct {
 	mu       sync.Mutex
 	x, y, z  float64
 	gamemode player.Gamemode
+	flying   bool // SetFlight
 	messages []string
 	slots    map[int]game.ItemStack
 	health   float32
@@ -65,7 +66,21 @@ func (p *fakePlayer) SendMessage(text string) {
 func (p *fakePlayer) SetGamemode(g player.Gamemode) {
 	p.mu.Lock()
 	p.gamemode = g
+	p.flying = false // like the client: a gamemode change resets abilities
 	p.mu.Unlock()
+}
+
+func (p *fakePlayer) SetFlight(allowed bool) {
+	p.mu.Lock()
+	p.flying = allowed
+	p.mu.Unlock()
+}
+
+// canFly reports the last SetFlight.
+func (p *fakePlayer) canFly() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.flying
 }
 func (p *fakePlayer) Kick(string) {}
 func (p *fakePlayer) IsOp() bool  { return false }

@@ -117,6 +117,8 @@ type bedWars struct {
 	startTick   uint64
 	waiting     map[int32]game.PlayerHandle
 	countdownAt uint64
+	// chosen is the team each waiting player picked (team_select.go).
+	chosen map[int32]int
 }
 
 func newBedWars(arena *Arena, teams []Team, teamSize int) *bedWars {
@@ -132,6 +134,7 @@ func newBedWars(arena *Arena, teams []Team, teamSize int) *bedWars {
 		pending:  make(map[int32]pendingRespawn),
 		stats:    make(map[int32]*playerStats),
 		waiting:  make(map[int32]game.PlayerHandle),
+		chosen:   make(map[int32]int),
 		started:  true, // no lobby unless WithMinPlayers says so
 	}
 	for i, t := range teams {

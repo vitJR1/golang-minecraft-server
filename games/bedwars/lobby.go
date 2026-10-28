@@ -65,7 +65,9 @@ func (g *bedWars) joinLobby(ctx *game.Ctx, p game.PlayerHandle) {
 
 	p.ClearInventory()
 	p.SetGamemode(player.Adventure)
+	p.SetFlight(true) // waiting players fly (after the gamemode, which resets it)
 	teleport(p, lobby)
+	giveTeamSelector(p)
 	p.SetSidebar(sidebarTitle, g.sidebarLines(p, tick))
 	ctx.Instance.BroadcastChat("", fmt.Sprintf("§e%s §7joined (§a%d§7/§a%d§7).", p.Name(), waiting, need))
 	if countdownStarted {
@@ -78,6 +80,7 @@ func (g *bedWars) joinLobby(ctx *game.Ctx, p game.PlayerHandle) {
 func (g *bedWars) leaveLobby(ctx *game.Ctx, p game.PlayerHandle) {
 	g.mu.Lock()
 	delete(g.waiting, p.EntityID())
+	delete(g.chosen, p.EntityID())
 	waiting, need := len(g.waiting), g.minPlayers
 	cancelled := false
 	if g.countdownAt != 0 && waiting < need && !g.forced {
@@ -167,13 +170,26 @@ func (g *bedWars) startRound(ctx *game.Ctx, tick uint64) {
 	}
 	sort.Slice(eids, func(i, j int) bool { return eids[i] < eids[j] })
 	placements := make([]placement, 0, len(eids))
-	for _, eid := range eids {
-		ts := g.assignTeamLocked()
+	place := func(eid int32, ts *teamState) {
 		ts.members[eid] = true
 		g.byEntity[eid] = ts.team.ID
 		placements = append(placements, placement{p: g.waiting[eid], ts: ts, k: g.kitOfLocked(eid), spwn: g.arena.Spawns[ts.team.ID]})
 	}
+	// Players who picked a team first (team_select.go), while it has room;
+	// then everyone else onto the smallest teams.
+	var unplaced []int32
+	for _, eid := range eids {
+		if ts, ok := g.pickedTeamLocked(eid); ok {
+			place(eid, ts)
+		} else {
+			unplaced = append(unplaced, eid)
+		}
+	}
+	for _, eid := range unplaced {
+		place(eid, g.assignTeamLocked())
+	}
 	g.waiting = make(map[int32]game.PlayerHandle)
+	g.chosen = make(map[int32]int)
 	if g.populatedTeams() >= 2 {
 		g.engaged = true
 	}
@@ -181,6 +197,7 @@ func (g *bedWars) startRound(ctx *game.Ctx, tick uint64) {
 
 	ctx.Instance.SetPvP(true)
 	for _, pl := range placements {
+		pl.p.SetFlight(false) // the lobby's flight ends with the wait
 		pl.p.SetGamemode(player.Survival)
 		teleport(pl.p, pl.spwn)
 		g.equip(pl.p, pl.ts, pl.k)

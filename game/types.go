@@ -276,6 +276,11 @@ type PlayerHandle interface {
 	// SetGamemode switches the player to gamemode g and tells the client.
 	SetGamemode(g player.Gamemode)
 
+	// SetFlight lets the player fly (double-tap jump) or takes it away, as
+	// the op command /fly does. A gamemode change or a move to another
+	// instance takes it away by itself, so grant it after SetGamemode.
+	SetFlight(allowed bool)
+
 	// GiveItem adds count of the namespaced item (e.g.
 	// "minecraft:iron_ingot") to the player's inventory, merging into
 	// existing stacks of the same item before filling empty main-inventory

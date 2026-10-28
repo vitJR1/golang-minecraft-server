@@ -29,6 +29,7 @@ func (p *fakePlayer) Pose() player.Snapshot {
 func (p *fakePlayer) Teleport(x, y, z float64)    { p.x, p.y, p.z = x, y, z }
 func (p *fakePlayer) SendMessage(text string)     { p.messages = append(p.messages, text) }
 func (p *fakePlayer) SetGamemode(player.Gamemode) {}
+func (p *fakePlayer) SetFlight(bool)              {}
 func (p *fakePlayer) GiveItem(item string, n int) {
 	if p.given == nil {
 		p.given = map[string]int{}

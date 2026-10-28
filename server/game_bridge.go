@@ -130,6 +130,9 @@ func (b playerBridge) SetGamemode(g player.Gamemode) {
 	_ = b.conn.sendGameModeChange(g)
 }
 
+// SetFlight grants or revokes flight (fly.go), with the anticheat aware.
+func (b playerBridge) SetFlight(allowed bool) { b.conn.setFlight(allowed) }
+
 // GiveItem resolves the namespaced item id and hands it to the connection's
 // inventory model, which stacks it and syncs the changed slots to the client.
 // An unknown id is a silent no-op.

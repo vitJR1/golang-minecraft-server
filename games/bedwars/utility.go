@@ -47,6 +47,9 @@ func (g *bedWars) OnItemConsume(_ *game.Ctx, p game.PlayerHandle, st game.ItemSt
 // unit of the held item and the click.
 func (g *bedWars) OnItemUse(ctx *game.Ctx, p game.PlayerHandle, use game.ItemUse) bool {
 	switch use.Name {
+	case nameTeamSelector:
+		g.openTeamMenu(p) // team_select.go; a no-op once the round runs
+		return false
 	case nameBridgeEgg:
 		if g.takeHeld(p, use) {
 			g.throwBridgeEgg(ctx, p)

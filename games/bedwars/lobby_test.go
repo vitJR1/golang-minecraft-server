@@ -30,8 +30,12 @@ func TestLobbyWaitsThenStarts(t *testing.T) {
 	if _, ok := g.teamOf(a); ok {
 		t.Error("waiting player must not have a team")
 	}
-	if !a.slot(36).Empty() {
-		t.Error("waiting player must not get a kit")
+	// No kit — only the team selector wool, and flight while waiting.
+	if st := a.slot(36); st.Item != "minecraft:white_wool" || st.Name != nameTeamSelector {
+		t.Errorf("waiting player's first slot = %+v, want the team selector", st)
+	}
+	if !a.canFly() {
+		t.Error("waiting players should fly")
 	}
 	if !strings.Contains(strings.Join(a.sidebar, "\n"), "Players: §a1§f/§a2") {
 		t.Errorf("lobby sidebar: %v", a.sidebar)
@@ -66,6 +70,9 @@ func TestLobbyWaitsThenStarts(t *testing.T) {
 	tb, okB := g.teamOf(b)
 	if !okA || !okB || ta.ID == tb.ID {
 		t.Errorf("players must land on different teams: %v %v", ta, tb)
+	}
+	if a.canFly() {
+		t.Error("flight must end when the round starts")
 	}
 	if a.Pose().Gamemode != player.Survival || a.slot(36).Item != "minecraft:wooden_sword" {
 		t.Errorf("started player should be in survival with a kit: %+v slot0=%+v", a.Pose(), a.slot(36))
