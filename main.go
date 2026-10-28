@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"minecraft-server/anticheat"
 	"minecraft-server/ban"
 	"minecraft-server/bots"
 	"minecraft-server/cfg"
@@ -50,6 +51,11 @@ func main() {
 
 	srv := server.New()
 	srv.TickTransactions = true
+	// ANTICHEAT=enforce punishes detections (kick/ban ladder); anything else
+	// only logs them — the default until the checks are proven on real
+	// clients.
+	srv.AnticheatEnforce = strings.EqualFold(getEnv("ANTICHEAT", "log"), "enforce")
+	slog.Info("anticheat", "enforce", srv.AnticheatEnforce)
 	srv.ChatModerator = bots.NewNosleeperBot(srv)
 	server.LoadFavicon(server.DefaultFaviconPath)
 	connectStores(srv) // STORAGE=postgres|memory picks the backends
@@ -215,11 +221,13 @@ func connectStores(srv *server.Server) {
 		connectPostgres(ctx, srv)
 		srv.Bans = store.NewBanStore(srv.Store.Players, srv.Store.Bans)
 		srv.EnderChests = srv.Store.EnderChests
+		srv.AnticheatLog = srv.Store.Anticheat
 		importBanlist(ctx, srv.Bans)
 	case storageMemory:
 		slog.Warn("STORAGE=memory: accounts, passwords, match history and ratings are NOT persisted")
 		srv.Bans = memoryBanStore()
 		srv.EnderChests = fileEnderChestStore()
+		srv.AnticheatLog = fileAnticheatStore()
 	}
 
 	if envEnabled("REDIS_ENABLED", mode == storagePostgres) {
@@ -291,6 +299,28 @@ func fileEnderChestStore() server.EnderChestStore {
 		return nil
 	}
 	slog.Info("ender chests: file-backed", "path", path)
+	return fs
+}
+
+// defaultAnticheatPath is where the anticheat statuses + punishment log go
+// under STORAGE=memory unless ANTICHEAT_FILE overrides it ("off" = RAM only).
+const defaultAnticheatPath = "anticheat.json"
+
+// fileAnticheatStore builds the STORAGE=memory anticheat log. A corrupt file
+// is logged and falls back to RAM only rather than aborting.
+func fileAnticheatStore() anticheat.Store {
+	path := getEnv("ANTICHEAT_FILE", defaultAnticheatPath)
+	switch strings.ToLower(path) {
+	case "off", "none":
+		slog.Info("anticheat log: in-memory only (ANTICHEAT_FILE=" + path + ")")
+		return anticheat.NewMemoryStore()
+	}
+	fs, err := anticheat.NewFileStore(path)
+	if err != nil {
+		slog.Warn("anticheat log: failed to load file, using in-memory only", "path", path, "err", err)
+		return anticheat.NewMemoryStore()
+	}
+	slog.Info("anticheat log: file-backed", "path", path)
 	return fs
 }
 

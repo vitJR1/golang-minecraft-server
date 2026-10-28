@@ -12,16 +12,20 @@ import (
 
 // anticheat.go wires the anticheat package into the connection: teleport
 // confirmations, Ping/Pong transactions, the per-tick position history, the
-// packet budget and violation flags. Checks build on these; the reaction to
-// a flag (kick / ban ladder) is a later layer — for now flags are logged.
+// packet budget and violation flags. Checks build on these; a check that
+// reaches its threshold goes up the punishment ladder (anticheat_punish.go).
 // See anticheat.md in the repo root.
 
 // flag records a violation of check on this connection and logs it. detail
-// is the human-readable evidence kept for the punishment record.
+// is the human-readable evidence kept for the punishment record. Reaching
+// the check's threshold is a detection (anticheat_punish.go).
 func (c *ClientConnection) flag(check, detail string) {
 	vl := c.ac.Violations.Flag(check, 1, detail, time.Now())
 	slog.Warn("anticheat flag",
 		"player", c.playerName, "check", check, "vl", fmt.Sprintf("%.1f", vl), "detail", detail)
+	if vl >= anticheat.Threshold(check) {
+		c.detect(check)
+	}
 }
 
 // kickFor disconnects the client with reason (shown on its disconnect

@@ -18,10 +18,10 @@ const (
 
 // Violation is one flag raised by a check.
 type Violation struct {
-	Check  string
-	Detail string
-	At     time.Time
-	VL     float64 // the check's level after this flag
+	Check  string    `json:"check"`
+	Detail string    `json:"detail"`
+	At     time.Time `json:"at"`
+	VL     float64   `json:"vl"` // the check's level after this flag
 }
 
 // Violations accumulates per-check violation levels with linear decay.

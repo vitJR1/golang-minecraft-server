@@ -100,6 +100,15 @@ type Server struct {
 	// (Postgres) or ban.FileStore (banlist.json) depending on STORAGE.
 	Bans ban.Store
 
+	// AnticheatLog persists the anticheat ladder: statuses + punishment log
+	// (anticheat_punish.go). New() installs an in-memory store; main swaps
+	// in store.AnticheatRepo (Postgres) or anticheat.FileStore.
+	AnticheatLog anticheat.Store
+	// AnticheatEnforce turns detections into punishments (ANTICHEAT=enforce).
+	// Off, a detection is only logged — the default until the checks have
+	// been proven against real clients.
+	AnticheatEnforce bool
+
 	nextEntityID       atomic.Int32
 	instanceSerialNext atomic.Uint64
 	arenaSerial        atomic.Uint64
@@ -151,16 +160,17 @@ func (s *Server) nextInstanceSerial() uint64 {
 // from cfg.InitialOps.
 func New() *Server {
 	s := &Server{
-		Ops:         NewOpSet(cfg.InitialOps),
-		Mutes:       NewMuteSet(),
-		Bans:        ban.NewMemoryStore(),
-		instances:   make(map[string]*Instance),
-		templates:   make(map[string]*world.Template),
-		arenas:      make(map[string]string),
-		TemplateDir: templates.Root,
-		connLimit:   newConnLimiter(),
-		janitorStop: make(chan struct{}),
-		startTime:   time.Now(),
+		Ops:          NewOpSet(cfg.InitialOps),
+		Mutes:        NewMuteSet(),
+		Bans:         ban.NewMemoryStore(),
+		AnticheatLog: anticheat.NewMemoryStore(),
+		instances:    make(map[string]*Instance),
+		templates:    make(map[string]*world.Template),
+		arenas:       make(map[string]string),
+		TemplateDir:  templates.Root,
+		connLimit:    newConnLimiter(),
+		janitorStop:  make(chan struct{}),
+		startTime:    time.Now(),
 	}
 	s.effects = newEffectTable()
 	s.Enchantments = nbtEnchantments{}

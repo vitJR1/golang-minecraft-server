@@ -37,6 +37,10 @@ type State struct {
 	// the client's claim, not verified physics.
 	Sprinting atomic.Bool
 	Sneaking  atomic.Bool
+
+	// Detected is set by the first detection of the session: one detection
+	// moves the ladder one step, however many checks fire before the kick.
+	Detected atomic.Bool
 }
 
 // Reset forgets everything tied to the current world: positions and the

@@ -118,6 +118,12 @@ func init() {
 		Run:     cmdBan,
 	})
 	registerCommand(&Command{
+		Name:    "ac",
+		NeedsOp: true,
+		Help:    "/ac info <player> | /ac reset <player> [reason] — anticheat status + punishment log",
+		Run:     cmdAnticheat,
+	})
+	registerCommand(&Command{
 		Name:    "unban",
 		NeedsOp: true,
 		Help:    "/unban <player>",
@@ -721,6 +727,9 @@ func cmdBan(c *ClientConnection, args []string) {
 
 	_ = c.sendSystemMessage(fmt.Sprintf("Banned %s until %s — %s",
 		target, until.Format("2006-01-02 15:04:05"), reason))
+	// A ban of a player at the anticheat max status is the admins' half of
+	// the ladder: log it with the admin's reason.
+	c.server.recordManualBan(c, target, reason, until)
 
 	if conn, _, ok := c.server.FindPlayer(target); ok {
 		_ = conn.sendPlayDisconnect(fmt.Sprintf("You are banned: %s (until %s)",

@@ -30,6 +30,7 @@ type Store struct {
 	Bans        *BanRepo
 	Mutes       *MuteRepo
 	EnderChests *EnderChestRepo
+	Anticheat   *AnticheatRepo
 
 	BedwarsMatches *BedwarsMatchRepo
 	BedwarsPlayers *BedwarsPlayerRepo
@@ -56,6 +57,7 @@ func New(pool *pgxpool.Pool) *Store {
 		Bans:        NewBanRepo(pool),
 		Mutes:       NewMuteRepo(pool),
 		EnderChests: NewEnderChestRepo(pool),
+		Anticheat:   NewAnticheatRepo(pool),
 
 		BedwarsMatches: NewBedwarsMatchRepo(pool),
 		BedwarsPlayers: NewBedwarsPlayerRepo(pool),
