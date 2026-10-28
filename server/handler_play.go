@@ -211,6 +211,13 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		}
 		held := c.heldItemName()
 
+		// Dead players and spectators click nothing, and the block must be
+		// within vanilla's use range (reach.go).
+		if !c.mayAct() || !c.useInReach(clickedPos) {
+			_ = c.sendBlockUpdate(placePos, c.instance.World.GetBlock(placePos))
+			break
+		}
+
 		// Plugins get first refusal on the click (selection wands, tools).
 		// A consumed click places nothing: roll back the client's predicted
 		// placement at the target block.
@@ -221,7 +228,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		}
 
 		// Flint and steel / fire charge on a TNT block lights it.
-		if c.tryIgniteTNT(clickedPos, held) {
+		if c.mayBuild() && c.tryIgniteTNT(clickedPos, held) {
 			break
 		}
 
@@ -241,6 +248,12 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		// Right-clicking a chest opens it instead of placing a block.
 		if isChestBlock(c.instance.World.GetBlock(clickedPos)) {
 			c.openBlockChest(clickedPos)
+			break
+		}
+
+		// Everything below changes the world, which adventure mode can't.
+		if !c.mayBuild() {
+			_ = c.sendBlockUpdate(placePos, c.instance.World.GetBlock(placePos))
 			break
 		}
 
@@ -337,6 +350,11 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			c.releaseUse()
 		case 0:
 			c.cancelUse()
+			// Only survival/creative dig, within vanilla's dig range.
+			if !c.mayBuild() || !c.digInReach(pos) {
+				_ = c.sendBlockUpdate(pos, c.instance.World.GetBlock(pos))
+				break
+			}
 			// Start of a dig = a left click: plugins may consume it (wand).
 			// Remember the position so the survival client's matching
 			// "finished digging" for the same block is swallowed too.
@@ -352,6 +370,12 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			c.consumedDig = nil
 			c.cancelDig()
 		case 2:
+			if !c.mayBuild() || !c.digInReach(pos) {
+				c.consumedDig = nil
+				c.cancelDig()
+				_ = c.sendBlockUpdate(pos, c.instance.World.GetBlock(pos))
+				break
+			}
 			if c.consumedDig != nil && *c.consumedDig == pos {
 				c.consumedDig = nil
 				_ = c.sendBlockUpdate(pos, c.instance.World.GetBlock(pos))
@@ -360,9 +384,13 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			c.consumedDig = nil
 			c.finishDig(pos)
 		case 3: // ctrl+Q: drop the whole held stack
-			c.dropHeld(true)
+			if c.mayAct() {
+				c.dropHeld(true)
+			}
 		case 4: // Q: drop one unit of the held stack
-			c.dropHeld(false)
+			if c.mayAct() {
+				c.dropHeld(false)
+			}
 		}
 
 	case SbPlayInteract:
@@ -376,9 +404,18 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		if err != nil {
 			return fmt.Errorf("interact type: %w", err)
 		}
+		// A spectator's attack only asks to spectate; the dead do nothing.
+		if !c.mayAct() {
+			break
+		}
 		switch atype {
 		case 1: // attack
-			if victim, ok := c.instance.Players.Get(int32(target)); ok && victim != c {
+			if victim, ok := c.instance.Players.Get(int32(target)); ok && victim != c && victim.player != nil {
+				// Lag-compensated reach (reach.go): an out-of-reach hit is
+				// cancelled and flagged.
+				if !c.attackInReach(victim) {
+					break
+				}
 				// The game logic hook gets first refusal: returning false
 				// vetoes the hit (no damage), so a game can implement teams,
 				// spawn protection, spectators, etc. A nil hook = allow.
@@ -390,6 +427,9 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			// drives the action so a single right-click isn't processed twice.
 			held := c.heldItemName()
 			if e, ok := c.instance.worldEntity(int32(target)); ok {
+				if !c.entityInReach(e) {
+					break
+				}
 				// Game logic / plugins first (shop NPCs); a consumed click
 				// skips the item-frame default.
 				ei := game.EntityInteraction{EntityID: int32(target), Type: e.Type, X: e.X, Y: e.Y, Z: e.Z, Item: held}
@@ -468,6 +508,9 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		// Other slots / instances no-op.
 		_, _ = protocol.ReadVarInt(packet) // hand
 		_, _ = protocol.ReadVarInt(packet) // sequence
+		if !c.mayAct() {
+			break // spectators and the dead use nothing
+		}
 		// Server-given menu items are recognised by their custom name in the
 		// inventory model (wherever the player moved them), so a plain ender
 		// pearl is still throwable while the "Arena selector" opens a menu.
@@ -504,7 +547,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			case name == "minecraft:fire_charge":
 				c.throwFireball()
 				c.consumeHeld()
-			case c.useBucket(name):
+			case c.mayBuild() && c.useBucket(name):
 				// Buckets: the client sends a plain Use Item for them, with
 				// no target — the server ray-casts for the fluid / spot.
 			default:

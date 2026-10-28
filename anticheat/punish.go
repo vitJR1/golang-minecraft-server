@@ -90,9 +90,13 @@ func Escalate(s Status) Step {
 // 2.5 means "three flags within ~5 s", while two never reach it.
 const DefaultThreshold = 2.5
 
-// Thresholds overrides DefaultThreshold per check — for future heuristic
-// checks (reach, speed) that need more evidence.
-var Thresholds = map[string]float64{}
+// Thresholds overrides DefaultThreshold per check — for heuristic checks
+// that need more evidence than an impossible packet.
+var Thresholds = map[string]float64{
+	// Reach is a measurement with lag compensation, not an impossible
+	// packet: a few borderline hits pass before it counts.
+	"combat.reach": 4,
+}
 
 // Threshold is the detection level for check.
 func Threshold(check string) float64 {

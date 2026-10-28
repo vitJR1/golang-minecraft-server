@@ -111,6 +111,7 @@ func TestListenerConsumesBlockInteract(t *testing.T) {
 	completeOfflineLogin(t, cli, "Digger")
 	cli.startDiscardDrain()
 	findConn(t, s, "Digger").player.SetGamemode(player.Creative) // instant breaks
+	findConn(t, s, "Digger").player.MoveTo(7.5, 69, 5.5, true)   // within dig reach of both blocks
 
 	dig := func(x, y, z int, action int32) {
 		var p bytes.Buffer

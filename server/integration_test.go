@@ -641,8 +641,9 @@ func TestBlockBreakClearsAndAcks(t *testing.T) {
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Breaker")
 	// Creative: "started digging" breaks at once (survival timing is
-	// covered in dig_test.go).
+	// covered in dig_test.go). Stand within dig reach of (5,70,5).
 	findConn(t, s, "Breaker").player.SetGamemode(player.Creative)
+	findConn(t, s, "Breaker").player.MoveTo(3.5, 69, 3.5, true)
 	ch := cli.startDrain()
 	// World-state replay (Block Update for the pre-seeded stone) is now
 	// drained inside completeOfflineLogin since it lands before SyncPos.
@@ -794,6 +795,7 @@ func TestOnBlockBreakVetoRollsBack(t *testing.T) {
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Breaker")
 	findConn(t, s, "Breaker").player.SetGamemode(player.Creative)
+	findConn(t, s, "Breaker").player.MoveTo(3.5, 69, 3.5, true) // within dig reach
 	ch := cli.startDrain()
 	drainExpect(t, ch, "Breaker bootstrap", CbPlayPlayerInfoUpdate)
 

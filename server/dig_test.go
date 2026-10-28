@@ -8,14 +8,15 @@ import (
 )
 
 // digWorld is an offline instance with the given block at (5,70,5) and a
-// survival miner standing on a floor at the origin, long since any tick.
+// survival miner standing (on the ground) two blocks off it — within dig
+// reach — long since any tick.
 func digWorld(t *testing.T, blk world.Block) (*Instance, *ClientConnection, world.Position) {
 	t.Helper()
 	pos := world.Position{X: 5, Y: 70, Z: 5}
 	inst := bareInstance(New(), world.NewMemoryWorld())
 	inst.World.SetBlock(pos, blk)
 	inst.tickCount.Store(1000)
-	c := offlineConn(inst, "Miner", player.Survival, 0.5, 64, 0.5)
+	c := offlineConn(inst, "Miner", player.Survival, 3.5, 69, 3.5)
 	return inst, c, pos
 }
 
