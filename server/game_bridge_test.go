@@ -147,3 +147,33 @@ func TestPlayerBridgeSurface(t *testing.T) {
 	// Pose just snapshots — safe even with zero state.
 	_ = h.Pose()
 }
+
+// forceLogic is a Logic that can be force-started.
+type forceLogic struct {
+	game.NoopLogic
+	starts int
+}
+
+func (f *forceLogic) ForceStart(*game.Ctx) error { f.starts++; return nil }
+
+// TestAttachLogicWiresForceStart: a Logic implementing game.ForceStarter is
+// reachable through the instance (/forcestart); one that doesn't isn't.
+func TestAttachLogicWiresForceStart(t *testing.T) {
+	s := New()
+	inst := NewInstance("round", s, world.NewMemoryWorld())
+	t.Cleanup(inst.Stop)
+	l := &forceLogic{}
+	s.AttachLogic(inst, l)
+	if inst.OnForceStart == nil {
+		t.Fatal("ForceStarter not wired")
+	}
+	if err := inst.OnForceStart(); err != nil || l.starts != 1 {
+		t.Fatalf("OnForceStart: err=%v starts=%d", err, l.starts)
+	}
+	plain := NewInstance("plain", s, world.NewMemoryWorld())
+	t.Cleanup(plain.Stop)
+	s.AttachLogic(plain, game.NoopLogic{})
+	if plain.OnForceStart != nil {
+		t.Fatal("a Logic without ForceStart got a force-start hook")
+	}
+}

@@ -149,3 +149,51 @@ func TestDefaultLobbyIsTheCentreDiamond(t *testing.T) {
 		t.Errorf("lobby %v, want the diamond generator", a.Lobby)
 	}
 }
+
+// TestForceStartSkipsTheWait: /forcestart starts an 8-player round with
+// two players on the very next tick, through the normal start path.
+func TestForceStartSkipsTheWait(t *testing.T) {
+	g, inst, ctx := lobbyHarness(t, 8)
+	if err := g.ForceStart(ctx); err == nil {
+		t.Fatal("force-starting an empty lobby should fail")
+	}
+	a := join(g, inst, ctx, "A", 1)
+	b := join(g, inst, ctx, "B", 2)
+	g.OnTick(ctx, 50)
+	if g.started {
+		t.Fatal("2 of 8 must not start on their own")
+	}
+	if err := g.ForceStart(ctx); err != nil {
+		t.Fatal(err)
+	}
+	g.OnTick(ctx, 51)
+	if !g.started {
+		t.Fatal("force-started round didn't start on the next tick")
+	}
+	ta, okA := g.teamOf(a)
+	tb, okB := g.teamOf(b)
+	if !okA || !okB || ta.ID == tb.ID || a.Pose().Gamemode != player.Survival {
+		t.Fatalf("players not dealt onto teams: %v %v", ta, tb)
+	}
+	if err := g.ForceStart(ctx); err == nil {
+		t.Fatal("force-starting a running round should fail")
+	}
+}
+
+// TestForceStartSurvivesALeave: a forced start isn't cancelled by someone
+// leaving before it runs (the room is below minPlayers anyway).
+func TestForceStartSurvivesALeave(t *testing.T) {
+	g, inst, ctx := lobbyHarness(t, 8)
+	a := join(g, inst, ctx, "A", 1)
+	join(g, inst, ctx, "B", 2)
+	g.OnTick(ctx, 10)
+	if err := g.ForceStart(ctx); err != nil {
+		t.Fatal(err)
+	}
+	g.OnPlayerLeave(ctx, a)
+	inst.remove(a)
+	g.OnTick(ctx, 11)
+	if !g.started {
+		t.Fatal("a leave cancelled the forced start")
+	}
+}

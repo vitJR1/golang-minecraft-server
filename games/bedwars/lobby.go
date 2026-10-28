@@ -1,6 +1,7 @@
 package bedwars
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 
@@ -79,7 +80,7 @@ func (g *bedWars) leaveLobby(ctx *game.Ctx, p game.PlayerHandle) {
 	delete(g.waiting, p.EntityID())
 	waiting, need := len(g.waiting), g.minPlayers
 	cancelled := false
-	if g.countdownAt != 0 && waiting < need {
+	if g.countdownAt != 0 && waiting < need && !g.forced {
 		g.countdownAt = 0
 		cancelled = true
 	}
@@ -89,6 +90,24 @@ func (g *bedWars) leaveLobby(ctx *game.Ctx, p game.PlayerHandle) {
 	if cancelled {
 		ctx.Instance.BroadcastChat("", "§cNot enough players, the countdown was cancelled.")
 	}
+}
+
+// ForceStart (game.ForceStarter, /forcestart) starts the round on the next
+// tick with whoever is waiting, skipping minPlayers and the countdown. The
+// start itself stays on the tick loop (lobbyTick → startRound), like a
+// countdown that ran out.
+func (g *bedWars) ForceStart(*game.Ctx) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	switch {
+	case g.started:
+		return errors.New("the round is already running")
+	case len(g.waiting) == 0:
+		return errors.New("nobody is waiting")
+	}
+	g.countdownAt = g.tick + 1
+	g.forced = true
+	return nil
 }
 
 // lobbyTick runs the waiting phase: countdown titles, the start itself,

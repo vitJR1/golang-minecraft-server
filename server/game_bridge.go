@@ -184,6 +184,9 @@ func (s *Server) AttachLogic(inst *Instance, logic game.Logic) *game.Ctx {
 			return ev.OnExplosionBreak(ctx, igniter, pos)
 		}
 	}
+	if fs, ok := logic.(game.ForceStarter); ok {
+		inst.OnForceStart = func() error { return fs.ForceStart(ctx) }
+	}
 	if rw, ok := logic.(game.PlacementRewriter); ok {
 		inst.OnRewritePlace = func(c *ClientConnection, pos world.Position, blk world.Block) world.Block {
 			return rw.RewritePlacedBlock(ctx, playerBridge{conn: c}, pos, blk)

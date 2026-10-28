@@ -98,6 +98,7 @@ type bedWars struct {
 	kits     map[int32]*kit           // entityID → persistent loadout
 	pending  map[int32]pendingRespawn // dead players waiting to respawn
 	tick     uint64                   // last OnTick value
+	forced   bool                     // /forcestart: the start ignores minPlayers (lobby.go)
 	ctx      *game.Ctx                // set in OnInstanceStart
 
 	// holograms are the countdown labels over diamond/emerald generators

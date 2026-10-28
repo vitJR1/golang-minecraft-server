@@ -124,6 +124,12 @@ func init() {
 		Run:     cmdFly,
 	})
 	registerCommand(&Command{
+		Name:    "forcestart",
+		NeedsOp: true,
+		Help:    "/forcestart — start this game's round now, without waiting for players",
+		Run:     cmdForceStart,
+	})
+	registerCommand(&Command{
 		Name: "leave",
 		Help: "/leave — leave the game for its mode's lobby (BedWars, FFA, …)",
 		Run:  cmdLeave,
@@ -659,6 +665,21 @@ func cmdLeave(c *ClientConnection, _ []string) {
 	if err := c.server.MovePlayer(c, target, 0.5, 67, 0.5); err != nil {
 		_ = c.sendSystemMessage("Couldn't leave: " + err.Error())
 	}
+}
+
+// cmdForceStart: /forcestart — start the round of the game the operator is
+// in now (game.ForceStarter), however few players are waiting.
+func cmdForceStart(c *ClientConnection, _ []string) {
+	start := c.instance.OnForceStart
+	if start == nil {
+		_ = c.sendSystemMessage("This isn't a game that can be force-started.")
+		return
+	}
+	if err := start(); err != nil {
+		_ = c.sendSystemMessage("Can't force-start: " + err.Error())
+		return
+	}
+	_ = c.sendSystemMessage("Starting the game now.")
 }
 
 // --- /template ---

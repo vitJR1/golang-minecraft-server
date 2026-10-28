@@ -1,6 +1,7 @@
 package server
 
 import (
+	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/world"
 	"testing"
@@ -160,5 +161,24 @@ func TestLobbyForGame(t *testing.T) {
 		if got, ok := lobbyForGame(game); ok {
 			t.Errorf("lobbyForGame(%q) = %q, want none", game, got)
 		}
+	}
+}
+
+func TestForceStartCommand(t *testing.T) {
+	s := New()
+	s.Ops.Add("Admin")
+	admin := offlineConn(s.Hub, "Admin", player.Creative, 0.5, 67, 0.5)
+	plain := offlineConn(s.Hub, "Player", player.Survival, 0.5, 67, 0.5)
+
+	s.RunCommand(admin, "forcestart") // the hub has no round to start
+	calls := 0
+	s.Hub.OnForceStart = func() error { calls++; return nil }
+	s.RunCommand(plain, "forcestart") // not an op
+	if calls != 0 {
+		t.Fatal("a non-op force-started the game")
+	}
+	s.RunCommand(admin, "forcestart")
+	if calls != 1 {
+		t.Fatalf("OnForceStart called %d times, want 1", calls)
 	}
 }

@@ -289,6 +289,14 @@ type ExplosionBreakVeto interface {
 	OnExplosionBreak(ctx *Ctx, igniter PlayerHandle, pos world.Position) bool
 }
 
+// ForceStarter is an optional extension a Logic can implement to let an
+// operator start its round now, without waiting for enough players
+// (/forcestart). A non-nil error says why it can't (already running,
+// nobody waiting) and is shown to the operator.
+type ForceStarter interface {
+	ForceStart(ctx *Ctx) error
+}
+
 // PlacementRewriter is an optional extension a Logic (or listener) can
 // implement to change WHAT gets placed: the server calls it before the
 // OnBlockPlace veto with the block the player is about to put down and

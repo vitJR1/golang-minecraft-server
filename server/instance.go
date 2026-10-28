@@ -241,6 +241,10 @@ type Instance struct {
 	// nil.
 	OnExplosionBreak func(c *ClientConnection, pos world.Position) bool
 
+	// OnForceStart, when set, starts the instance's round now
+	// (game.ForceStarter, /forcestart).
+	OnForceStart func() error
+
 	// OnRewritePlace, when set, may swap the block a player is about to
 	// place (game.PlacementRewriter). Runs before OnBlockPlace.
 	OnRewritePlace func(c *ClientConnection, pos world.Position, blk world.Block) world.Block
