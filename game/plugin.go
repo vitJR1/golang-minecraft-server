@@ -314,7 +314,7 @@ type BotGuide interface {
 	// BotPlan is what p should be doing; asked a few times a second.
 	BotPlan(ctx *Ctx, p PlayerHandle) BotPlan
 	// BotBuy makes p buy the game's goods with this key (as if clicked in
-	// the shop); false when it couldn't.
+	// the shop); true when it paid for them.
 	BotBuy(ctx *Ctx, p PlayerHandle, key string) bool
 }
 
@@ -323,6 +323,12 @@ type BotGuide interface {
 type BotPlan struct {
 	// Idle: nothing to do — waiting for the round, dead, spectating.
 	Idle bool
+	// Team names the bot's side: bots of one team split the work (one
+	// attacks, one defends, one shoots).
+	Team string
+	// Defend is the team's own bed (its blocks) while it stands: a
+	// defending bot builds a cover of blocks round it.
+	Defend []world.Position
 	// Station is where the bot stands to collect resources; Home is where
 	// it falls back to (both block positions to stand on, i.e. feet).
 	Station, Home world.Position
@@ -340,6 +346,37 @@ type BotPlan struct {
 	Pack      int
 	// Targets are blocks to destroy, nearest first (enemy beds).
 	Targets []world.Position
+	// Wares is what the shop sells that a bot may want (gear, tools,
+	// explosives), with what p already owns marked.
+	Wares []BotWare
+}
+
+// BotTeams is optionally implemented by a BotGuide: the team names /bot add
+// accepts, for tab completion.
+type BotTeams interface {
+	BotTeams(ctx *Ctx) []string
+}
+
+// BotWare kinds the server's bots know how to use.
+const (
+	WareSword   = "sword"
+	WareArmor   = "armor"
+	WarePickaxe = "pickaxe"
+	WareAxe     = "axe"
+	WareShears  = "shears"
+	WareBow     = "bow"
+	WareArrows  = "arrows"
+	WareTNT     = "tnt"
+)
+
+// BotWare is one shop entry offered to bots.
+type BotWare struct {
+	Key      string // what BotBuy buys
+	Kind     string // Ware* kind
+	Tier     int    // within the kind, higher is better (0 = untiered)
+	Currency string // item id paid with
+	Price    int
+	Owned    bool // p has it already (at this tier or better)
 }
 
 // PlacementRewriter is an optional extension a Logic (or listener) can

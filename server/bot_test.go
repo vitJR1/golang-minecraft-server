@@ -1,6 +1,7 @@
 package server
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -17,6 +18,7 @@ import (
 type fakeGuide struct {
 	plan  game.BotPlan
 	buys  int
+	wares []string // wares bought, in order
 	joins []string
 }
 
@@ -32,6 +34,19 @@ func (f *fakeGuide) BotEnemy(_ *game.Ctx, _, other game.PlayerHandle) bool {
 func (f *fakeGuide) BotPlan(*game.Ctx, game.PlayerHandle) game.BotPlan { return f.plan }
 
 func (f *fakeGuide) BotBuy(_ *game.Ctx, p game.PlayerHandle, key string) bool {
+	for i, w := range f.plan.Wares {
+		if w.Key != key {
+			continue
+		}
+		if w.Owned || p.CountItem(w.Currency) < w.Price {
+			return false
+		}
+		p.TakeItem(w.Currency, w.Price)
+		p.GiveStack(game.ItemStack{Item: "minecraft:" + key, Count: 1})
+		f.plan.Wares[i].Owned = true
+		f.wares = append(f.wares, key)
+		return true
+	}
 	if p.CountItem(f.plan.Currency) < f.plan.Price {
 		return false
 	}
@@ -71,12 +86,42 @@ func addTestBot(t *testing.T, inst *Instance, guide *fakeGuide, diff Difficulty,
 	return b
 }
 
-// runTicks advances the instance's bots n ticks.
-func runTicks(inst *Instance, n int) {
+// runTicks advances the instance's bots (and projectiles, TNT) n ticks,
+// draining the given players' queues as it goes.
+func runTicks(inst *Instance, n int, players ...*ClientConnection) {
 	for i := 0; i < n; i++ {
 		tick := inst.tickCount.Add(1)
 		inst.botTick(tick)
+		inst.projectileTick(tick)
+		inst.tntTick(tick)
+		for _, p := range players {
+			drain(p)
+		}
 	}
+}
+
+func itemOf(t *testing.T, item string, n int) itemStack {
+	t.Helper()
+	id, ok := world.ItemByName(item)
+	if !ok {
+		t.Fatalf("%s not registered", item)
+	}
+	return itemStack{ID: id, Count: byte(n)}
+}
+
+// gapWorld: two strips along X at y=63, z=-1..1 — x=-3..2 and x=3+gap..12+gap.
+func gapWorld(gap int) *Instance {
+	inst := bareInstance(New(), world.NewMemoryWorld())
+	for z := -1; z <= 1; z++ {
+		for x := -3; x <= 12+gap; x++ {
+			if x < 3 || x >= 3+gap {
+				inst.World.SetBlock(world.Position{X: x, Y: 63, Z: z}, world.Stone)
+			}
+		}
+	}
+	inst.Combat = DefaultCombatConfig()
+	inst.SetPvP(true)
+	return inst
 }
 
 func woolStack(t *testing.T, n int) itemStack {
@@ -226,5 +271,247 @@ func TestBotFightsWithItsBestWeapon(t *testing.T) {
 	}
 	if enemy.player.Health() >= player.MaxHealth {
 		t.Fatal("no hit landed")
+	}
+}
+
+// TestBotLeapsToAnEnemy: no blocks, a two-block gap to the enemy — a hard
+// bot sprint-jumps it.
+func TestBotLeapsToAnEnemy(t *testing.T) {
+	inst := gapWorld(2)
+	b := addTestBot(t, inst, &fakeGuide{plan: game.BotPlan{}}, DifficultyHard, 0.5, 0.5)
+	enemy := offlineConn(inst, "Enemy", player.Survival, 9.5, 64, 0.5)
+	runTicks(inst, 300, enemy)
+	if s := b.player.Snapshot(); s.Y < 63 {
+		t.Fatalf("bot fell: %+v", s)
+	}
+	if enemy.player.Health() >= player.MaxHealth {
+		t.Fatalf("never reached the enemy; bot at %+v", b.player.Snapshot())
+	}
+}
+
+// TestBotBridgesToAnEnemy: a gap too wide to leap — it bridges.
+func TestBotBridgesToAnEnemy(t *testing.T) {
+	inst := gapWorld(6)
+	b := addTestBot(t, inst, &fakeGuide{plan: game.BotPlan{BlockItem: "minecraft:white_wool"}}, DifficultyHard, 0.5, 0.5)
+	b.inv.set(hotbarStart+1, woolStack(t, 32))
+	enemy := offlineConn(inst, "Enemy", player.Survival, 11.5, 64, 0.5)
+	runTicks(inst, 600, enemy)
+	if enemy.player.Health() >= player.MaxHealth {
+		t.Fatalf("never reached the enemy; bot at %+v", b.player.Snapshot())
+	}
+}
+
+// TestBotBuildsStairsToAnEnemy: the enemy waits on a 3-high pillar; the bot
+// builds up to it.
+func TestBotBuildsStairsToAnEnemy(t *testing.T) {
+	inst := gapWorld(0)
+	for y := 64; y <= 66; y++ {
+		inst.World.SetBlock(world.Position{X: 6, Y: y, Z: 0}, world.Stone)
+	}
+	b := addTestBot(t, inst, &fakeGuide{plan: game.BotPlan{BlockItem: "minecraft:white_wool"}}, DifficultyNormal, 0.5, 0.5)
+	b.inv.set(hotbarStart+1, woolStack(t, 32))
+	enemy := offlineConn(inst, "Enemy", player.Survival, 6.5, 67, 0.5)
+	runTicks(inst, 600, enemy)
+	if enemy.player.Health() >= player.MaxHealth {
+		t.Fatalf("never reached the enemy on the pillar; bot at %+v", b.player.Snapshot())
+	}
+}
+
+// TestBotShootsAnUnreachableEnemy: across the void, no blocks, a bow.
+func TestBotShootsAnUnreachableEnemy(t *testing.T) {
+	inst, _ := botWorld()
+	b := addTestBot(t, inst, &fakeGuide{plan: game.BotPlan{}}, DifficultyHard, 0.5, 0.5)
+	b.inv.set(hotbarStart+3, itemOf(t, "minecraft:bow", 1))
+	b.inv.set(mainInvStart, itemOf(t, "minecraft:arrow", 16))
+	enemy := offlineConn(inst, "Enemy", player.Survival, 13.5, 64, 0.5)
+	runTicks(inst, 400, enemy)
+	if b.countItemName("minecraft:arrow") == 16 {
+		t.Fatal("no arrow shot")
+	}
+	if enemy.player.Health() >= player.MaxHealth {
+		t.Fatalf("no arrow hit (%d left)", b.countItemName("minecraft:arrow"))
+	}
+}
+
+// TestBotLeavesAnUnreachableEnemy: no bow, no way over — it gets on with
+// its plan instead of staring.
+func TestBotLeavesAnUnreachableEnemy(t *testing.T) {
+	inst, _ := botWorld()
+	guide := &fakeGuide{plan: game.BotPlan{Station: world.Position{X: -2, Y: 64, Z: -2}, HasStation: true}}
+	b := addTestBot(t, inst, guide, DifficultyHard, 0.5, 0.5)
+	enemy := offlineConn(inst, "Enemy", player.Survival, 13.5, 64, 0.5)
+	runTicks(inst, 200, enemy)
+	if cell := b.feetCellNow(); !atStation(guide.plan.Station)(cell) {
+		t.Fatalf("bot at %v, want it gone on to the station", cell)
+	}
+}
+
+// TestBotBuysGear: with iron to spare it buys a sword, keeping a pack of
+// wool's worth; armour it can't afford it leaves.
+func TestBotBuysGear(t *testing.T) {
+	inst, _ := botWorld()
+	guide := &fakeGuide{plan: game.BotPlan{
+		BlockItem: "minecraft:white_wool", BuyKey: "wool",
+		Currency: "minecraft:iron_ingot", Price: 4, Pack: 16,
+		Shop: world.Position{X: 3, Y: 64, Z: 3}, HasShop: true,
+		Wares: []game.BotWare{
+			{Key: "stone_sword", Kind: game.WareSword, Tier: 1, Currency: "minecraft:iron_ingot", Price: 10},
+			{Key: "iron_chestplate", Kind: game.WareArmor, Tier: 2, Currency: "minecraft:gold_ingot", Price: 12},
+		},
+	}}
+	b := addTestBot(t, inst, guide, DifficultyNormal, -2.5, -2.5)
+	b.inv.set(hotbarStart+1, woolStack(t, 64))
+	b.inv.set(hotbarStart+2, itemOf(t, "minecraft:iron_ingot", 12))
+	runTicks(inst, 300)
+	if len(guide.wares) != 1 || guide.wares[0] != "stone_sword" {
+		t.Fatalf("bought %v, want the stone sword", guide.wares)
+	}
+	if b.countItemName("minecraft:stone_sword") != 1 {
+		t.Fatal("no sword in the inventory")
+	}
+}
+
+// TestBotBlastsHardCover: a bed under obsidian and the bot carries TNT — it
+// places a lit TNT against the cover and runs.
+func TestBotBlastsHardCover(t *testing.T) {
+	inst, target := botWorld()
+	inst.SetTNTAutoPrime(true)
+	obsidian, _ := world.BlockByName("minecraft:obsidian")
+	for _, d := range [][3]int{{-1, 0, 0}, {1, 0, 0}, {0, 0, -1}, {0, 0, 1}, {0, 1, 0}} {
+		inst.World.SetBlock(target.Add(d[0], d[1], d[2]), obsidian)
+	}
+	guide := &fakeGuide{plan: game.BotPlan{
+		BlockItem: "minecraft:white_wool",
+		Home:      world.Position{X: 0, Y: 64, Z: 0},
+		Targets:   []world.Position{target},
+	}}
+	b := addTestBot(t, inst, guide, DifficultyHard, 0.5, 0.5)
+	b.inv.set(hotbarStart+1, woolStack(t, 32))
+	b.inv.set(hotbarStart+4, itemOf(t, "minecraft:tnt", 1))
+	lit := false
+	for i := 0; i < 1500 && !lit; i++ {
+		runTicks(inst, 1)
+		inst.tntMu.Lock()
+		lit = len(inst.tnts) > 0
+		inst.tntMu.Unlock()
+	}
+	if !lit {
+		t.Fatalf("no TNT lit; bot at %+v", b.player.Snapshot())
+	}
+	runTicks(inst, 45) // fuse 50: it should be clear by now
+	s := b.player.Snapshot()
+	if d := math.Hypot(s.X-float64(target.X), s.Z-float64(target.Z)); d < 5 {
+		t.Fatalf("bot still %.1f blocks from its TNT", d)
+	}
+}
+
+// TestBotTeamRoles: of three bots on one team, the first attacks, the
+// second covers the team's bed with wool, the third is the archer.
+func TestBotTeamRoles(t *testing.T) {
+	inst, target := botWorld()
+	bed, _ := world.BlockByName("minecraft:red_bed")
+	own := []world.Position{{X: -2, Y: 64, Z: 0}, {X: -1, Y: 64, Z: 0}}
+	for _, p := range own {
+		inst.World.SetBlock(p, bed)
+	}
+	guide := &fakeGuide{plan: game.BotPlan{
+		Team: "red", Defend: own,
+		BlockItem: "minecraft:white_wool",
+		Targets:   []world.Position{target},
+	}}
+	var bots []*ClientConnection
+	for i := 0; i < 3; i++ {
+		b := addTestBot(t, inst, guide, DifficultyHard, 1.5, float64(i)-0.5)
+		b.inv.set(hotbarStart+1, woolStack(t, 32))
+		bots = append(bots, b)
+	}
+	runTicks(inst, 1200)
+	roles := []botRole{bots[0].bot.brain.role, bots[1].bot.brain.role, bots[2].bot.brain.role}
+	if roles[0] != roleAttacker || roles[1] != roleDefender || roles[2] != roleArcher {
+		t.Fatalf("roles %v, want attacker, defender, archer", roles)
+	}
+	if left := bedCover(inst.World.GetBlock, own); len(left) != 0 {
+		t.Fatalf("bed cover still open at %v", left)
+	}
+	if got := inst.World.GetBlock(target); got != world.Air {
+		t.Fatalf("the attacker didn't break the enemy bed (%s)", got.Name)
+	}
+}
+
+// TestBotTeamBrain: one brain per team — an enemy at the bed pulls a
+// second defender in (and the defenders go for it), and every attacker goes
+// for the same bed.
+func TestBotTeamBrain(t *testing.T) {
+	inst, target := botWorld()
+	other := world.Position{X: 16, Y: 64, Z: 3}
+	planks, _ := world.BlockByName("minecraft:oak_planks")
+	inst.World.SetBlock(other, planks)
+	own := []world.Position{{X: -2, Y: 64, Z: 0}, {X: -1, Y: 64, Z: 0}}
+	guide := &fakeGuide{plan: game.BotPlan{
+		Team: "red", Defend: own,
+		Targets: []world.Position{target, other},
+	}}
+	var bots []*ClientConnection
+	for i := 0; i < 4; i++ {
+		bots = append(bots, addTestBot(t, inst, guide, DifficultyNormal, float64(i)-1.5, 2.5))
+	}
+	runTicks(inst, 20)
+	roles := func() []botRole {
+		var out []botRole
+		for _, b := range bots {
+			out = append(out, b.bot.brain.role)
+		}
+		return out
+	}
+	if r := roles(); r[0] != roleAttacker || r[1] != roleDefender || r[2] != roleArcher || r[3] != roleAttacker {
+		t.Fatalf("calm roles %v", r)
+	}
+	// Bots 1 and 4 attack: both put the team's focus first.
+	if a, b := bots[0].bot.teamTargets(), bots[3].bot.teamTargets(); a[0] != b[0] {
+		t.Fatalf("attackers split: %v vs %v", a[0], b[0])
+	}
+
+	enemy := offlineConn(inst, "Enemy", player.Survival, -1.5, 64, -2.5)
+	runTicks(inst, 20, enemy)
+	if r := roles(); r[1] != roleDefender || r[2] != roleDefender {
+		t.Fatalf("roles with an enemy at the bed %v, want two defenders", r)
+	}
+	if bots[2].bot.brain.target != enemy {
+		t.Fatal("the second defender isn't going for the intruder")
+	}
+}
+
+// teamsGuide is a fakeGuide that names its teams (game.BotTeams).
+type teamsGuide struct{ fakeGuide }
+
+func (*teamsGuide) BotTeams(*game.Ctx) []string { return []string{"red", "blue"} }
+
+func TestBotSuggestions(t *testing.T) {
+	inst, _ := botWorld()
+	op := offlineConn(inst, "Op", player.Creative, 0.5, 64, 0.5)
+	guide := &teamsGuide{fakeGuide{plan: game.BotPlan{Idle: true}}}
+	inst.botGuide = guide
+	inst.ID = "bots"
+	inst.Server.mu.Lock()
+	inst.Server.instances[inst.ID] = inst // so /bot remove lists its bots
+	inst.Server.mu.Unlock()
+	b, err := inst.Server.AddBot(inst, "red", DifficultyEasy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string][]string{
+		"/bot ":         {"add", "clear", "list", "remove"},
+		"/bot a":        {"add"},
+		"/bot add ":     {"blue", "red"},
+		"/bot add r":    {"red"},
+		"/bot add red ": {"easy", "hard", "normal"},
+		"/bot remove ":  {b.playerName},
+		"/bot list ":    nil,
+	}
+	for text, want := range cases {
+		_, _, got := inst.Server.Suggestions(op, text)
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Errorf("%q → %v, want %v", text, got, want)
+		}
 	}
 }

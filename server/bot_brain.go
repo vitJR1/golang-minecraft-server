@@ -14,12 +14,19 @@ import (
 // bot_brain.go decides what a bot does each tick. In order:
 //
 //  1. Fight: the nearest enemy within the difficulty's aggro range is
-//     chased and hit (reaction delay, clicks per second, hit chance).
-//  2. Fall back home on low health (normal / hard), for a few seconds.
-//  3. Short on building blocks and able to pay: walk to the shop, buy.
-//  4. Short and broke: stand at the resource station and collect.
+//     chased — bridging, building stairs up, leaping gaps — and hit
+//     (reaction delay, clicks per second, hit chance). One it can't reach
+//     is shot with a bow, if it has one, else left alone for a while.
+//  2. Fall back home on low health (normal / hard), for a few seconds; run
+//     from its own lit TNT.
+//  3. Short on building blocks, or able to pay for gear it wants (a sword,
+//     armour, a bow, a tool or TNT for a hard bed defence): walk to the
+//     shop, buy (bot_tactics.go).
+//  4. Short and broke — or saving up for gear: stand at the resource
+//     station and collect.
 //  5. Otherwise go for the first target (an enemy bed) — bridging across
-//     the void with the blocks it carries — and dig it out, cover first.
+//     the void with the blocks it carries — and dig it out, cover first;
+//     cover that takes long to dig is blasted with TNT, if it has some.
 //
 // What counts as an enemy, where the station / shop / targets are and how to
 // buy all come from the game (game.BotGuide).
@@ -84,6 +91,37 @@ type brainState struct {
 	dig       *digJob
 	failed    map[world.Position]uint64
 
+	// Chasing: enemies given up on (unreachable) until a tick; since when
+	// the chase goal is reached with the enemy still out of reach; the last
+	// chase key no route was found for.
+	ignore  map[int32]uint64
+	closeAt uint64
+	failKey string
+	failAt  uint64
+
+	// Bow: the tick the draw started (0: not drawing), the next shot.
+	drawAt           uint64
+	nextShot         uint64
+	aimYaw, aimPitch float32 // this shot's aim error
+
+	badWare map[string]uint64 // wares that failed to buy, until
+
+	// leapCell is the landing cell of the leap whose run-up is done.
+	leapCell world.Position
+	leapRun  bool
+
+	// hardCover is the tool a target's cover wants, when digging it with
+	// what the bot holds takes too long (world.NoTool: none).
+	hardCover world.ToolType
+	fleeFrom  world.Position
+	fleeUntil uint64
+
+	// Saving up at the station for gear it can't afford yet.
+	farmUntil    uint64
+	farmDecideAt uint64
+
+	role botRole // its part in the team (bot_team.go)
+
 	yaw, pitch float32
 }
 
@@ -111,7 +149,7 @@ func (b *bot) tick(now uint64) {
 	snap := c.player.Snapshot()
 	if snap.Dead {
 		b.phys.Vel = anticheat.Vec{}
-		b.brain.route = nil
+		b.brain.route, b.brain.drawAt = nil, 0
 		return
 	}
 	// Someone else moved the bot (respawn, a game teleport): start there.
@@ -160,6 +198,7 @@ func (b *bot) think(now uint64) physInput {
 	if now >= br.planAt {
 		br.plan = guide.BotPlan(ctx, me)
 		br.planAt = now + botPlanEvery
+		b.teamUpdate(now)
 	}
 	if br.plan.Idle {
 		br.target, br.route, br.dig = nil, nil, nil
@@ -169,10 +208,14 @@ func (b *bot) think(now uint64) physInput {
 	if now%botTargetEvery == 0 || !b.targetValid(br.target) {
 		b.pickTarget(now)
 	}
+	if now < br.fleeUntil {
+		return b.flee(now)
+	}
 	retreating := now < br.retreatUntil
 	if t := br.target; t != nil && (!retreating || b.reach(t) < botChaseClose) {
 		return b.fight(now, t)
 	}
+	b.stopDraw()
 	if retreating {
 		return b.goTo(now, "home", br.plan.Home, within(br.plan.Home, 1.5, 2), b.c.countItemName(br.plan.BlockItem))
 	}
@@ -200,7 +243,7 @@ func (b *bot) pickTarget(now uint64) {
 	var best *ClientConnection
 	bestD := b.skill.aggro
 	for _, o := range c.instance.Players.snapshot() {
-		if o == c || !b.targetValid(o) {
+		if o == c || now < br.ignore[o.player.EntityID] || !b.targetValid(o) {
 			continue
 		}
 		os := o.player.Snapshot()
@@ -211,8 +254,12 @@ func (b *bot) pickTarget(now uint64) {
 			best, bestD = o, d
 		}
 	}
+	// A defender goes for whoever is at the team's bed, from any distance.
+	if in := b.teamIntruder(); in != nil {
+		best = in
+	}
 	if best != br.target {
-		br.target, br.targetAt = best, now
+		br.target, br.targetAt, br.closeAt = best, now, 0
 	}
 }
 
@@ -236,6 +283,12 @@ func (b *bot) fight(now uint64, t *ClientConnection) physInput {
 	}
 
 	d := b.reach(t)
+	if br.drawAt != 0 || (d > botArcherRange && br.role == roleArcher) {
+		// Mid-draw: finish the shot. An archer opens at range.
+		if in, ok := b.shoot(now, t); ok {
+			return in
+		}
+	}
 	if d <= botAttackReach+1 {
 		b.holdBestWeapon() // the sword, not the wool it bridged with
 	}
@@ -255,10 +308,73 @@ func (b *bot) fight(now uint64, t *ClientConnection) physInput {
 	}
 	goal := world.Position{X: floorF(ts.X), Y: floorF(ts.Y + 0.01), Z: floorF(ts.Z)}
 	key := fmt.Sprintf("chase:%d:%v", t.player.EntityID, goal)
-	in := b.goTo(now, key, goal, within(goal, 1.8, 1), 0)
-	in.Sprint = true
-	b.lookAt(anticheat.Vec{X: ts.X, Y: ts.Y + 1.2, Z: ts.Z})
+	blocks := min(c.countItemName(br.plan.BlockItem), b.skill.chaseCap)
+	in, ok := b.chase(now, key, goal, within(goal, 1.8, 1), blocks)
+	if !ok {
+		return b.unreachable(now, t)
+	}
+	if !b.placing() {
+		in.Sprint = true
+		b.lookAt(anticheat.Vec{X: ts.X, Y: ts.Y + 1.2, Z: ts.Z})
+	}
 	return in
+}
+
+const (
+	botChaseRetry = 20  // ticks before a chase with no route is searched again
+	botStandOff   = 30  // goal reached, enemy out of reach this long: unreachable
+	botIgnoreFor  = 100 // an unreachable enemy is left alone this long
+)
+
+// chase steers toward a moving enemy with a quick search (blocks to build
+// with, leaps). False when there's no way to it: no route, or the bot got as
+// close as it can and still can't reach.
+func (b *bot) chase(now uint64, key string, aim world.Position, goal func(world.Position) bool, blocks int) (physInput, bool) {
+	c, br := b.c, &b.brain
+	here := c.feetCellNow()
+	if goal(here) && (br.route == nil || br.routeKey != key) {
+		if br.closeAt == 0 {
+			br.closeAt = now
+		}
+		return physInput{}, now < br.closeAt+botStandOff
+	}
+	br.closeAt = 0
+	if br.failKey == key && now < br.failAt+botChaseRetry {
+		return physInput{}, false
+	}
+	stale := br.routeKey != key || br.route == nil || now >= br.routeAt+botRouteEvery || now >= br.progressAt+botStuckTicks
+	if stale && b.phys.OnGround {
+		br.route = findRoute(c.instance.World.GetBlock, here, aim, goal, b.opts(blocks, pathNearNodes))
+		br.routeIdx, br.routeKey, br.routeAt, br.routeStart, br.progressAt, br.farRoute = 0, key, now, here, now, false
+		if br.route == nil {
+			br.failKey, br.failAt = key, now
+			return physInput{}, false
+		}
+	}
+	if br.route == nil {
+		return physInput{}, true // in the air: wait to land
+	}
+	return b.follow(now), true
+}
+
+// unreachable: no way to t on foot. Shoot it if possible, else leave it be
+// for a while.
+func (b *bot) unreachable(now uint64, t *ClientConnection) physInput {
+	if in, ok := b.shoot(now, t); ok {
+		return in
+	}
+	br := &b.brain
+	if br.ignore == nil {
+		br.ignore = map[int32]uint64{}
+	}
+	br.ignore[t.player.EntityID] = now + botIgnoreFor
+	br.target, br.route = nil, nil
+	return physInput{}
+}
+
+// opts is the search tuning for this bot, allowing blocks to place.
+func (b *bot) opts(blocks, budget int) routeOpts {
+	return routeOpts{maxBlocks: blocks, maxLeap: b.skill.maxLeap, leapCost: b.style.leapCost, budget: budget}
 }
 
 // --- goals --------------------------------------------------------------------
@@ -281,25 +397,34 @@ func (b *bot) pursue(now uint64) physInput {
 		want = 0
 	}
 
-	// Short of blocks and able to pay: go shopping, and buy while the money
-	// lasts.
+	// Short of blocks and able to pay, or gear it wants within its means:
+	// go shopping, and buy while the money lasts — gear first, then blocks.
 	canPay := plan.HasShop && plan.Price > 0 && c.countItemName(plan.Currency) >= plan.Price
-	if blocks < want && canPay {
+	ware := b.wantWare(blocks)
+	if (blocks < want && canPay) || ware != nil {
 		br.shopping = true
 	}
-	if br.shopping && (!canPay || blocks >= stockTo) {
+	if br.shopping && (!canPay || blocks >= stockTo) && ware == nil {
 		br.shopping = false
 	}
 	if br.shopping {
 		if within(plan.Shop, 2.5, 2)(c.feetCellNow()) {
 			if now >= br.nextBuy {
 				br.nextBuy = now + botBuyGap
-				c.instance.botGuide.BotBuy(c.instance.pluginCtx(), playerBridge{conn: c}, plan.BuyKey)
+				b.buy(ware)
 			}
 			b.lookAt(blockCentre(plan.Shop))
 			return physInput{}
 		}
 		return b.goTo(now, "shop", plan.Shop, within(plan.Shop, 2.5, 2), blocks)
+	}
+	if b.saving(now) {
+		return b.goTo(now, "station", plan.Station, atStation(plan.Station), blocks)
+	}
+	if br.role == roleDefender {
+		if in, ok := b.defend(now, blocks); ok {
+			return in
+		}
 	}
 	if blocks < want {
 		if plan.HasStation {
@@ -308,7 +433,7 @@ func (b *bot) pursue(now uint64) physInput {
 		return physInput{}
 	}
 
-	for _, t := range plan.Targets {
+	for _, t := range b.teamTargets() {
 		if until, ok := br.failed[t]; ok && now < until {
 			continue
 		}
@@ -368,7 +493,19 @@ func (b *bot) breakTarget(now uint64, t world.Position) physInput {
 			return physInput{}
 		}
 		b.holdBestTool(blk)
-		ticks := world.BreakTicksWith(world.BreakInfoFor(blk.Name), c.heldItemName(), c.digContext())
+		info := world.BreakInfoFor(blk.Name)
+		ticks := world.BreakTicksWith(info, c.heldItemName(), c.digContext())
+		if pos != t && !isWool(blk.Name) && (ticks < 0 || ticks > botHardDig) {
+			// Hard cover (end stone, wood, obsidian…): blast it, or go and buy
+			// what gets through when the bot can afford it.
+			if b.blast(now, pos) {
+				return physInput{}
+			}
+			br.hardCover = info.Tool
+			if b.wantWare(c.countItemName(br.plan.BlockItem)) != nil {
+				return physInput{} // the shop, next tick
+			}
+		}
 		if ticks < 0 {
 			b.giveUp(now, t)
 			return physInput{}
@@ -434,9 +571,9 @@ func (c *ClientConnection) feetCellNow() world.Position {
 }
 
 // goTo steers toward a goal along a route, recomputing it when the goal
-// changes, when it's old, when the bot left it or got stuck. maxBridge is how
-// many blocks it may bridge with. A goal already reached stands still.
-func (b *bot) goTo(now uint64, key string, aim world.Position, goal func(world.Position) bool, maxBridge int) physInput {
+// changes, when it's old, when the bot left it or got stuck. maxBlocks is how
+// many blocks it may build with. A goal already reached stands still.
+func (b *bot) goTo(now uint64, key string, aim world.Position, goal func(world.Position) bool, maxBlocks int) physInput {
 	c, br := b.c, &b.brain
 	here := c.feetCellNow()
 	if goal(here) {
@@ -445,17 +582,17 @@ func (b *bot) goTo(now uint64, key string, aim world.Position, goal func(world.P
 	}
 	// A goal too far for a search on the tick is in the hands of goToFar.
 	if (br.far != nil && br.farKey == key) || (br.farRoute && br.routeKey == key && br.route != nil) {
-		in, _ := b.goToFar(now, key, aim, goal, maxBridge)
+		in, _ := b.goToFar(now, key, aim, goal, maxBlocks)
 		return in
 	}
 	stale := br.routeKey != key || br.route == nil || now >= br.routeAt+botRouteEvery || now >= br.progressAt+botStuckTicks
 	if stale && b.phys.OnGround {
-		br.route = findRoute(c.instance.World.GetBlock, here, aim, goal, maxBridge, pathNearNodes)
+		br.route = findRoute(c.instance.World.GetBlock, here, aim, goal, b.opts(maxBlocks, pathNearNodes))
 		br.routeIdx, br.routeKey, br.routeAt, br.routeStart, br.progressAt, br.farRoute = 0, key, now, here, now, false
 		if br.route == nil {
 			// Not within a quick search (another island, a long way round):
 			// search off the tick.
-			in, _ := b.goToFar(now, key, aim, goal, maxBridge)
+			in, _ := b.goToFar(now, key, aim, goal, maxBlocks)
 			return in
 		}
 	}
@@ -482,11 +619,11 @@ const (
 )
 
 // goToFar steers toward a goal that may be islands away. The route is
-// searched on its own goroutine (pathFarNodes, bridging up to maxBridge) so
+// searched on its own goroutine (pathFarNodes, building with up to maxBlocks) so
 // a long search never stalls the instance's tick; the bot waits meanwhile.
 // A route in progress is kept until it's finished, left or stuck — not
 // recomputed on a timer.
-func (b *bot) goToFar(now uint64, key string, aim world.Position, goal func(world.Position) bool, maxBridge int) (physInput, int) {
+func (b *bot) goToFar(now uint64, key string, aim world.Position, goal func(world.Position) bool, maxBlocks int) (physInput, int) {
 	c, br := b.c, &b.brain
 	if br.routeKey == key && br.route != nil {
 		if now < br.progressAt+botStuckTicks {
@@ -529,26 +666,50 @@ func (b *bot) goToFar(now uint64, key string, aim world.Position, goal func(worl
 	ch := make(chan []routeStep, 1)
 	br.far, br.farKey, br.farStart = ch, key, here
 	at := c.instance.World.GetBlock // MemoryWorld reads are locked: safe off the tick
-	go func() { ch <- findRoute(at, here, aim, goal, maxBridge, pathFarNodes) }()
+	opts := b.opts(maxBlocks, pathFarNodes)
+	go func() { ch <- findRoute(at, here, aim, goal, opts) }()
 	return physInput{}, farPending
 }
 
-// bridgesLeft counts the bridge steps still ahead on the route.
+// bridgesLeft counts the blocks still to place on the route ahead.
 func (b *bot) bridgesLeft() int {
 	br := &b.brain
 	at := b.c.instance.World.GetBlock
 	n := 0
 	for i := br.routeIdx; i < len(br.route); i++ {
-		if br.route[i].Bridge && !groundUnder(at, br.route[i].Cell) {
-			n++
+		for _, p := range br.route[i].Place {
+			if world.Replaceable(at(p)) {
+				n++
+			}
 		}
 	}
 	return n
 }
 
+// placing reports whether the current step still has blocks to put down.
+func (b *bot) placing() bool {
+	br := &b.brain
+	if br.route == nil || br.routeIdx >= len(br.route) {
+		return false
+	}
+	_, ok := nextPlacement(b.c.instance.World.GetBlock, br.route[br.routeIdx])
+	return ok
+}
+
+// nextPlacement is the first of the step's blocks not yet in place.
+func nextPlacement(at blockAt, s routeStep) (world.Position, bool) {
+	for _, p := range s.Place {
+		if world.Replaceable(at(p)) {
+			return p, true
+		}
+	}
+	return world.Position{}, false
+}
+
 // follow walks the current route one tick: toward the next cell, jumping
-// up steps, and bridging — from the centre of the cell before a gap, a block
-// under the next cell, then the step.
+// up steps; building — from the centre of the cell before, the step's
+// blocks in order (a bridge block under the next cell, or a stair block in
+// front to jump onto) — and leaping (leap).
 func (b *bot) follow(now uint64) physInput {
 	c, br := b.c, &b.brain
 	at := c.instance.World.GetBlock
@@ -562,37 +723,118 @@ func (b *bot) follow(now uint64) physInput {
 		prev = br.route[br.routeIdx-1].Cell
 	}
 	here := c.feetCellNow()
-	if here != prev && here != step.Cell && b.phys.OnGround {
+	runUp := prev.Add(-sign(step.Cell.X-prev.X), 0, -sign(step.Cell.Z-prev.Z))
+	if here != prev && here != step.Cell && !(step.Leap && onLeapLine(prev, runUp, step.Cell, here)) && b.phys.OnGround {
 		b.dropRoute() // knocked off the route: pick it up again or plan anew
 		return physInput{}
 	}
 
-	if step.Bridge && !groundUnder(at, step.Cell) {
+	if next, ok := nextPlacement(at, step); ok {
 		pc := cellCentre(prev)
-		if horiz(b.phys.Pos, pc) > botArrive {
+		if here != prev || horiz(b.phys.Pos, pc) > botArrive {
 			return b.toward(pc, false)
 		}
-		floor := step.Cell.Add(0, -1, 0)
-		b.lookAt(blockCentre(floor))
+		if c.instance.blockedByPlayer(next) && horiz(b.phys.Pos, pc) > 0.02 {
+			// Off-centre, its own hitbox overlaps the block's cell: closer in.
+			in := b.toward(pc, false)
+			in.DirX, in.DirZ = in.DirX*0.3, in.DirZ*0.3
+			return in
+		}
+		b.lookAt(blockCentre(next))
 		if now >= br.nextPlace {
 			br.nextPlace = now + b.skill.placeGap
-			if !c.botPlace(floor, br.plan.BlockItem) {
+			if !c.botPlace(next, br.plan.BlockItem) {
 				br.route = nil
 			}
 		}
 		return physInput{}
 	}
+	if step.Leap {
+		return b.leap(now, prev, runUp, step)
+	}
 
 	target := cellCentre(step.Cell)
-	in := b.toward(target, len(br.route)-br.routeIdx > 3 && !step.Bridge)
+	in := b.toward(target, len(br.route)-br.routeIdx > 3 && len(step.Place) == 0)
 	if step.Cell.Y > here.Y && b.phys.OnGround && horiz(b.phys.Pos, target) < 1.5 {
 		in.Jump = true
 	}
-	if horiz(b.phys.Pos, target) < botArrive && math.Abs(b.phys.Pos.Y-float64(step.Cell.Y)) < 0.6 {
+	b.arrive(now, step)
+	return in
+}
+
+// arrive moves on to the next step once the bot stands at this one's centre.
+func (b *bot) arrive(now uint64, step routeStep) {
+	br := &b.brain
+	if horiz(b.phys.Pos, cellCentre(step.Cell)) < botArrive && math.Abs(b.phys.Pos.Y-float64(step.Cell.Y)) < 0.6 &&
+		(!step.Leap || b.phys.OnGround) {
 		br.routeIdx++
 		br.progressAt = now
 	}
+}
+
+// leap sprint-jumps a gap: back to the run-up cell behind prev, a sprint
+// at the gap, the jump off prev's far half, and steering for the landing
+// cell in the air.
+func (b *bot) leap(now uint64, prev, runUp world.Position, step routeStep) physInput {
+	br := &b.brain
+	target := cellCentre(step.Cell)
+	if br.leapCell != step.Cell {
+		br.leapCell, br.leapRun = step.Cell, false
+	}
+	if b.phys.OnGround && b.c.feetCellNow() != step.Cell {
+		if !br.leapRun {
+			rc := cellCentre(runUp)
+			if horiz(b.phys.Pos, rc) > botArrive {
+				return b.toward(rc, false)
+			}
+			br.leapRun = true
+		}
+		in := b.toward(target, true)
+		pc := cellCentre(prev)
+		dx, dz := float64(sign(step.Cell.X-prev.X)), float64(sign(step.Cell.Z-prev.Z))
+		// Jump from prev's far half — before the next move would carry the
+		// feet past its edge (the hitbox holds on until 0.8 past the centre).
+		if (b.phys.Pos.X+b.phys.Vel.X-pc.X)*dx+(b.phys.Pos.Z+b.phys.Vel.Z-pc.Z)*dz >= 0.3 {
+			in.Jump = true
+		}
+		return in
+	}
+	in := b.toward(target, true)
+	if b.phys.OnGround {
+		// Landed: on the cell, or carried on to the next one.
+		here := b.c.feetCellNow()
+		for k := br.routeIdx; k < len(br.route) && k <= br.routeIdx+1; k++ {
+			if br.route[k].Cell == here {
+				br.routeIdx, br.progressAt, br.leapRun = k+1, now, false
+				break
+			}
+		}
+	}
 	return in
+}
+
+// onLeapLine: here is on the line of a leap from prev to land — the run-up
+// cell, or a gap cell the bot's feet overhang while it still stands on prev's
+// edge.
+func onLeapLine(prev, runUp, land, here world.Position) bool {
+	if here == runUp {
+		return true
+	}
+	if here.Y != prev.Y {
+		return false
+	}
+	dx, dz := sign(land.X-prev.X), sign(land.Z-prev.Z)
+	return here == prev.Add(dx, 0, dz)
+}
+
+func sign(v int) int {
+	switch {
+	case v > 0:
+		return 1
+	case v < 0:
+		return -1
+	}
+	return 0
 }
 
 // toward walks straight at p.
@@ -640,6 +882,7 @@ func (c *ClientConnection) botHold(match func(itemStack) bool) bool {
 	for k := int16(0); k < 9; k++ {
 		if st := c.inv.get(hotbarStart + k); !st.empty() && match(st) {
 			if c.heldSlot.Load() != int32(k) {
+				c.cancelUse()
 				c.heldSlot.Store(int32(k))
 				c.equipmentChanged()
 			}
@@ -649,6 +892,7 @@ func (c *ClientConnection) botHold(match func(itemStack) bool) bool {
 	for s := int16(mainInvStart); s < hotbarStart; s++ {
 		if st := c.inv.get(s); !st.empty() && match(st) {
 			last := int16(hotbarStart + 8)
+			c.cancelUse()
 			c.inv.slots[s], c.inv.slots[last] = c.inv.slots[last], c.inv.slots[s]
 			c.heldSlot.Store(8)
 			c.equipmentChanged()
@@ -705,6 +949,7 @@ func (b *bot) holdBestTool(blk world.Block) {
 		}
 	}
 	if bestSlot >= 0 && c.heldSlot.Load() != bestSlot {
+		c.cancelUse()
 		c.heldSlot.Store(bestSlot)
 		c.equipmentChanged()
 	}
@@ -714,9 +959,15 @@ func (b *bot) holdBestTool(blk world.Block) {
 // the same rules as a player's placement: replaceable spot, nobody in the
 // way, the game's rewrite and veto.
 func (c *ClientConnection) botPlace(pos world.Position, item string) bool {
+	return c.botPlaceWith(pos, func(name string) bool { return name == item || isWool(name) })
+}
+
+// botPlaceWith places the first held-able block matching; a placed TNT
+// lights itself where the game wants it to (like a player's).
+func (c *ClientConnection) botPlaceWith(pos world.Position, match func(string) bool) bool {
 	if !c.botHold(func(st itemStack) bool {
 		name, _ := world.ItemName(st.ID)
-		return name == item || isWool(name)
+		return match(name)
 	}) {
 		return false
 	}
@@ -732,5 +983,8 @@ func (c *ClientConnection) botPlace(pos world.Position, item string) bool {
 	inst.SetBlock(pos, block)
 	c.consumeHeld()
 	c.broadcastEntityAnimation(0)
+	if block == world.TNT && inst.TNTAutoPrime() {
+		inst.primeTNT(pos, tntAutoFuse, c)
+	}
 	return true
 }

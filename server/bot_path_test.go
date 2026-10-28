@@ -13,12 +13,13 @@ func reach(p world.Position) func(world.Position) bool {
 	return func(c world.Position) bool { return c == p }
 }
 
+// blocks is a near search that may place n blocks and never leaps.
+func blocks(n int) routeOpts { return routeOpts{maxBlocks: n, budget: pathNearNodes} }
+
 func bridgesIn(path []routeStep) int {
 	n := 0
 	for _, s := range path {
-		if s.Bridge {
-			n++
-		}
+		n += len(s.Place)
 	}
 	return n
 }
@@ -30,7 +31,7 @@ func TestPathWalksAroundAWall(t *testing.T) {
 		w[at(3, 64, z)] = world.Stone
 		w[at(3, 65, z)] = world.Stone
 	}
-	path := findPath(w.at, at(0, 64, 0), at(6, 64, 0), reach(at(6, 64, 0)), 0, pathNearNodes)
+	path := findPath(w.at, at(0, 64, 0), at(6, 64, 0), reach(at(6, 64, 0)), blocks(0))
 	if path == nil {
 		t.Fatal("no way round the wall")
 	}
@@ -38,8 +39,8 @@ func TestPathWalksAroundAWall(t *testing.T) {
 		if s.Cell.X == 3 && s.Cell.Z >= -3 && s.Cell.Z <= 3 {
 			t.Fatalf("path goes through the wall at %v", s.Cell)
 		}
-		if s.Bridge {
-			t.Fatal("bridged when walking round was possible")
+		if len(s.Place) > 0 {
+			t.Fatal("built when walking round was possible")
 		}
 	}
 }
@@ -48,17 +49,17 @@ func TestPathBridgesAGap(t *testing.T) {
 	w := testWorld{}
 	w.floor(63, -3, 2, -2, 2) // island A
 	w.floor(63, 8, 12, -2, 2) // island B, a 5-block gap at x=3..7
-	path := findPath(w.at, at(0, 64, 0), at(10, 64, 0), reach(at(10, 64, 0)), 64, pathNearNodes)
+	path := findPath(w.at, at(0, 64, 0), at(10, 64, 0), reach(at(10, 64, 0)), blocks(64))
 	if path == nil {
 		t.Fatal("no bridge across the gap")
 	}
 	if n := bridgesIn(path); n != 5 {
 		t.Fatalf("%d bridge steps, want 5 (the gap)", n)
 	}
-	if findPath(w.at, at(0, 64, 0), at(10, 64, 0), reach(at(10, 64, 0)), 3, pathNearNodes) != nil {
+	if findPath(w.at, at(0, 64, 0), at(10, 64, 0), reach(at(10, 64, 0)), blocks(3)) != nil {
 		t.Fatal("3 blocks were enough for a 5-block gap")
 	}
-	if findPath(w.at, at(0, 64, 0), at(10, 64, 0), reach(at(10, 64, 0)), 0, pathNearNodes) != nil {
+	if findPath(w.at, at(0, 64, 0), at(10, 64, 0), reach(at(10, 64, 0)), blocks(0)) != nil {
 		t.Fatal("crossed the void without blocks")
 	}
 }
@@ -67,7 +68,7 @@ func TestPathJumpsUpAndDropsDown(t *testing.T) {
 	w := testWorld{}
 	w.floor(63, -2, 10, -2, 2)
 	w.floor(64, 3, 5, -2, 2) // a one-block step up at x=3..5
-	path := findPath(w.at, at(0, 64, 0), at(8, 64, 0), reach(at(8, 64, 0)), 0, pathNearNodes)
+	path := findPath(w.at, at(0, 64, 0), at(8, 64, 0), reach(at(8, 64, 0)), blocks(0))
 	if path == nil {
 		t.Fatal("no path over the step")
 	}
@@ -85,7 +86,7 @@ func TestPathJumpsUpAndDropsDown(t *testing.T) {
 	tall.floor(63, -2, 10, -2, 2)
 	tall.floor(64, 3, 3, -2, 2)
 	tall.floor(65, 3, 3, -2, 2) // a two-block wall: no jumping it
-	if p := findPath(tall.at, at(0, 64, 0), at(8, 64, 0), reach(at(8, 64, 0)), 0, pathNearNodes); p != nil {
+	if p := findPath(tall.at, at(0, 64, 0), at(8, 64, 0), reach(at(8, 64, 0)), blocks(0)); p != nil {
 		t.Fatalf("jumped a two-block wall: %v", p)
 	}
 }
@@ -94,7 +95,7 @@ func TestPathDropsFromALedge(t *testing.T) {
 	w := testWorld{}
 	w.floor(66, -2, 2, -2, 2) // a ledge 3 blocks above the ground
 	w.floor(63, 3, 8, -2, 2)
-	path := findPath(w.at, at(0, 67, 0), at(6, 64, 0), reach(at(6, 64, 0)), 0, pathNearNodes)
+	path := findPath(w.at, at(0, 67, 0), at(6, 64, 0), reach(at(6, 64, 0)), blocks(0))
 	if path == nil || bridgesIn(path) != 0 {
 		t.Fatalf("no drop off the ledge: %v", path)
 	}
@@ -112,7 +113,7 @@ func TestPathDoesntClimbWalls(t *testing.T) {
 	for z := -2; z <= 2; z++ {
 		w[at(3, 64, z)] = wall
 	}
-	path := findPath(w.at, at(0, 64, 0), at(6, 64, 0), reach(at(6, 64, 0)), 0, pathNearNodes)
+	path := findPath(w.at, at(0, 64, 0), at(6, 64, 0), reach(at(6, 64, 0)), blocks(0))
 	if path == nil {
 		t.Fatal("no way round the wall")
 	}
@@ -133,11 +134,11 @@ func TestRouteUsesAnExistingBridge(t *testing.T) {
 		w[at(x, 63, -3)] = world.Stone
 	}
 	goal := reach(at(10, 64, 2))
-	greedy := findPath(w.at, at(0, 64, 2), at(10, 64, 2), goal, 64, pathNearNodes)
+	greedy := findPath(w.at, at(0, 64, 2), at(10, 64, 2), goal, blocks(64))
 	if bridgesIn(greedy) == 0 {
 		t.Skip("the plain search already walks the old bridge here")
 	}
-	path := findRoute(w.at, at(0, 64, 2), at(10, 64, 2), goal, 64, pathNearNodes)
+	path := findRoute(w.at, at(0, 64, 2), at(10, 64, 2), goal, blocks(64))
 	if path == nil || bridgesIn(path) != 0 {
 		t.Fatalf("built %d new bridge blocks next to an existing bridge", bridgesIn(path))
 	}
@@ -145,13 +146,13 @@ func TestRouteUsesAnExistingBridge(t *testing.T) {
 	w2 := testWorld{}
 	w2.floor(63, -3, 2, -3, 3)
 	w2.floor(63, 8, 12, -3, 3)
-	if p := findRoute(w2.at, at(0, 64, 2), at(10, 64, 2), goal, 64, pathNearNodes); bridgesIn(p) == 0 {
+	if p := findRoute(w2.at, at(0, 64, 2), at(10, 64, 2), goal, blocks(64)); bridgesIn(p) == 0 {
 		t.Fatal("no bridge where none exists")
 	}
 }
 
 func TestResumeAt(t *testing.T) {
-	route := []routeStep{{Cell: at(1, 64, 0)}, {Cell: at(2, 64, 0)}, {Cell: at(3, 64, 0), Bridge: true}, {Cell: at(4, 64, 0), Bridge: true}}
+	route := []routeStep{{Cell: at(1, 64, 0)}, {Cell: at(2, 64, 0)}, {Cell: at(3, 64, 0), Place: []world.Position{at(3, 63, 0)}}, {Cell: at(4, 64, 0), Place: []world.Position{at(4, 63, 0)}}}
 	if i := resumeAt(route, at(2, 64, 0)); i != 2 {
 		t.Errorf("standing on step 1: resume at %d, want 2", i)
 	}
@@ -163,5 +164,68 @@ func TestResumeAt(t *testing.T) {
 	}
 	if i := resumeAt(route, at(9, 64, 9)); i != -1 {
 		t.Errorf("far away: resume at %d, want -1", i)
+	}
+}
+
+// TestPathBuildsStairs: a three-block wall with nothing to step on is
+// climbed by stair steps — a block in front, a jump onto it — when the
+// search may place blocks.
+func TestPathBuildsStairs(t *testing.T) {
+	w := testWorld{}
+	w.floor(63, -2, 3, -1, 1)
+	w.floor(66, 4, 8, -1, 1) // a platform three blocks up, against a wall
+	for y := 64; y <= 66; y++ {
+		for z := -1; z <= 1; z++ {
+			w[at(4, y, z)] = world.Stone
+		}
+	}
+	goal := reach(at(6, 67, 0))
+	if p := findPath(w.at, at(0, 64, 0), at(6, 67, 0), goal, blocks(0)); p != nil {
+		t.Fatalf("climbed a 3-block wall without blocks: %v", p)
+	}
+	path := findPath(w.at, at(0, 64, 0), at(6, 67, 0), goal, blocks(8))
+	if path == nil {
+		t.Fatal("no stairs up the wall")
+	}
+	stairs := 0
+	for i, s := range path {
+		prevY := 64
+		if i > 0 {
+			prevY = path[i-1].Cell.Y
+		}
+		if len(s.Place) > 0 && s.Cell.Y == prevY+1 {
+			stairs++
+		}
+	}
+	if stairs < 2 {
+		t.Fatalf("%d stair steps in %v, want ≥2", stairs, path)
+	}
+}
+
+// TestPathLeapsAGap: a two-block gap is leapt when leaps are allowed, and
+// needs blocks otherwise.
+func TestPathLeapsAGap(t *testing.T) {
+	w := testWorld{}
+	w.floor(63, -3, 2, -1, 1)
+	w.floor(63, 5, 9, -1, 1) // gap at x=3,4
+	goal := reach(at(7, 64, 0))
+	if p := findPath(w.at, at(0, 64, 0), at(7, 64, 0), goal, blocks(0)); p != nil {
+		t.Fatalf("crossed without leaping or blocks: %v", p)
+	}
+	opts := blocks(0)
+	opts.maxLeap = 2
+	path := findPath(w.at, at(0, 64, 0), at(7, 64, 0), goal, opts)
+	leaps := 0
+	for _, s := range path {
+		if s.Leap {
+			leaps++
+		}
+	}
+	if path == nil || leaps != 1 || bridgesIn(path) != 0 {
+		t.Fatalf("want one leap and no blocks: %v", path)
+	}
+	opts.maxLeap = 1
+	if p := findPath(w.at, at(0, 64, 0), at(7, 64, 0), goal, opts); p != nil {
+		t.Fatalf("leapt a 2-gap with maxLeap 1: %v", p)
 	}
 }

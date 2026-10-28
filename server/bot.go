@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 
 	"minecraft-server/anticheat"
+	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 )
@@ -77,12 +78,37 @@ type botSkill struct {
 	placeGap  uint64  // ticks between bridge blocks
 	retreat   bool    // falls back home on low health
 	crits     bool    // jumps into hits for critical damage
+	maxLeap   int     // widest gap it sprint-jumps (0 = never)
+	chaseCap  int     // most blocks it builds with to reach an enemy
+	aimNoise  float64 // bow aim error, degrees
+	farm      float64 // chance to stay at the forge for gear it can't afford yet
 }
 
 var botSkills = map[Difficulty]botSkill{
-	DifficultyEasy:   {reaction: 12, cps: 4, hitChance: 0.55, aggro: 8, placeGap: 8},
-	DifficultyNormal: {reaction: 7, cps: 7, hitChance: 0.75, aggro: 12, placeGap: 5, retreat: true},
-	DifficultyHard:   {reaction: 3, cps: 10, hitChance: 0.9, aggro: 16, placeGap: 3, retreat: true, crits: true},
+	DifficultyEasy: {reaction: 12, cps: 4, hitChance: 0.55, aggro: 8, placeGap: 8,
+		chaseCap: 8, aimNoise: 4, farm: 0.3},
+	DifficultyNormal: {reaction: 7, cps: 7, hitChance: 0.75, aggro: 12, placeGap: 5, retreat: true,
+		maxLeap: 2, chaseCap: 24, aimNoise: 2, farm: 0.5},
+	DifficultyHard: {reaction: 3, cps: 10, hitChance: 0.9, aggro: 16, placeGap: 3, retreat: true, crits: true,
+		maxLeap: 3, chaseCap: 48, aimNoise: 0.8, farm: 0.7},
+}
+
+// botStyle is a bot's own taste, rolled when it joins: two bots of one
+// difficulty don't play alike.
+type botStyle struct {
+	likesBow   bool    // buys a bow and arrows
+	prefersTNT bool    // blasts hard bed defences rather than buying a tool
+	armorFirst bool    // armour before a better sword
+	leapCost   float64 // how much it dislikes leaps (path cost)
+}
+
+func rollStyle(rng *rand.Rand) botStyle {
+	return botStyle{
+		likesBow:   rng.Float64() < 0.4,
+		prefersTNT: rng.Float64() < 0.5,
+		armorFirst: rng.Float64() < 0.5,
+		leapCost:   rng.Float64() * 3,
+	}
 }
 
 // bot is the AI half of a bot connection.
@@ -90,6 +116,7 @@ type bot struct {
 	c     *ClientConnection
 	diff  Difficulty
 	skill botSkill
+	style botStyle
 	rng   *rand.Rand
 
 	phys physState
@@ -173,7 +200,7 @@ func (s *Server) AddBot(inst *Instance, team string, diff Difficulty) (*ClientCo
 	}
 	c.authed.Store(true)
 	c.player = player.New(s.nextEntityID.Add(1), name, uuid)
-	c.bot = &bot{c: c, diff: diff, skill: botSkills[diff], rng: rng}
+	c.bot = &bot{c: c, diff: diff, skill: botSkills[diff], style: rollStyle(rng), rng: rng}
 	go func() { // the "client": nothing reads what the server sends
 		for range c.outbound {
 		}
@@ -214,6 +241,47 @@ func (s *Server) botsIn(inst *Instance) []*ClientConnection {
 	})
 	sort.Slice(out, func(i, j int) bool { return out[i].playerName < out[j].playerName })
 	return out
+}
+
+// botSuggestions completes /bot: add <team> [difficulty] with the teams of
+// the game in c's instance (game.BotTeams), remove <name> with the bots.
+func (s *Server) botSuggestions(c *ClientConnection, parts []string, argIdx int) []string {
+	if argIdx == 1 {
+		return []string{"add", "remove", "list", "clear"}
+	}
+	if len(parts) < 2 {
+		return nil
+	}
+	switch strings.ToLower(parts[1]) {
+	case "add":
+		switch argIdx {
+		case 2:
+			return s.botTeamNames(c.instance)
+		case 3:
+			return []string{"easy", "normal", "hard"}
+		}
+	case "remove":
+		if argIdx == 2 {
+			var names []string
+			for _, b := range s.botsIn(nil) {
+				names = append(names, b.playerName)
+			}
+			return names
+		}
+	}
+	return nil
+}
+
+// botTeamNames are the teams of the game in inst (game.BotTeams), if it
+// names them.
+func (s *Server) botTeamNames(inst *Instance) []string {
+	if inst == nil {
+		return nil
+	}
+	if bt, ok := inst.botGuide.(game.BotTeams); ok {
+		return bt.BotTeams(inst.pluginCtx())
+	}
+	return nil
 }
 
 // cmdBot: /bot add <team> [easy|normal|hard] | remove <name> | list | clear

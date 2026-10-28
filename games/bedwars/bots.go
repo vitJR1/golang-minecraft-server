@@ -29,6 +29,17 @@ func (g *bedWars) teamByName(name string) (*teamState, bool) {
 	return nil, false
 }
 
+// BotTeams lists the round's team names, lower-case (game.BotTeams).
+func (g *bedWars) BotTeams(*game.Ctx) []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	names := make([]string, len(g.teams))
+	for i, t := range g.teams {
+		names[i] = strings.ToLower(t.team.Name)
+	}
+	return names
+}
+
 // BotJoin puts the bot on the named team: as its pick while the round waits,
 // or straight onto the team (moved there, re-kitted) when it's running.
 func (g *bedWars) BotJoin(_ *game.Ctx, p game.PlayerHandle, team string) error {
@@ -90,9 +101,10 @@ func (g *bedWars) BotEnemy(_ *game.Ctx, p, other game.PlayerHandle) bool {
 	return g.started && ok1 && ok2 && mine != theirs
 }
 
-// BotPlan: idle while waiting, dead or spectating; otherwise the team's
-// iron forge to collect at, its item shop to buy wool at, and the enemy beds
-// still standing, nearest first.
+// BotPlan: idle while waiting, dead or spectating; otherwise the team (and
+// its bed to defend while it stands), the team's iron forge to collect at,
+// its item shop to buy wool at, and the enemy beds still standing, nearest
+// first.
 func (g *bedWars) BotPlan(_ *game.Ctx, p game.PlayerHandle) game.BotPlan {
 	pose := p.Pose()
 	if pose.Dead || pose.Gamemode == player.Spectator {
@@ -104,7 +116,10 @@ func (g *bedWars) BotPlan(_ *game.Ctx, p game.PlayerHandle) game.BotPlan {
 	if !g.started || !ok {
 		return game.BotPlan{Idle: true}
 	}
-	plan := game.BotPlan{Home: g.arena.Spawns[id].Position}
+	plan := game.BotPlan{Home: g.arena.Spawns[id].Position, Team: g.teams[id].team.Name}
+	if g.teams[id].bedAlive && id < len(g.arena.BedBlocks) {
+		plan.Defend = append(plan.Defend, g.arena.BedBlocks[id]...)
+	}
 	for _, gen := range g.gens {
 		if gen.TeamID == id && gen.Resource == Iron {
 			plan.Station, plan.HasStation = gen.Pos, true
@@ -147,22 +162,77 @@ func (g *bedWars) BotPlan(_ *game.Ctx, p game.PlayerHandle) game.BotPlan {
 	for _, b := range beds {
 		plan.Targets = append(plan.Targets, b.pos)
 	}
+	plan.Wares = g.botWaresLocked(p, g.kitOfLocked(p.EntityID()))
 	return plan
 }
 
+// botWaresLocked lists the gear a bot may buy: swords and armour by tier,
+// the next pickaxe / axe tier, shears, a bow and arrows, TNT. Caller holds
+// g.mu.
+func (g *bedWars) botWaresLocked(p game.PlayerHandle, k *kit) []game.BotWare {
+	var out []game.BotWare
+	ware := func(key, kind string, tier int, owned bool) {
+		it, ok := findShopItem(key)
+		if !ok {
+			return
+		}
+		out = append(out, game.BotWare{Key: key, Kind: kind, Tier: tier,
+			Currency: it.Cost.item(), Price: it.Price, Owned: owned})
+	}
+	swords := []string{"stone_sword", "iron_sword", "diamond_sword"}
+	for i, key := range swords {
+		owned := false
+		for _, better := range swords[i:] {
+			if p.CountItem("minecraft:"+better) > 0 {
+				owned = true
+			}
+		}
+		ware(key, game.WareSword, i+1, owned)
+	}
+	for i, key := range []string{"chain_armor", "iron_armor", "diamond_armor"} {
+		ware(key, game.WareArmor, i+1, k.armor >= i+1)
+	}
+	for _, tk := range []struct {
+		key, kind string
+		tool      toolKind
+	}{{"pickaxe", game.WarePickaxe, toolPickaxe}, {"axe", game.WareAxe, toolAxe}} {
+		cur := k.toolTierOf(tk.tool)
+		if cur >= maxToolTier(tk.tool) {
+			continue
+		}
+		next := toolTiers[tk.tool][cur]
+		out = append(out, game.BotWare{Key: tk.key, Kind: tk.kind, Tier: cur + 1,
+			Currency: next.Cost.item(), Price: next.Price})
+	}
+	ware("shears", game.WareShears, 0, k.shears)
+	ware("bow", game.WareBow, 0, p.CountItem("minecraft:bow") > 0)
+	ware("arrows", game.WareArrows, 0, false)
+	ware("tnt", game.WareTNT, 0, false)
+	return out
+}
+
 // BotBuy buys the goods with this key as a click in the shop would; true
-// when the bot got them.
+// when the bot paid for them (wool, a sword, an armour tier, a tool tier…).
 func (g *bedWars) BotBuy(_ *game.Ctx, p game.PlayerHandle, key string) bool {
 	it, ok := findShopItem(key)
 	if !ok {
 		return false
 	}
-	ts, _, ok := g.playerState(p)
+	_, k, ok := g.playerState(p)
 	if !ok {
 		return false
 	}
-	goods := resolveGoods(it.Icon, ts.team)
-	before := p.CountItem(goods)
+	currency := it.Cost.item()
+	if it.Kind == kindTool { // the price is the next tier's
+		g.mu.Lock()
+		cur := k.toolTierOf(it.Tool)
+		g.mu.Unlock()
+		if cur >= maxToolTier(it.Tool) {
+			return false
+		}
+		currency = toolTiers[it.Tool][cur].Cost.item()
+	}
+	before := p.CountItem(currency)
 	g.buyItem(p, it, false)
-	return p.CountItem(goods) > before
+	return p.CountItem(currency) < before
 }

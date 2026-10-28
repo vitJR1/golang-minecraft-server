@@ -17,6 +17,8 @@ import (
 //   - Argument after /op /deop /tp /gamemode (player slot): suggest online
 //     player names.
 //   - Argument after /instance: suggest instance IDs.
+//   - /bot: sub-commands, the game's teams and the difficulties for add,
+//     bot names for remove.
 //   - Everything else: no suggestions.
 //
 // Matches always replace the word the cursor is on (last whitespace-
@@ -83,6 +85,8 @@ func (s *Server) Suggestions(c *ClientConnection, text string) (start, length in
 		case 2:
 			candidates = append(effectNames(), "clear")
 		}
+	case cmd == "bot":
+		candidates = s.botSuggestions(c, parts, argIdx)
 	case cmd == "template" || cmd == "templates":
 		if argIdx == 1 {
 			candidates = []string{"list"}

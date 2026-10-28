@@ -9,15 +9,30 @@ import (
 
 // bot_path.go finds a bot's way across the blocks: A* over "feet cells"
 // (the block a standing player's feet are in) with walking, a one-block
-// jump up, drops of up to three blocks, and bridging — stepping out over a
-// gap by placing a block under the next cell, against the block under the
-// current one, the way a player bridges with wool.
+// jump up, drops of up to three blocks, and three moves that need more than
+// legs:
+//
+//   - bridging: out over a gap, a block placed under the next cell against
+//     the one under the current cell, the way a player bridges with wool;
+//   - stairs: up a level where there's nothing to step on — a block placed
+//     in front at foot level (and one under it, if that's void too), then a
+//     jump onto it;
+//   - leaps: a sprint-jump over a gap of up to opts.maxLeap cells.
 
-// routeStep is one cell of a path; Bridge means a block must be placed under
-// it before stepping there.
+// routeStep is one cell of a path. Place lists the blocks to put down,
+// in order, before stepping there; Leap marks a sprint-jump over a gap.
 type routeStep struct {
-	Cell   world.Position
-	Bridge bool
+	Cell  world.Position
+	Place []world.Position
+	Leap  bool
+}
+
+// routeOpts tunes a search.
+type routeOpts struct {
+	maxBlocks int     // blocks the path may place (the bot carries them)
+	maxLeap   int     // widest gap a leap may cross (0 = never leap)
+	leapCost  float64 // extra cost per leap: how much the bot dislikes them
+	budget    int     // nodes to expand
 }
 
 const (
@@ -31,6 +46,8 @@ const (
 	pathCostJump   = 2.0
 	pathCostDrop   = 1.5
 	pathCostBridge = 4.0 // bridging is slow and spends blocks: walk if possible
+	pathCostStair  = 5.0 // a stair step: a block (or two) and a jump
+	pathCostLeap   = 2.0 // base cost of a sprint-jump, plus its length
 	pathMaxDrop    = 3
 	// pathGreed weighs the distance-to-go over the cost so far (weighted
 	// A*): above the bridge cost, the search heads across the void for the
@@ -95,12 +112,14 @@ var (
 
 // pathNode is an A* entry.
 type pathNode struct {
-	cell    world.Position
-	g, f    float64
-	parent  *pathNode
-	bridge  bool
-	bridges int // bridge steps from the start up to here
-	index   int
+	cell   world.Position
+	g, f   float64
+	parent *pathNode
+	place  []world.Position
+	leap   bool
+	blocks int  // blocks placed from the start up to here
+	placed bool // this cell stands on a block the path placed
+	index  int
 }
 
 type nodeHeap []*pathNode
@@ -117,42 +136,39 @@ func (h *nodeHeap) Pop() interface{} {
 }
 
 // findPath searches from start to any cell where goal is true, steering by
-// the distance to aim. maxBridge caps how many bridge steps the path may
-// use; budget caps the nodes expanded. It returns the steps after start, or
-// nil when there's no way within the budget. It only reads blocks, so it
-// may run off the tick goroutine.
-func findPath(at blockAt, start world.Position, aim world.Position, goal func(world.Position) bool, maxBridge, budget int) []routeStep {
+// the distance to aim, within opts. It returns the steps after start, or nil
+// when there's no way within the budget. It only reads blocks, so it may run
+// off the tick goroutine.
+func findPath(at blockAt, start world.Position, aim world.Position, goal func(world.Position) bool, opts routeOpts) []routeStep {
 	h := func(p world.Position) float64 {
 		dx, dy, dz := float64(p.X-aim.X), float64(p.Y-aim.Y), float64(p.Z-aim.Z)
 		return math.Sqrt(dx*dx + dy*dy + dz*dz)
 	}
 	best := map[world.Position]float64{}
 	open := &nodeHeap{}
-	push := func(parent *pathNode, cell world.Position, cost float64, bridge bool) {
-		g, bridges := cost, 0
+	push := func(parent *pathNode, cell world.Position, cost float64, place []world.Position, leap bool) {
+		g, blocks := cost, len(place)
 		if parent != nil {
 			g += parent.g
-			bridges = parent.bridges
+			blocks += parent.blocks
 		}
-		if bridge {
-			bridges++
-		}
-		if bridges > maxBridge {
+		if blocks > opts.maxBlocks {
 			return
 		}
 		if old, ok := best[cell]; ok && old <= g {
 			return
 		}
 		best[cell] = g
-		heap.Push(open, &pathNode{cell: cell, g: g, f: g + pathGreed*h(cell), parent: parent, bridge: bridge, bridges: bridges})
+		heap.Push(open, &pathNode{cell: cell, g: g, f: g + pathGreed*h(cell), parent: parent,
+			place: place, leap: leap, blocks: blocks, placed: len(place) > 0})
 	}
-	push(nil, start, 0, false)
-	for expanded := 0; open.Len() > 0 && expanded < budget; expanded++ {
+	push(nil, start, 0, nil, false)
+	for expanded := 0; open.Len() > 0 && expanded < opts.budget; expanded++ {
 		n := heap.Pop(open).(*pathNode)
 		if goal(n.cell) {
 			var out []routeStep
 			for ; n.parent != nil; n = n.parent {
-				out = append(out, routeStep{Cell: n.cell, Bridge: n.bridge})
+				out = append(out, routeStep{Cell: n.cell, Place: n.place, Leap: n.leap})
 			}
 			for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 				out[i], out[j] = out[j], out[i]
@@ -160,29 +176,48 @@ func findPath(at blockAt, start world.Position, aim world.Position, goal func(wo
 			return out
 		}
 		c := n.cell
+		// The block under c holds a new block from the side: a real block,
+		// or one this path put there.
+		supported := n.placed || world.Collidable(at(c.Add(0, -1, 0)))
 		for _, d := range cardinals {
 			t := c.Add(d[0], 0, d[1])
 			switch {
 			case standable(at, t):
-				push(n, t, pathCostWalk, false)
-			case bridgeable(at, c, t, n.bridge):
-				push(n, t, pathCostBridge, true)
+				push(n, t, pathCostWalk, nil, false)
+			case supported && bridgeable(at, c, t, true):
+				push(n, t, pathCostBridge, []world.Position{t.Add(0, -1, 0)}, false)
 			}
-			// Jump up one block.
-			if up := t.Add(0, 1, 0); headClear(at, c.Add(0, 2, 0)) && standable(at, up) {
-				push(n, up, pathCostJump, false)
+			up := t.Add(0, 1, 0)
+			if headClear(at, c.Add(0, 2, 0)) {
+				if standable(at, up) {
+					// Jump up one block.
+					push(n, up, pathCostJump, nil, false)
+				} else if step, ok := stairStep(at, c, t, supported); ok {
+					push(n, up, pathCostStair+float64(len(step)-1)*pathCostBridge, step, false)
+				}
 			}
 			// Drop down.
 			if cellClear(at, t) && headClear(at, t.Add(0, 1, 0)) && !groundUnder(at, t) {
 				for k := 1; k <= pathMaxDrop; k++ {
 					down := t.Add(0, -k, 0)
 					if standable(at, down) {
-						push(n, down, pathCostDrop+float64(k)*0.5, false)
+						push(n, down, pathCostDrop+float64(k)*0.5, nil, false)
 						break
 					}
 					if !cellClear(at, down) {
 						break
 					}
+				}
+			}
+			// Leap over a gap.
+			for k := 2; k <= opts.maxLeap+1; k++ {
+				land := c.Add(d[0]*k, 0, d[1]*k)
+				if !leapClear(at, c, d, k) {
+					break
+				}
+				if standable(at, land) && standable(at, c.Add(-d[0], 0, -d[1])) { // a run-up behind
+					push(n, land, pathCostLeap+float64(k)+opts.leapCost, nil, true)
+					break
 				}
 			}
 		}
@@ -191,23 +226,60 @@ func findPath(at blockAt, start world.Position, aim world.Position, goal func(wo
 			a, b := c.Add(d[0], 0, 0), c.Add(0, 0, d[1])
 			if standable(at, t) && cellClear(at, a) && headClear(at, a.Add(0, 1, 0)) &&
 				cellClear(at, b) && headClear(at, b.Add(0, 1, 0)) {
-				push(n, t, pathCostDiag, false)
+				push(n, t, pathCostDiag, nil, false)
 			}
 		}
 	}
 	return nil
 }
 
+// stairStep checks a stair step from c toward t (one cell over, same level):
+// the bot stands on a block placed at t, its feet a level up. Returns the
+// blocks to place: t itself, preceded by the block under t when that is
+// void too (and c's support can hold it from the side).
+func stairStep(at blockAt, c, t world.Position, supported bool) ([]world.Position, bool) {
+	up := t.Add(0, 1, 0)
+	if !cellClear(at, up) || !headClear(at, up.Add(0, 1, 0)) {
+		return nil, false
+	}
+	if !world.Replaceable(at(t)) || !headClear(at, t) {
+		return nil, false
+	}
+	below := t.Add(0, -1, 0)
+	if world.Collidable(at(below)) {
+		return []world.Position{t}, true // t sits on solid ground: one block
+	}
+	if !supported || !world.Replaceable(at(below)) {
+		return nil, false
+	}
+	return []world.Position{below, t}, true
+}
+
+// leapClear reports whether the k-1 cells between c and c+k·d are an open
+// gap a sprint-jump flies through: no ground to walk on (else it isn't a
+// gap), and room for the body and the jump's arc.
+func leapClear(at blockAt, c world.Position, d [2]int, k int) bool {
+	for i := 1; i < k; i++ {
+		p := c.Add(d[0]*i, 0, d[1]*i)
+		if !cellClear(at, p) || !headClear(at, p.Add(0, 1, 0)) || !headClear(at, p.Add(0, 2, 0)) || groundUnder(at, p) {
+			return false
+		}
+	}
+	return true
+}
+
 // findRoute prefers walking over building: a walk-only search first — it
 // finds bridges already there, this bot's from an earlier trip or anyone
-// else's — and a search that may bridge only when walking can't get there.
-// Without it the greedy search would happily lay a fresh bridge alongside
-// an existing one.
-func findRoute(at blockAt, start, aim world.Position, goal func(world.Position) bool, maxBridge, budget int) []routeStep {
-	if r := findPath(at, start, aim, goal, 0, budget); r != nil || maxBridge == 0 {
+// else's — and a search that may place blocks only when walking (and
+// leaping) can't get there. Without it the greedy search would happily lay
+// a fresh bridge alongside an existing one.
+func findRoute(at blockAt, start, aim world.Position, goal func(world.Position) bool, opts routeOpts) []routeStep {
+	walk := opts
+	walk.maxBlocks = 0
+	if r := findPath(at, start, aim, goal, walk); r != nil || opts.maxBlocks == 0 {
 		return r
 	}
-	return findPath(at, start, aim, goal, maxBridge, budget)
+	return findPath(at, start, aim, goal, opts)
 }
 
 // resumeAt finds where a route can be picked up again from cell here: the

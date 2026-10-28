@@ -105,3 +105,51 @@ func TestBotBuysWool(t *testing.T) {
 		t.Fatalf("buying wool: red wool %d", bot.CountItem("minecraft:red_wool"))
 	}
 }
+
+// TestBotWaresAndGear: the plan lists gear with what the bot owns marked,
+// the team and its bed; BotBuy pays for a sword, armour and a tool tier.
+func TestBotWaresAndGear(t *testing.T) {
+	g, inst, ctx := harness(t)
+	bot := join(g, inst, ctx, "BOT_Ivy", 7)
+	if err := g.BotJoin(ctx, bot, "red"); err != nil {
+		t.Fatal(err)
+	}
+	ware := func(plan game.BotPlan, key string) (game.BotWare, bool) {
+		for _, w := range plan.Wares {
+			if w.Key == key {
+				return w, true
+			}
+		}
+		return game.BotWare{}, false
+	}
+	plan := g.BotPlan(ctx, bot)
+	if plan.Team != "Red" || len(plan.Defend) != 2 {
+		t.Fatalf("team %q, defend %v", plan.Team, plan.Defend)
+	}
+	for _, key := range []string{"stone_sword", "chain_armor", "pickaxe", "shears", "bow", "tnt"} {
+		if w, ok := ware(plan, key); !ok || w.Owned || w.Price == 0 {
+			t.Fatalf("ware %s: %+v (listed %v)", key, w, ok)
+		}
+	}
+	if g.BotBuy(ctx, bot, "stone_sword") {
+		t.Fatal("bought a sword without iron")
+	}
+	bot.GiveStack(game.ItemStack{Item: "minecraft:iron_ingot", Count: 64})
+	for _, key := range []string{"stone_sword", "chain_armor", "pickaxe"} {
+		if !g.BotBuy(ctx, bot, key) {
+			t.Fatalf("buying %s failed", key)
+		}
+	}
+	plan = g.BotPlan(ctx, bot)
+	for _, key := range []string{"stone_sword", "chain_armor"} {
+		if w, _ := ware(plan, key); !w.Owned {
+			t.Fatalf("%s not marked owned after buying", key)
+		}
+	}
+	if w, ok := ware(plan, "pickaxe"); !ok || w.Tier != 2 {
+		t.Fatalf("next pickaxe tier: %+v", w)
+	}
+	if g.BotBuy(ctx, bot, "chain_armor") {
+		t.Fatal("bought the same armour twice")
+	}
+}

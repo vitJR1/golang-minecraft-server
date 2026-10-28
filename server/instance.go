@@ -247,6 +247,9 @@ type Instance struct {
 
 	// botGuide is the game's game.BotGuide, when it supports bots (/bot).
 	botGuide game.BotGuide
+	// botTeams are the bot teams' shared brains, by team name
+	// (bot_team.go). Touched only on the tick goroutine.
+	botTeams map[string]*teamBrain
 
 	// OnRewritePlace, when set, may swap the block a player is about to
 	// place (game.PlacementRewriter). Runs before OnBlockPlace.
