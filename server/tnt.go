@@ -261,6 +261,9 @@ func (i *Instance) explodeWith(x, y, z, power, knockback float64, igniter *Clien
 			}
 		}
 		_ = c.safeWrite(CbPlayExplosion, explosionPayload(x, y, z, float32(power), records, mx, my, mz))
+		if mx != 0 || my != 0 || mz != 0 {
+			c.giveVelocity(mx, my, mz) // the explosion pushes the client itself
+		}
 	}
 }
 

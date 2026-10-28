@@ -11,6 +11,9 @@ const maxPendingTeleports = 64
 type Teleport struct {
 	ID      int32
 	X, Y, Z float64
+	// Setback marks a rubber-band after a refused move: it puts the player
+	// back where they were, it doesn't land them anywhere new.
+	Setback bool
 }
 
 // Teleports tracks Synchronize Player Position packets until the client's
@@ -26,7 +29,12 @@ type Teleports struct {
 // Begin registers a teleport to (x, y, z) and returns the id to put on the
 // wire. Ids start at 1 and never repeat within a connection (until int32
 // wraps, which takes years of teleports).
-func (t *Teleports) Begin(x, y, z float64) int32 {
+func (t *Teleports) Begin(x, y, z float64) int32 { return t.begin(x, y, z, false) }
+
+// BeginSetback is Begin for a rubber-band (Teleport.Setback).
+func (t *Teleports) BeginSetback(x, y, z float64) int32 { return t.begin(x, y, z, true) }
+
+func (t *Teleports) begin(x, y, z float64, setback bool) int32 {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.next++
@@ -36,7 +44,7 @@ func (t *Teleports) Begin(x, y, z float64) int32 {
 	if len(t.pending) >= maxPendingTeleports {
 		t.pending = t.pending[1:]
 	}
-	t.pending = append(t.pending, Teleport{ID: t.next, X: x, Y: y, Z: z})
+	t.pending = append(t.pending, Teleport{ID: t.next, X: x, Y: y, Z: z, Setback: setback})
 	return t.next
 }
 
@@ -61,4 +69,11 @@ func (t *Teleports) Awaiting() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return len(t.pending) > 0
+}
+
+// Pending returns a copy of the unconfirmed teleports, oldest first.
+func (t *Teleports) Pending() []Teleport {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]Teleport(nil), t.pending...)
 }

@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"math"
 	"testing"
 
 	"minecraft-server/player"
@@ -53,7 +54,8 @@ func TestWalkingIntoWallRefused(t *testing.T) {
 
 func TestPhasingThroughWallInOnePacketRefused(t *testing.T) {
 	inst := wallWorld()
-	c := offlineConn(inst, "Phaser", player.Survival, 1.5, 64, 0.5)
+	// Creative: a 2-block hop would be a speed violation first.
+	c := offlineConn(inst, "Phaser", player.Creative, 1.5, 64, 0.5)
 	setPos(t, c, 3.5, 64, 0.5) // both ends clear, the wall in between
 	if x := c.player.Snapshot().X; x != 1.5 {
 		t.Fatalf("went through the wall: x=%v", x)
@@ -68,9 +70,18 @@ func TestWalkingFlushAgainstWallAndOnPartialBlocks(t *testing.T) {
 	slab, _ := world.BlockByName("minecraft:oak_slab")
 	inst.World.SetBlock(world.Position{X: 0, Y: 64, Z: 2}, slab)
 	c := offlineConn(inst, "Walker", player.Survival, 1.0, 64, 0.5)
-	setPos(t, c, 1.7, 64, 0.5)   // box max x = 2.0: touching, not inside
-	setPos(t, c, 1.7, 64, -1.5)  // along the wall
-	setPos(t, c, 0.5, 64.5, 2.5) // standing on the slab
+	walk := func(x, y, z float64) { // in walking-speed steps
+		s := c.player.Snapshot()
+		n := int(math.Ceil(math.Hypot(x-s.X, z-s.Z) / 0.25))
+		for k := 1; k <= n; k++ {
+			f := float64(k) / float64(n)
+			setPos(t, c, s.X+(x-s.X)*f, s.Y+(y-s.Y)*f, s.Z+(z-s.Z)*f)
+		}
+	}
+	walk(1.7, 64, 0.5)   // box max x = 2.0: touching, not inside
+	walk(1.7, 64, -1.5)  // along the wall
+	walk(0.5, 64, 2.0)   // up to the slab
+	walk(0.5, 64.5, 2.5) // standing on it
 	if s := c.player.Snapshot(); s.X != 0.5 || s.Y != 64.5 {
 		t.Fatalf("legal moves refused: at %v,%v,%v", s.X, s.Y, s.Z)
 	}

@@ -551,6 +551,8 @@ func TestPlayerMovementBroadcasts(t *testing.T) {
 		CbPlayPlayerInfoUpdate, CbPlaySpawnPlayer, CbPlaySetEquipment)
 
 	// Alice sends a position update. Bob should see Teleport Entity for her.
+	// (Creative: a 6-block hop is a test shortcut, not walking speed.)
+	findConn(t, s, "Alice").player.SetGamemode(player.Creative)
 	var move bytes.Buffer
 	move.Write(protocol.WriteDouble(5.5))
 	move.Write(protocol.WriteDouble(70))

@@ -70,9 +70,16 @@ func (c *ClientConnection) acceptChat(text string) bool {
 // onTeleportConfirm handles Confirm Teleportation. A forged id is flagged;
 // it settles nothing, so the movement gate stays closed.
 func (c *ClientConnection) onTeleportConfirm(id int32) {
-	if _, ok := c.ac.Teleports.Confirm(id); !ok {
+	tp, ok := c.ac.Teleports.Confirm(id)
+	if !ok {
 		c.flag("badpackets.teleport", fmt.Sprintf("confirmed unknown teleport id %d", id))
 		return
+	}
+	// A real teleport lands the player somewhere new: the air/fly state
+	// starts over there. A setback only puts them back mid-air — resetting
+	// on it would let a flying client "land" on every rubber-band.
+	if !tp.Setback {
+		c.teleported(tp.Y)
 	}
 	// The vanilla client follows every confirm with an extra position
 	// packet in the same tick; it isn't a timer.
@@ -84,6 +91,18 @@ func (c *ClientConnection) onTeleportConfirm(id int32) {
 // server already overrode, so they're dropped (vanilla does the same).
 func (c *ClientConnection) awaitingTeleport() bool {
 	return c.ac.Teleports.Awaiting()
+}
+
+// giveVelocity records a push the server just sent this player (knockback,
+// Punch, an explosion) in its velocity budget, and follows it with a Ping:
+// the Pong tells when the client applied it (anticheat/velocity.go). Call
+// after the velocity packet is queued, so the Ping comes after it.
+func (c *ClientConnection) giveVelocity(vx, vy, vz float64) {
+	if c == nil || c.player == nil {
+		return
+	}
+	im := c.ac.Velocity.Add(vx, vy, vz)
+	c.sendTransaction(func() { c.ac.Velocity.Confirm(im) })
 }
 
 // sendTransaction sends a Ping numbered in c.ac.Transactions; onConfirm (may

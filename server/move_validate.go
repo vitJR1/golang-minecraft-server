@@ -73,13 +73,20 @@ func (c *ClientConnection) acceptMove(x, y, z float64) bool {
 	tooFast := dx*dx+dy*dy+dz*dz > maxMoveSqPerPacket
 	if !outOfBounds && !tooFast {
 		from, to := anticheat.Vec{X: snap.X, Y: snap.Y, Z: snap.Z}, anticheat.Vec{X: x, Y: y, Z: z}
-		if !c.phased(from, to) {
+		check, detail := "", ""
+		if c.phased(from, to) {
+			// Into or through a full block (movement.go): vanilla's "moved
+			// wrongly".
+			check, detail = "movement.phase", fmt.Sprintf("%.2f,%.2f,%.2f → %.2f,%.2f,%.2f", snap.X, snap.Y, snap.Z, x, y, z)
+		} else {
+			check, detail = c.checkMotion(from, to) // speed, flight
+		}
+		if check == "" {
 			c.moved(from, to)
 			return true
 		}
-		// Into or through a full block (movement.go): vanilla's "moved
-		// wrongly" — back to where the player was.
-		c.flag("movement.phase", fmt.Sprintf("%.2f,%.2f,%.2f → %.2f,%.2f,%.2f", snap.X, snap.Y, snap.Z, x, y, z))
+		// Back to where the player was.
+		c.flag(check, detail)
 		_ = c.sendSetback(snap.X, snap.Y, snap.Z)
 		return false
 	}

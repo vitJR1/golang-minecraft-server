@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"math"
+	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"testing"
 	"time"
@@ -45,6 +46,9 @@ func TestMoveValidAccepted(t *testing.T) {
 	completeOfflineLogin(t, cli, "Walker")
 	cli.startDiscardDrain()
 	conn := findConn(t, s, "Walker")
+	// Creative: these tests are about the sanity limits, not walking speed
+	// (movement.go skips creative's speed/flight checks).
+	conn.player.SetGamemode(player.Creative)
 
 	// Default spawn is (0.5, 67, 0.5); a couple of blocks away is legit.
 	writeSetPos(t, cli, 2.5, 67, 3.5)
@@ -60,6 +64,7 @@ func TestMoveTooFastRejected(t *testing.T) {
 	completeOfflineLogin(t, cli, "Teleporter")
 	ids := cli.startDrain()
 	conn := findConn(t, s, "Teleporter")
+	conn.player.SetGamemode(player.Creative) // sanity limits, not speed
 
 	// 200 blocks in one packet — must be rejected with a setback.
 	writeSetPos(t, cli, 200.5, 67, 0.5)
@@ -79,6 +84,7 @@ func TestMoveOutOfBoundsRejected(t *testing.T) {
 	completeOfflineLogin(t, cli, "Voider")
 	ids := cli.startDrain()
 	conn := findConn(t, s, "Voider")
+	conn.player.SetGamemode(player.Creative) // sanity limits, not speed
 
 	// In-range delta can't reach out-of-bounds coords from spawn, so force
 	// the server-side position near the border first.

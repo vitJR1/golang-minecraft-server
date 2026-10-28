@@ -39,6 +39,8 @@ type State struct {
 	Timer Timer
 	// Move is the server's view of the player's movement (read loop only).
 	Move MoveState
+	// Velocity is the motion the server gave the player (velocity.go).
+	Velocity Velocity
 	// Chat rate-limits chat messages and commands (AllowChat); Drops the
 	// items the player throws (AllowDrop).
 	Chat  RateLimiter
@@ -60,6 +62,41 @@ type MoveState struct {
 	// LastDY is the vertical change of the latest accepted move: below zero
 	// the player is falling (a critical hit needs that).
 	LastDY float64
+
+	// GroundY is the height the player last stood at (HasGround once set);
+	// AirMoves counts moves since; Stalled counts airborne moves that didn't
+	// fall (hover / glide).
+	GroundY   float64
+	HasGround bool
+	AirMoves  int
+	Stalled   int
+
+	// SpeedBuffer accumulates horizontal excess, so one jittery packet
+	// isn't a violation.
+	SpeedBuffer float64
+
+	// IceLeft / BounceLeft count down the moves that still carry the
+	// momentum of ice (BlueIce: it was blue ice) or the launch of a bouncy
+	// block (slime, bed); zero — the zero value — means none.
+	IceLeft    int
+	BlueIce    bool
+	BounceLeft int
+
+	// SpeedLevel / JumpLevel hold an effect's level for a while after it
+	// ends (the client may still be moving with it); *Hold counts down.
+	SpeedLevel, SpeedHold int
+	JumpLevel, JumpHold   int
+}
+
+// Held returns the level to allow for an effect now at cur: a level that
+// just dropped is kept for hold more moves.
+func Held(cur int, level, hold *int, moves int) int {
+	if cur < *level && *hold > 0 {
+		*hold--
+		return *level
+	}
+	*level, *hold = cur, moves
+	return cur
 }
 
 // Reset forgets everything tied to the current world: positions and the

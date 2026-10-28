@@ -138,7 +138,7 @@ func (c *ClientConnection) handleAttack(victim *ClientConnection) {
 		c.damageHeldTool(2)
 	}
 
-	c.applyKnockback(cfg, aSnap, vSnap)
+	c.applyKnockback(cfg, aSnap, vSnap, victim)
 
 	// Red flash + recoil for everyone, including the victim's own client.
 	hurtYaw := yawTo(vSnap.X, vSnap.Z, aSnap.X, aSnap.Z)
@@ -166,7 +166,7 @@ func (c *ClientConnection) handleAttack(victim *ClientConnection) {
 // applyKnockback launches the victim away from the attacker, broadcasting
 // Set Entity Velocity to everyone (the victim's own client included, so its
 // movement actually changes). Sprinting attackers add the w-tap bonus.
-func (c *ClientConnection) applyKnockback(cfg CombatConfig, aSnap, vSnap player.Snapshot) {
+func (c *ClientConnection) applyKnockback(cfg CombatConfig, aSnap, vSnap player.Snapshot, victim *ClientConnection) {
 	strength := cfg.Knockback
 	if c.sprintHit() {
 		strength += cfg.SprintKnockback
@@ -179,6 +179,7 @@ func (c *ClientConnection) applyKnockback(cfg CombatConfig, aSnap, vSnap player.
 	vx, vz := knockbackHoriz(aSnap.X, aSnap.Z, vSnap.X, vSnap.Z, strength)
 	c.instance.Players.Broadcast(CbPlayEntityVelocity,
 		entityVelocityPayload(vSnap.EntityID, vx, float64(cfg.VerticalKnockback), vz), -1)
+	victim.giveVelocity(vx, float64(cfg.VerticalKnockback), vz)
 }
 
 // sprintHit reports whether c's hit earns the sprint-knockback bonus: the

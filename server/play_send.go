@@ -75,7 +75,12 @@ func (c *ClientConnection) sendSetback(x, y, z float64) error {
 // registered in c.ac.Teleports: until the client confirms it, its movement
 // packets predate the teleport and are ignored (see handler_play.go).
 func (c *ClientConnection) writeSyncPos(x, y, z float64, flags byte) error {
-	id := c.ac.Teleports.Begin(x, y, z)
+	var id int32
+	if flags != 0 { // relative rotation = a setback (sendSetback)
+		id = c.ac.Teleports.BeginSetback(x, y, z)
+	} else {
+		id = c.ac.Teleports.Begin(x, y, z)
+	}
 	var buf bytes.Buffer
 	buf.Write(protocol.WriteDouble(x))
 	buf.Write(protocol.WriteDouble(y))

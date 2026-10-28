@@ -212,6 +212,7 @@ func (p *projectile) arrowHit(i *Instance, victim *ClientConnection) {
 		k := punchStrength * float64(p.punch)
 		i.Players.Broadcast(CbPlayEntityVelocity,
 			entityVelocityPayload(s.EntityID, p.vx/speed*k, 0.1, p.vz/speed*k), -1)
+		victim.giveVelocity(p.vx/speed*k, 0.1, p.vz/speed*k)
 	}
 	if killed {
 		victim.die(shooter)

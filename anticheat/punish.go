@@ -101,6 +101,10 @@ var Thresholds = map[string]float64{
 	// not proof, until repeated.
 	"movement.timer": 5,
 	"movement.phase": 5,
+	// Speed and flight are physics approximations with budgets for pushes
+	// and effects; each violation already costs a setback.
+	"movement.speed": 5,
+	"movement.fly":   5,
 }
 
 // Threshold is the detection level for check.
