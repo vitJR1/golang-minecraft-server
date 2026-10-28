@@ -240,6 +240,7 @@ func (s *Server) StartGame(defID string) (*Instance, error) {
 	}
 	id := fmt.Sprintf("%s-%d", def.ID, s.nextInstanceSerial())
 	inst := NewInstance(id, s, def.Template.Instantiate())
+	inst.GameID = def.ID
 	// Ephemeral: normally EndGame removes the round, but if every player
 	// disconnects instead, the janitor collects the leftover.
 	markEphemeral(inst, time.Now())

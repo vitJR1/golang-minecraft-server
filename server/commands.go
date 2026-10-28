@@ -118,6 +118,11 @@ func init() {
 		Run:     cmdBan,
 	})
 	registerCommand(&Command{
+		Name: "leave",
+		Help: "/leave — leave the game for its mode's lobby (BedWars, FFA, …)",
+		Run:  cmdLeave,
+	})
+	registerCommand(&Command{
 		Name:    "ac",
 		NeedsOp: true,
 		Help:    "/ac info <player> | /ac reset <player> [reason] — anticheat status + punishment log",
@@ -621,6 +626,32 @@ func cmdHub(c *ClientConnection, args []string) {
 	if err := c.server.MovePlayer(c, c.server.Hub, 0.5, 67, 0.5); err != nil {
 		_ = c.sendSystemMessage("Hub teleport failed: " + err.Error())
 		return
+	}
+}
+
+// cmdLeave: /leave — out of the running game into the lobby of its mode, the
+// way the hub menu enters a lobby (spectator mode, kit and effects are shed
+// on landing). A game without a lobby, or none at all, falls back to the
+// hub.
+func cmdLeave(c *ClientConnection, _ []string) {
+	c.server.Matchmaker.Dequeue(c)
+	inst := c.instance
+	if inst == c.server.Hub {
+		_ = c.sendSystemMessage("You're not in a game.")
+		return
+	}
+	if _, inLobby := arenasForLobby(inst.ID); inLobby {
+		_ = c.sendSystemMessage("You're not in a game — /hub to go back to the hub.")
+		return
+	}
+	target := c.server.Hub
+	if id, ok := lobbyForGame(inst.GameID); ok {
+		if lobby := c.server.GetInstance(id); lobby != nil {
+			target = lobby
+		}
+	}
+	if err := c.server.MovePlayer(c, target, 0.5, 67, 0.5); err != nil {
+		_ = c.sendSystemMessage("Couldn't leave: " + err.Error())
 	}
 }
 

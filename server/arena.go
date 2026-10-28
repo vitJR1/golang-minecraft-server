@@ -59,6 +59,7 @@ func (s *Server) CreateArena(kind, templateName, name string) (string, error) {
 	// joiner lands in the same instance and is mutually visible. Ephemeral:
 	// the janitor collects it if it sits empty (never joined, or abandoned).
 	inst := NewInstance(name, s, def.Template.Instantiate())
+	inst.GameID = kind
 	markEphemeral(inst, time.Now())
 	s.AddInstance(inst)
 	s.AttachLogic(inst, logic)

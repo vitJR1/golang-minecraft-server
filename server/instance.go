@@ -115,6 +115,12 @@ type Instance struct {
 	World   world.World
 	Players *PlayerList
 
+	// GameID is the game this instance runs: the Definition ID for a
+	// matchmaker round ("bedwars", "ffa"), the arena kind for a created
+	// arena ("bedwars-1x1"); "" for the hub, lobbies and plain instances.
+	// /leave uses it to find the mode's lobby. Set before players join.
+	GameID string
+
 	// ephemeralState carries the janitor's collectability flag + empty
 	// timestamp — see janitor.go.
 	ephemeralState

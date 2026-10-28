@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"minecraft-server/templates"
 	"minecraft-server/world"
+	"strings"
 )
 
 // Lobby IDs. Used both as Instance.ID and as the keys the hub menu
@@ -23,6 +24,18 @@ var lobbyTemplateNames = map[string]string{
 	LobbyFFA:     templates.FFALobby,
 	LobbyBedWars: templates.BedwarsLobby,
 	LobbySkyWars: templates.SkywarsLobby,
+}
+
+// lobbyForGame maps a game ID (a Definition ID or arena kind) to its mode's
+// lobby: every "bedwars…" mode (bedwars, bedwars-1x1, …) to the BedWars
+// lobby, and so on. ok is false for a game with no lobby.
+func lobbyForGame(gameID string) (string, bool) {
+	for _, id := range lobbyIDs {
+		if gameID == id || strings.HasPrefix(gameID, id+"-") {
+			return id, true
+		}
+	}
+	return "", false
 }
 
 // lobbyIDs is the iteration order at startup. Keep stable — the order
