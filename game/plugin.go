@@ -301,6 +301,47 @@ type ForceStarter interface {
 	ForceStart(ctx *Ctx) error
 }
 
+// BotGuide is an optional extension a Logic implements so the server's bots
+// (/bot add) can play it. The bot core — movement, pathfinding with
+// bridging, combat, digging — is the server's; the guide tells a bot which
+// side it's on and what the game wants from it.
+type BotGuide interface {
+	// BotJoin puts the freshly joined bot p on the named team ("green");
+	// an error (unknown or full team) makes the server remove the bot.
+	BotJoin(ctx *Ctx, p PlayerHandle, team string) error
+	// BotEnemy reports whether other is fair game for p right now.
+	BotEnemy(ctx *Ctx, p, other PlayerHandle) bool
+	// BotPlan is what p should be doing; asked a few times a second.
+	BotPlan(ctx *Ctx, p PlayerHandle) BotPlan
+	// BotBuy makes p buy the game's goods with this key (as if clicked in
+	// the shop); false when it couldn't.
+	BotBuy(ctx *Ctx, p PlayerHandle, key string) bool
+}
+
+// BotPlan is a game's instructions to one bot. The zero value (Idle false,
+// no positions) means "just fight what comes".
+type BotPlan struct {
+	// Idle: nothing to do — waiting for the round, dead, spectating.
+	Idle bool
+	// Station is where the bot stands to collect resources; Home is where
+	// it falls back to (both block positions to stand on, i.e. feet).
+	Station, Home world.Position
+	HasStation    bool
+	// Shop is the block the bot walks up to to buy building blocks.
+	Shop    world.Position
+	HasShop bool
+	// BuyKey is the goods BotBuy buys for building; BlockItem the item id it
+	// yields; Currency / Price what one purchase costs; Pack how many
+	// blocks it gives.
+	BuyKey    string
+	BlockItem string
+	Currency  string
+	Price     int
+	Pack      int
+	// Targets are blocks to destroy, nearest first (enemy beds).
+	Targets []world.Position
+}
+
 // PlacementRewriter is an optional extension a Logic (or listener) can
 // implement to change WHAT gets placed: the server calls it before the
 // OnBlockPlace veto with the block the player is about to put down and

@@ -187,6 +187,9 @@ func (s *Server) AttachLogic(inst *Instance, logic game.Logic) *game.Ctx {
 			return ev.OnExplosionBreak(ctx, igniter, pos)
 		}
 	}
+	if bg, ok := logic.(game.BotGuide); ok {
+		inst.botGuide = bg
+	}
 	if fs, ok := logic.(game.ForceStarter); ok {
 		inst.OnForceStart = func() error { return fs.ForceStart(ctx) }
 	}

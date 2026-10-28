@@ -124,6 +124,12 @@ func init() {
 		Run:     cmdFly,
 	})
 	registerCommand(&Command{
+		Name:    "bot",
+		NeedsOp: true,
+		Help:    "/bot add <team> [easy|normal|hard] | remove <name> | list | clear — AI players",
+		Run:     cmdBot,
+	})
+	registerCommand(&Command{
 		Name:    "forcestart",
 		NeedsOp: true,
 		Help:    "/forcestart — start this game's round now, without waiting for players",

@@ -346,6 +346,12 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 	if old == target {
 		return nil
 	}
+	if c.isBot() {
+		// A bot belongs to the game it was added to: when the game sends
+		// its players elsewhere (round over), the bot leaves the server.
+		s.RemoveBot(c)
+		return nil
+	}
 
 	// Capture UUIDs we'll need to clear from the client's tab list AFTER
 	// LeaveAndAnnounce removes c — so include c itself.
@@ -620,6 +626,10 @@ type ClientConnection struct {
 	// leaves the cursor without reaching a slot) was dropped and becomes an
 	// item entity — see drop.go. Only touched from the readLoop goroutine.
 	cursor itemStack
+
+	// bot is set when this connection is a server-driven bot (bot.go):
+	// no socket, an AI moves and acts for it.
+	bot *bot
 
 	// canFly is /fly's permission; flyGrace keeps the movement checks off
 	// until the client confirmed flight was taken away (fly.go).

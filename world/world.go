@@ -8,6 +8,11 @@ type Position struct {
 	X, Y, Z int
 }
 
+// Add returns p offset by (dx, dy, dz).
+func (p Position) Add(dx, dy, dz int) Position {
+	return Position{X: p.X + dx, Y: p.Y + dy, Z: p.Z + dz}
+}
+
 // BlockChange is one (position, block) pair for bulk updates such as
 // Instance.SetBlocks: a region fill or a schematic paste is expressed as a
 // slice of these, applied and broadcast together.

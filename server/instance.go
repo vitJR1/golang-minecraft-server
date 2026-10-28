@@ -245,6 +245,9 @@ type Instance struct {
 	// (game.ForceStarter, /forcestart).
 	OnForceStart func() error
 
+	// botGuide is the game's game.BotGuide, when it supports bots (/bot).
+	botGuide game.BotGuide
+
 	// OnRewritePlace, when set, may swap the block a player is about to
 	// place (game.PlacementRewriter). Runs before OnBlockPlace.
 	OnRewritePlace func(c *ClientConnection, pos world.Position, blk world.Block) world.Block
@@ -302,6 +305,7 @@ func NewInstance(id string, srv *Server, w world.World) *Instance {
 	i.OnTick(i.itemTick)
 	i.OnTick(i.tntTick)
 	i.OnTick(i.anticheatTick)
+	i.OnTick(i.botTick)
 	i.initListeners()
 	go i.tickLoop()
 	return i

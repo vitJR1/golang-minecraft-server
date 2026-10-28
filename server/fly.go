@@ -85,6 +85,10 @@ func (c *ClientConnection) dropFlight() {
 // endFlightGrace ends the exemption once the client confirms it has seen
 // the change (the Ping goes out after the packet that took flight away).
 func (c *ClientConnection) endFlightGrace() {
+	if c.isBot() {
+		c.flyGrace.Store(c.canFly.Load()) // no client to confirm: done at once
+		return
+	}
 	c.sendTransaction(func() {
 		if !c.canFly.Load() {
 			c.flyGrace.Store(false)

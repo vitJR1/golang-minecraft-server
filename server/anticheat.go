@@ -101,6 +101,10 @@ func (c *ClientConnection) giveVelocity(vx, vy, vz float64) {
 	if c == nil || c.player == nil {
 		return
 	}
+	if c.isBot() {
+		c.bot.pushVelocity(vx, vy, vz) // its server-side physics applies it
+		return
+	}
 	im := c.ac.Velocity.Add(vx, vy, vz)
 	c.sendTransaction(func() {
 		c.ac.Velocity.Confirm(im)
@@ -113,6 +117,9 @@ func (c *ClientConnection) giveVelocity(vx, vy, vz float64) {
 // everything sent before it. A client sitting on MaxOutstanding Pings is
 // kicked: it answers keep-alives but hides what it has seen.
 func (c *ClientConnection) sendTransaction(onConfirm func()) {
+	if c.isBot() {
+		return // nothing would answer: a bot has no client
+	}
 	var tick uint64
 	if c.instance != nil {
 		tick = c.instance.Tick()

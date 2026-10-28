@@ -1,6 +1,9 @@
 package world
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // collision.go classifies blocks for movement checks (server/movement.go).
 // Two predicates, each biased toward the side that can't wrong a vanilla
@@ -127,4 +130,55 @@ func Collidable(b Block) bool {
 		}
 	}
 	return true
+}
+
+// CollisionHeight is the vertical extent of b's collision box inside its
+// cell, as offsets from the cell's floor: lo..hi (a bottom slab 0..0.5, a
+// top slab 0.5..1, a bed 0..0.5625, a fence 0..1.5). ok is false for a
+// block without collision. Horizontally the box is taken as the whole cell
+// — exact for the blocks maps are built from, a fair wall for the rest.
+// Used by the server-side physics of bots (server/bot_physics.go).
+func CollisionHeight(b Block) (lo, hi float64, ok bool) {
+	if !Collidable(b) {
+		return 0, 0, false
+	}
+	if FullCube(b) {
+		return 0, 1, true
+	}
+	n := strings.TrimPrefix(b.Name, "minecraft:")
+	props := StateProperties(b.Name, b.StateID)
+	switch {
+	case strings.HasSuffix(n, "_slab"):
+		switch props["type"] {
+		case "top":
+			return 0.5, 1, true
+		case "double":
+			return 0, 1, true
+		}
+		return 0, 0.5, true
+	case strings.HasSuffix(n, "_bed"):
+		return 0, 0.5625, true
+	case strings.HasSuffix(n, "carpet"):
+		return 0, 0.0625, true
+	case n == "snow":
+		layers := 1
+		if l, err := strconv.Atoi(props["layers"]); err == nil {
+			layers = l
+		}
+		if layers <= 1 {
+			return 0, 0, false // one layer has no collision
+		}
+		return 0, float64(layers-1) / 8, true
+	case strings.HasSuffix(n, "_fence"), strings.HasSuffix(n, "_fence_gate"), strings.HasSuffix(n, "_wall"):
+		return 0, 1.5, true
+	case strings.Contains(n, "chest"):
+		return 0, 0.875, true
+	case n == "soul_sand", n == "mud":
+		return 0, 0.875, true
+	case n == "farmland", n == "dirt_path":
+		return 0, 0.9375, true
+	case strings.Contains(n, "pressure_plate"), n == "ladder", strings.HasSuffix(n, "_trapdoor"):
+		return 0, 0, false // too thin to stand in the way of a walk
+	}
+	return 0, 1, true
 }

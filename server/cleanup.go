@@ -41,8 +41,11 @@ func (c *ClientConnection) cleanup() {
 		c.instance.LeaveAndAnnounce(c)
 	}
 
-	addr := c.conn.RemoteAddr().String()
-	c.conn.Close()
+	addr := "bot"
+	if c.conn != nil { // bots have no socket
+		addr = c.conn.RemoteAddr().String()
+		c.conn.Close()
+	}
 	close(c.done)
 	slog.Info("connection closed", "addr", addr, "player", c.playerName)
 }
