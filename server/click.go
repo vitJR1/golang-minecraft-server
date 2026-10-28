@@ -586,11 +586,16 @@ func stackEqual(a, b itemStack) bool {
 // every slot it reported holds what it says, every slot that changed was
 // reported, and the cursor agrees.
 func (c clickClaim) matches(before []itemStack, v *clickView) bool {
-	if !stackEqual(c.cursor, v.cursor) {
+	// NoDrop is server-only: the client's copy never carries it.
+	seen := func(claimed, server itemStack) bool {
+		claimed.NoDrop = server.NoDrop
+		return stackEqual(claimed, server)
+	}
+	if !seen(c.cursor, v.cursor) {
 		return false
 	}
 	for i, st := range c.slots {
-		if !v.valid(i) || !stackEqual(st, v.slots[i]) {
+		if !v.valid(i) || !seen(st, v.slots[i]) {
 			return false
 		}
 	}
@@ -645,7 +650,7 @@ func (c *ClientConnection) clickChest(store chestStore, slot, button, mode int, 
 		v.slots = append(v.slots, c.inv.slots[mainInvStart:hotbarStart+9]...)
 		before = append([]itemStack(nil), v.slots...)
 		v.click(slot, button, mode, &c.drag)
-		if ok = c.dropsAllowed(v.drops); !ok {
+		if ok = c.dropsAllowed(v.drops) && !storesUndroppable(before[:chestSlotCount], v.slots[:chestSlotCount]); !ok {
 			return
 		}
 		copy(chest[:], v.slots[:chestSlotCount])
@@ -664,12 +669,12 @@ func (c *ClientConnection) clickChest(store chestStore, slot, button, mode int, 
 	c.equipmentChanged()
 }
 
-// dropsAllowed refuses a click that would throw a hub UI item (navigator,
-// arena selector) — those never leave the inventory — or exceed the drop
-// budget (anticheat.DropRate); the caller re-sends the window.
+// dropsAllowed refuses a click that would throw an undroppable item (NoDrop,
+// hub UI items) or exceed the drop budget (anticheat.DropRate); the caller
+// re-sends the window.
 func (c *ClientConnection) dropsAllowed(drops []itemStack) bool {
 	for _, st := range drops {
-		if st.Name == navigatorName || st.Name == selectorName {
+		if st.undroppable() {
 			return false
 		}
 	}
@@ -679,6 +684,17 @@ func (c *ClientConnection) dropsAllowed(drops []itemStack) bool {
 		}
 	}
 	return true
+}
+
+// storesUndroppable reports whether a click moved an undroppable stack into
+// the chest: a chest slot holds one now that didn't hold that stack before.
+func storesUndroppable(before, after []itemStack) bool {
+	for i := range after {
+		if after[i].undroppable() && !stackEqual(before[i], after[i]) {
+			return true
+		}
+	}
+	return false
 }
 
 // throwAll throws every dropped stack from the player's eyes.

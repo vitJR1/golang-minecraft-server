@@ -246,6 +246,10 @@ type ItemStack struct {
 	Potion       string         // potion id for minecraft:potion ("minecraft:swiftness")
 	Damage       int            // tool wear
 	Slot         int            // window-0 slot index, Inventory() only
+	// NoDrop keeps the stack in the player's inventory: it can't be thrown
+	// (Q, from a window, off the cursor) nor put into a chest. A server-side
+	// mark — the client never sees it and can't forge it.
+	NoDrop bool
 }
 
 // Empty reports whether the stack is an empty slot.

@@ -31,7 +31,7 @@ func TestLobbyWaitsThenStarts(t *testing.T) {
 		t.Error("waiting player must not have a team")
 	}
 	// No kit — only the team selector wool, and flight while waiting.
-	if st := a.slot(36); st.Item != "minecraft:white_wool" || st.Name != nameTeamSelector {
+	if st := a.slot(36); st.Item != "minecraft:white_wool" || st.Name != nameTeamSelector || !st.NoDrop {
 		t.Errorf("waiting player's first slot = %+v, want the team selector", st)
 	}
 	if !a.canFly() {

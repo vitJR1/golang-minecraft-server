@@ -47,14 +47,24 @@ type itemStack struct {
 	// Glint forces the enchanted shimmer without a real enchantment (menu
 	// icons): written as a hidden dummy enchantment.
 	Glint bool
+	// NoDrop: the stack can't leave the player's inventory (game.ItemStack.
+	// NoDrop). Server-only, never written to the item's NBT.
+	NoDrop bool
 }
 
 func (s itemStack) empty() bool { return s.Count == 0 }
 
+// undroppable reports whether the stack must stay in the player's
+// inventory: marked NoDrop by a game, or a hub UI item (navigator, arena
+// selector).
+func (s itemStack) undroppable() bool {
+	return !s.empty() && (s.NoDrop || s.Name == navigatorName || s.Name == selectorName)
+}
+
 // sameKind reports whether two stacks can merge: same item and identical
 // display / enchantment / potion data (count and wear aside).
 func (s itemStack) sameKind(o itemStack) bool {
-	if s.ID != o.ID || s.Name != o.Name || s.Color != o.Color || s.Potion != o.Potion || s.Glint != o.Glint {
+	if s.ID != o.ID || s.Name != o.Name || s.Color != o.Color || s.Potion != o.Potion || s.Glint != o.Glint || s.NoDrop != o.NoDrop {
 		return false
 	}
 	if s.Damage != o.Damage || len(s.Lore) != len(o.Lore) || len(s.Enchantments) != len(o.Enchantments) {

@@ -20,11 +20,13 @@ const nameTeamSelector = "§fSelect team"
 // teamMenuTitle is the selector menu's title.
 const teamMenuTitle = "Select team"
 
-// giveTeamSelector puts the selector wool in the first hotbar slot.
+// giveTeamSelector puts the selector wool in the first hotbar slot; it
+// can't be dropped (or stashed in a chest).
 func giveTeamSelector(p game.PlayerHandle) {
 	p.SetSlot(game.SlotHotbar0, game.ItemStack{
 		Item: "minecraft:white_wool", Count: 1, Name: nameTeamSelector,
-		Lore: []string{"§7Right-click to pick your team"},
+		Lore:   []string{"§7Right-click to pick your team"},
+		NoDrop: true,
 	})
 }
 

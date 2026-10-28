@@ -29,8 +29,9 @@ const (
 func (c *ClientConnection) dropHeld(all bool) {
 	slot := int16(hotbarStart) + int16(c.heldSlot.Load())
 	st := c.inv.get(slot)
-	if st.empty() || st.Name == navigatorName || st.Name == selectorName {
-		return // hub UI items aren't droppable
+	if st.empty() || st.undroppable() {
+		_ = c.sendSetSlot(0, slot, st) // undo the client's predicted drop
+		return
 	}
 	if !c.ac.AllowDrop(time.Now()) {
 		// Over the drop budget: keep the item, undo the client's prediction.
@@ -76,5 +77,12 @@ func (c *ClientConnection) dropCursor() {
 	}
 	st := c.cursor
 	c.cursor = itemStack{}
+	if st.undroppable() {
+		// Back into the inventory instead of onto the ground.
+		if left := c.giveStack(st); left > 0 {
+			c.cursor = withCount(st, left) // nowhere to go: keep it carried
+		}
+		return
+	}
 	c.throwStack(st)
 }

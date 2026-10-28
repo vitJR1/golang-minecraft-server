@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"minecraft-server/game"
 	"testing"
 
 	"minecraft-server/player"
@@ -143,5 +144,92 @@ func TestThrownItemFliesForwardAndSlides(t *testing.T) {
 	}
 	if it.vx != 0 || it.vz != 0 {
 		t.Errorf("item should have stopped sliding, got v=(%v,%v)", it.vx, it.vz)
+	}
+}
+
+// noDropWool is a game-marked undroppable stack (BedWars' team selector).
+func noDropWool(t *testing.T) itemStack {
+	t.Helper()
+	id, ok := world.ItemByName("minecraft:white_wool")
+	if !ok {
+		t.Fatal("white_wool not registered")
+	}
+	return itemStack{ID: id, Count: 1, Name: "§fSelect team", NoDrop: true}
+}
+
+func TestNoDropItemStaysInInventory(t *testing.T) {
+	inst := bareInstance(New(), tntWorld())
+	c := offlineConn(inst, "Keeper", player.Adventure, 0.5, 64, 0.5)
+	wool := noDropWool(t)
+	c.inv.set(hotbarStart, wool)
+
+	dropAction(t, c, 4)                                 // Q
+	dropAction(t, c, 3)                                 // ctrl+Q
+	clickIn(t, c, 0, int16(hotbarStart), 1, clickThrow) // drop key over the slot
+	if !stackEqual(c.inv.get(hotbarStart), wool) {
+		t.Fatalf("selector left its slot: %+v", c.inv.get(hotbarStart))
+	}
+
+	// Picked up onto the cursor and clicked outside: refused.
+	clickIn(t, c, 0, int16(hotbarStart), 0, clickPickup)
+	if !stackEqual(c.cursor, wool) {
+		t.Fatalf("pickup onto the cursor: %+v", c.cursor)
+	}
+	clickIn(t, c, 0, slotOutside, 0, clickPickup)
+	if !stackEqual(c.cursor, wool) {
+		t.Fatal("thrown from the cursor")
+	}
+	// Closing the inventory with it on the cursor puts it back.
+	var p bytes.Buffer
+	p.WriteByte(0)
+	play(t, c, SbPlayCloseContainer, p.Bytes())
+	if !c.cursor.empty() || c.countItem(wool.ID) != 1 {
+		t.Fatalf("after close: cursor %+v, in inventory %d", c.cursor, c.countItem(wool.ID))
+	}
+	if n := len(itemsIn(inst)); n != 0 {
+		t.Fatalf("%d item entities on the ground", n)
+	}
+}
+
+func TestNoDropItemCantGoIntoChest(t *testing.T) {
+	inst := bareInstance(New(), world.NewMemoryWorld())
+	c := offlineConn(inst, "Stasher", player.Survival, 0, 64, 0)
+	wool := noDropWool(t)
+	c.inv.set(hotbarStart, wool)
+	pos := world.Position{X: 1, Y: 64, Z: 0}
+	c.openBlockChest(pos)
+	drain(c)
+
+	clickIn(t, c, menuWindowID, chestHotbar0, 0, clickPickup) // onto the cursor
+	clickIn(t, c, menuWindowID, 0, 0, clickPickup)            // into chest slot 0
+	clickIn(t, c, menuWindowID, chestHotbar0, 0, clickQuickMove)
+	if got := inst.chestAt(pos); !got[0].empty() {
+		t.Fatalf("selector stashed in the chest: %+v", got[0])
+	}
+	if c.countItem(wool.ID)+int(c.cursor.Count) != 1 {
+		t.Fatal("selector lost")
+	}
+}
+
+func TestNoDropDoesNotMergeWithPlainStack(t *testing.T) {
+	wool := noDropWool(t)
+	plain := wool
+	plain.NoDrop = false
+	if wool.sameKind(plain) {
+		t.Fatal("a NoDrop stack would merge with (and lend its mark to) plain wool")
+	}
+}
+
+// TestGameNoDropReachesTheModel: a game's NoDrop stack keeps the mark in the
+// server's inventory model, and reads back with it.
+func TestGameNoDropReachesTheModel(t *testing.T) {
+	inst := bareInstance(New(), world.NewMemoryWorld())
+	c := offlineConn(inst, "Bridged", player.Adventure, 0, 64, 0)
+	playerBridge{conn: c}.SetSlot(game.SlotHotbar0, game.ItemStack{Item: "minecraft:white_wool", Count: 1, NoDrop: true})
+	if !c.inv.get(hotbarStart).NoDrop {
+		t.Fatal("NoDrop lost on the way in")
+	}
+	if inv := (playerBridge{conn: c}).Inventory(); len(inv) == 0 || !inv[0].NoDrop {
+		t.Fatalf("NoDrop lost on the way out: %+v", inv)
 	}
 }

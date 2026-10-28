@@ -21,7 +21,7 @@ func toGameStack(st itemStack, slot int) game.ItemStack {
 	name, _ := world.ItemName(st.ID)
 	out := game.ItemStack{
 		Item: name, Count: int(st.Count), Name: st.Name, Color: st.Color,
-		Potion: st.Potion, Damage: st.Damage, Slot: slot,
+		Potion: st.Potion, Damage: st.Damage, Slot: slot, NoDrop: st.NoDrop,
 	}
 	if len(st.Lore) > 0 {
 		out.Lore = append([]string(nil), st.Lore...)
@@ -49,7 +49,7 @@ func fromGameStack(gs game.ItemStack) (itemStack, bool) {
 	if count > 64 {
 		count = 64
 	}
-	st := itemStack{ID: id, Count: byte(count), Name: gs.Name, Color: gs.Color, Potion: gs.Potion, Damage: gs.Damage}
+	st := itemStack{ID: id, Count: byte(count), Name: gs.Name, Color: gs.Color, Potion: gs.Potion, Damage: gs.Damage, NoDrop: gs.NoDrop}
 	if len(gs.Lore) > 0 {
 		st.Lore = append([]string(nil), gs.Lore...)
 	}
