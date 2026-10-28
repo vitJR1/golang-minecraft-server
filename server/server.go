@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"minecraft-server/anticheat"
 	"minecraft-server/ban"
 	"minecraft-server/cfg"
 	"minecraft-server/db"
@@ -66,6 +67,11 @@ type Server struct {
 	// ChatModerator, when non-nil, gets a chance to inspect every chat
 	// line before it broadcasts. See chat_moderation.go for the contract.
 	ChatModerator ChatModerator
+	// TickTransactions sends every player a Ping each instance tick
+	// (anticheat.go), numbering ticks for lag-compensated checks. Off in
+	// New() — test clients often don't read their socket, and the per-tick
+	// Pings would fill the send queue; main.go turns it on.
+	TickTransactions bool
 
 	// DB and Redis are the optional persistence/cache backends, wired up in
 	// main from the POSTGRES_* / REDIS_* env config. Either may be nil when
@@ -366,8 +372,10 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 	//    so sendWorldChunks reads the right blocks.
 	c.instance = target
 
-	// 5. Reset the player's position to spawn.
+	// 5. Reset the player's position to spawn. The anticheat history and
+	//    transaction ticks belonged to the old instance's timeline.
 	c.player.MoveTo(x, y, z, false)
+	c.ac.Reset()
 
 	// 6. Stream the spawn-position triplet (compass + view center +
 	//    start-waiting-for-chunks), THEN chunks → blocks → SyncPos.
@@ -386,7 +394,7 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 	if err := c.sendWorldChunks(); err != nil {
 		return fmt.Errorf("world chunks: %w", err)
 	}
-	if err := c.sendSyncPlayerPosition(x, y, z, 1); err != nil {
+	if err := c.sendSyncPlayerPosition(x, y, z); err != nil {
 		return fmt.Errorf("sync pos: %w", err)
 	}
 	// Respawn reset the client's attributes — re-send the cooldown-bar
@@ -622,11 +630,11 @@ type ClientConnection struct {
 	// goroutine, so no lock.
 	inv playerInventory
 
-	// sprinting tracks whether the client is currently sprinting, fed by the
-	// Player Command packet (start/stop sprinting actions). The combat code
-	// reads it to apply the extra sprint knockback ("w-tap") from 1.9. Atomic
-	// because the writer (readLoop) and readers (attack handling) can race.
-	sprinting atomic.Bool
+	// ac is the anticheat state (anticheat/): pending teleports, Ping/Pong
+	// transactions, per-tick position history, violation levels, packet
+	// budget and the client's sprint/sneak input (Player Command; combat
+	// reads Sprinting for the 1.9 "w-tap" knockback bonus).
+	ac anticheat.State
 
 	// sidebar is the scoreboard sidebar this client shows (nil = none);
 	// sidebarMu guards it. See sidebar.go.
@@ -827,7 +835,7 @@ func (c *ClientConnection) sendPlayPackets() error {
 		{"Start Waiting For Chunks", c.sendStartWaitingForChunks},
 		{"World Chunks", c.sendWorldChunks},
 		{"Sync Player Position", func() error {
-			return c.sendSyncPlayerPosition(spawn.X, spawn.Y, spawn.Z, 1)
+			return c.sendSyncPlayerPosition(spawn.X, spawn.Y, spawn.Z)
 		}},
 		// After SyncPos so loading-terrain dismisses first. Declare
 		// Commands is a one-shot per-connection — Respawn (cross-instance

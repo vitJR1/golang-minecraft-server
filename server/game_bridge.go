@@ -121,7 +121,7 @@ func (b playerBridge) SendMessage(text string) {
 
 func (b playerBridge) Teleport(x, y, z float64) {
 	b.conn.player.MoveTo(x, y, z, false)
-	_ = b.conn.sendSyncPlayerPosition(x, y, z, 1)
+	_ = b.conn.sendSyncPlayerPosition(x, y, z)
 	b.conn.broadcastEntityTeleport()
 }
 

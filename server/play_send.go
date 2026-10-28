@@ -58,17 +58,32 @@ func (c *ClientConnection) sendLoginPlay() error {
 	return c.safeWrite(CbPlayLogin, buf.Bytes())
 }
 
-// sendSyncPlayerPosition writes Synchronize Player Position (0x3C). The
-// teleportID echoes back in the next Confirm Teleportation packet.
-func (c *ClientConnection) sendSyncPlayerPosition(x, y, z float64, teleportID int32) error {
+// sendSyncPlayerPosition writes Synchronize Player Position (0x3C): an
+// absolute teleport, rotation reset to yaw 0 / pitch 0.
+func (c *ClientConnection) sendSyncPlayerPosition(x, y, z float64) error {
+	return c.writeSyncPos(x, y, z, 0)
+}
+
+// sendSetback snaps the client back to (x, y, z) after a rejected move,
+// keeping its view direction: the yaw/pitch flag bits (0x08 | 0x10) make the
+// zero rotation relative, so a rubber-band doesn't spin the camera.
+func (c *ClientConnection) sendSetback(x, y, z float64) error {
+	return c.writeSyncPos(x, y, z, 0x08|0x10)
+}
+
+// writeSyncPos sends Synchronize Player Position under a fresh teleport id
+// registered in c.ac.Teleports: until the client confirms it, its movement
+// packets predate the teleport and are ignored (see handler_play.go).
+func (c *ClientConnection) writeSyncPos(x, y, z float64, flags byte) error {
+	id := c.ac.Teleports.Begin(x, y, z)
 	var buf bytes.Buffer
 	buf.Write(protocol.WriteDouble(x))
 	buf.Write(protocol.WriteDouble(y))
 	buf.Write(protocol.WriteDouble(z))
 	buf.Write(protocol.WriteFloat(0)) // yaw
 	buf.Write(protocol.WriteFloat(0)) // pitch
-	buf.WriteByte(0)                  // flags (all absolute)
-	protocol.WriteVarInt32ToBuffer(&buf, teleportID)
+	buf.WriteByte(flags)
+	protocol.WriteVarInt32ToBuffer(&buf, id)
 	return c.safeWrite(CbPlaySyncPos, buf.Bytes())
 }
 

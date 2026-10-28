@@ -1,8 +1,11 @@
 package server
 
 import (
+	"fmt"
 	"log/slog"
 	"math"
+
+	"minecraft-server/anticheat"
 )
 
 // Movement sanity limits. The client is fully trusted about physics
@@ -60,10 +63,9 @@ func (c *ClientConnection) kickInvalidMove() {
 // sent, snapping the client back (vanilla's "rubber-band"); the caller
 // must NOT apply the move.
 //
-// False positives are possible right after a server-side teleport (the
-// client's in-flight packets still reference the old position) — the
-// rubber-band converges to the server position either way, so that window
-// resolves itself within one round-trip.
+// Packets sent before the client confirmed a server teleport never get here
+// (the handler drops them while c.awaitingTeleport()), so the old position
+// in flight can't trip this check.
 func (c *ClientConnection) acceptMove(x, y, z float64) bool {
 	snap := c.player.Snapshot()
 	dx, dy, dz := x-snap.X, y-snap.Y, z-snap.Z
@@ -79,6 +81,17 @@ func (c *ClientConnection) acceptMove(x, y, z float64) bool {
 		"from", [3]float64{snap.X, snap.Y, snap.Z},
 		"to", [3]float64{x, y, z},
 		"out_of_bounds", outOfBounds)
-	_ = c.sendSyncPlayerPosition(snap.X, snap.Y, snap.Z, 1)
+	_ = c.sendSetback(snap.X, snap.Y, snap.Z)
+	return false
+}
+
+// acceptLook validates a rotation packet's pitch: the vanilla client clamps
+// it to ±90°, so anything beyond is a modified client (derp / spin modules).
+// The packet is dropped and flagged; yaw is free to wrap.
+func (c *ClientConnection) acceptLook(pitch float32) bool {
+	if anticheat.ValidPitch(pitch) {
+		return true
+	}
+	c.flag("badpackets.pitch", fmt.Sprintf("pitch %.1f", pitch))
 	return false
 }

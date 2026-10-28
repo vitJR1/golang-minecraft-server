@@ -19,6 +19,26 @@ func writeSetPos(t *testing.T, cli *testClient, x, y, z float64) {
 	cli.write(t, SbPlaySetPos, p.Bytes())
 }
 
+// awaitSetback waits for the server's rubber-band Synchronize Player
+// Position. startDrain has already confirmed it when the id comes through.
+func awaitSetback(t *testing.T, ids <-chan int) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case id, ok := <-ids:
+			if !ok {
+				t.Fatal("connection closed before the setback")
+			}
+			if id == CbPlaySyncPos {
+				return
+			}
+		case <-deadline:
+			t.Fatal("no setback sent")
+		}
+	}
+}
+
 func TestMoveValidAccepted(t *testing.T) {
 	s := New()
 	cli := pipeClientOn(t, s)
@@ -38,13 +58,15 @@ func TestMoveTooFastRejected(t *testing.T) {
 	s := New()
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Teleporter")
-	cli.startDiscardDrain()
+	ids := cli.startDrain()
 	conn := findConn(t, s, "Teleporter")
 
-	// 200 blocks in one packet — must be rejected (position unchanged).
+	// 200 blocks in one packet — must be rejected with a setback.
 	writeSetPos(t, cli, 200.5, 67, 0.5)
-	// A follow-up move that is only in range from the ORIGINAL spawn proves
-	// the hack packet was processed AND ignored (packets are sequential).
+	awaitSetback(t, ids)
+	// The drain confirmed the setback (like a real client) before we get
+	// here. A follow-up move that is only in range from the ORIGINAL spawn
+	// proves the hack packet was ignored.
 	writeSetPos(t, cli, 3.5, 67, 0.5)
 	waitFor(t, time.Second, func() bool {
 		return conn.player.Snapshot().X == 3.5
@@ -55,13 +77,14 @@ func TestMoveOutOfBoundsRejected(t *testing.T) {
 	s := New()
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Voider")
-	cli.startDiscardDrain()
+	ids := cli.startDrain()
 	conn := findConn(t, s, "Voider")
 
 	// In-range delta can't reach out-of-bounds coords from spawn, so force
 	// the server-side position near the border first.
 	conn.player.MoveTo(maxWorldXZ-1, 67, 0.5, true)
 	writeSetPos(t, cli, maxWorldXZ+5, 67, 0.5)
+	awaitSetback(t, ids)
 	writeSetPos(t, cli, maxWorldXZ-4, 67, 0.5) // legit follow-up
 	waitFor(t, time.Second, func() bool {
 		return conn.player.Snapshot().X == maxWorldXZ-4

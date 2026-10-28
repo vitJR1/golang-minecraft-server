@@ -361,7 +361,7 @@ func (p *projectile) teleportThrower() {
 		return
 	}
 	c.player.MoveTo(p.x, p.y, p.z, false)
-	_ = c.sendSyncPlayerPosition(p.x, p.y, p.z, 1)
+	_ = c.sendSyncPlayerPosition(p.x, p.y, p.z)
 	c.broadcastEntityTeleport()
 }
 

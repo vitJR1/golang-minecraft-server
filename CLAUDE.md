@@ -40,6 +40,13 @@ player/        Player gameplay entity (EntityID, Name, UUID, position,
 chunk/         Chunk-level data builders (empty chunk sections,
                heightmaps NBT).
 encryption/    AES-128 CFB8 cipher + net.Conn wrapper.
+anticheat/     Per-connection anticheat bookkeeping, no server import:
+               Teleports (pending Sync Position ids), Transactions
+               (Ping/Pong numbering → last tick the client saw, RTT),
+               History (64-tick position ring for lag compensation),
+               Violations (per-check VL with decay + recent reasons),
+               RateLimiter (packet budget), validators. Plan and audit:
+               anticheat.md.
 mojang/        sessionserver.mojang.com client (hasJoined endpoint).
 ban/           Player-ban Store interface + MemoryStore / FileStore
                (banlist.json, saved on every change). The Postgres
@@ -170,6 +177,8 @@ After LoginSuccess + state transition to play, `sendPlayPackets` (in `server.go`
 
 ## Gotchas
 
+- **Movement is ignored until the client confirms the server's teleport** (`server/anticheat.go`, like vanilla's `awaitingPositionFromClient`). Every Synchronize Player Position goes through `sendSyncPlayerPosition(x, y, z)` / `sendSetback` (rubber-band, relative rotation so the camera doesn't snap), which take a fresh id from `c.ac.Teleports`; Set Pos / Pos+Rot / Rot packets are dropped while any is unconfirmed. **Never write Cb 0x3C by hand** — an untracked id is never confirmed by anything we wait for, and an id we wait for that never went out freezes the player. Test clients answer like vanilla: `testClient.autoReply` (called from `read`, `startDrain`, `startDiscardDrain`) sends Confirm Teleportation for every 0x3C and Pong for every Ping; a test that moves the player right after a server teleport must wait for that 0x3C first (see `awaitSetback` in `move_validate_test.go`).
+- **Anticheat state lives in `c.ac` (`anticheat.State`)**: the player's sprint/sneak input (`c.ac.Sprinting` / `Sneaking`), per-tick history (`Instance.anticheatTick`), Ping/Pong transactions (Cb Ping 0x32 / Sb Pong 0x20, Int32 id, minecraft-data 1.20). `Server.TickTransactions` sends a Ping per player per tick — **on in `main.go`, off in `New()`** because test clients that stop reading would fill the 256-frame send queue and get kicked. Bad packets are `c.flag(check, detail)`-ed (logged, VL kept; no punishment yet); a packet flood (`anticheat.PacketRate`/`PacketBurst`) or `MaxOutstanding` unanswered Pings kicks. `MovePlayer` calls `c.ac.Reset()` (history + transaction epoch belong to the old instance).
 - **`handleLogin` reads from `c.conn` directly** for the Encryption Response while `readLoop` is parked in `processPacket`. Works only because both run on the same goroutine — don't introduce concurrent reads.
 - **Bans go through `Server.Bans` (`ban.Store`)**, never a package global: `IsBanned(ctx, name)` in the login handler, `Add`/`Remove` in `/ban` `/unban`. `server.New()` installs `ban.NewMemoryStore()` (what tests see); `main.connectStores` swaps in `store.BanStore` (Postgres, keyed by player row — banning a never-seen name creates the row with its offline UUID) or `ban.FileStore` (banlist.json, rewritten on every change). A failing lookup at login fails **open** with a warning. Expired entries are filtered at lookup in every backend.
 - **`OfflineUUID`** (`protocol/uuid.go`) uses vanilla `MD5("OfflinePlayer:" + name)` with v3 UUID bits — match this exactly if reproducing behavior.

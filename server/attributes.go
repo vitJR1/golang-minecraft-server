@@ -100,6 +100,6 @@ func (c *ClientConnection) sendMovementAttributes() error {
 	if c.player == nil {
 		return nil
 	}
-	mods := movementSpeedModifiers(c.effectLevel(EffectSpeed), c.effectLevel(EffectSlowness), c.sprinting.Load())
+	mods := movementSpeedModifiers(c.effectLevel(EffectSpeed), c.effectLevel(EffectSlowness), c.ac.Sprinting.Load())
 	return c.safeWrite(CbPlayUpdateAttributes, movementSpeedAttributePayload(c.player.EntityID, mods))
 }

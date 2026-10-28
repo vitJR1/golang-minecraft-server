@@ -36,7 +36,7 @@ func (c *ClientConnection) resyncView() error {
 	if err := c.sendWorldChunks(); err != nil {
 		return fmt.Errorf("resync chunks: %w", err)
 	}
-	if err := c.sendSyncPlayerPosition(s.X, s.Y, s.Z, 1); err != nil {
+	if err := c.sendSyncPlayerPosition(s.X, s.Y, s.Z); err != nil {
 		return fmt.Errorf("resync sync pos: %w", err)
 	}
 	// 3. The Respawn reset the player's own state on the client — re-send the

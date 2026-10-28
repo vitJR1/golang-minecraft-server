@@ -54,6 +54,7 @@ const (
 	SbPlayPlayerAbilities   = 0x1C // flags byte: flying / invulnerable / etc.
 	SbPlayPlayerAction      = 0x1D // NOT 0x1C — that's Player Abilities in 1.20.1
 	SbPlayPlayerCommand     = 0x1E // sneak / sprint / jump_boost
+	SbPlayPong              = 0x20 // "pong": Int32 id echoing a Cb Ping (minecraft-data 1.20)
 	SbPlaySwingArm          = 0x2F
 	SbPlayUseItemOnBlock    = 0x31
 	SbPlayUseItem           = 0x32 // right-click in air (e.g. holding blaze rod)
@@ -123,4 +124,8 @@ const (
 	CbPlaySetContainerContent = 0x12 // window_items
 	CbPlaySetContainerSlot    = 0x14 // set_slot
 	CbPlayOpenScreen          = 0x30 // open_window
+
+	// Transactions (anticheat): the client answers with Sb Pong 0x20 in
+	// packet order. minecraft-data 1.20 "ping": Int32 id.
+	CbPlayPing = 0x32
 )

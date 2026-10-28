@@ -266,6 +266,13 @@ func WriteShort(value int16) []byte {
 	return buf
 }
 
+func ReadInt(buf *bytes.Buffer) (int32, error) {
+	if buf.Len() < 4 {
+		return 0, fmt.Errorf("insufficient data for int: need 4, have %d", buf.Len())
+	}
+	return int32(binary.BigEndian.Uint32(buf.Next(4))), nil
+}
+
 func WriteInt(value int32) []byte {
 	buf := make([]byte, 4)
 	binary.BigEndian.PutUint32(buf, uint32(value))

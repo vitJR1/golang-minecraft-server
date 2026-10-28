@@ -142,7 +142,7 @@ func (b playerBridge) Respawn(x, y, z float64) {
 	c.player.Respawn()
 	c.player.MoveTo(x, y, z, false)
 	_ = c.sendSetHealth(player.MaxHealth)
-	_ = c.sendSyncPlayerPosition(x, y, z, 1)
+	_ = c.sendSyncPlayerPosition(x, y, z)
 	c.broadcastEntityTeleport()
 	c.resendEffects()
 	c.equipmentChanged()

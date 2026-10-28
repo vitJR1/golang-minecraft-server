@@ -291,6 +291,7 @@ func NewInstance(id string, srv *Server, w world.World) *Instance {
 	i.OnTick(i.consumeTick)
 	i.OnTick(i.itemTick)
 	i.OnTick(i.tntTick)
+	i.OnTick(i.anticheatTick)
 	i.initListeners()
 	go i.tickLoop()
 	return i

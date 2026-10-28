@@ -166,7 +166,7 @@ func (c *ClientConnection) handleAttack(victim *ClientConnection) {
 // movement actually changes). Sprinting attackers add the w-tap bonus.
 func (c *ClientConnection) applyKnockback(cfg CombatConfig, aSnap, vSnap player.Snapshot) {
 	strength := cfg.Knockback
-	if c.sprinting.Load() {
+	if c.ac.Sprinting.Load() {
 		strength += cfg.SprintKnockback
 	}
 	strength += 0.5 * float32(c.heldEnchant(EnchantKnockback)) // knockback stick
@@ -225,7 +225,7 @@ func (c *ClientConnection) instantRespawn() {
 	c.player.Respawn()
 	c.player.MoveTo(sp.X, sp.Y, sp.Z, false)
 	_ = c.sendSetHealth(player.MaxHealth)
-	_ = c.sendSyncPlayerPosition(sp.X, sp.Y, sp.Z, 1)
+	_ = c.sendSyncPlayerPosition(sp.X, sp.Y, sp.Z)
 	c.broadcastEntityTeleport()
 }
 

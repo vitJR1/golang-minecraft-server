@@ -49,6 +49,7 @@ func main() {
 	logger.Init() // LOG_LEVEL / LOG_FORMAT read here
 
 	srv := server.New()
+	srv.TickTransactions = true
 	srv.ChatModerator = bots.NewNosleeperBot(srv)
 	server.LoadFavicon(server.DefaultFaviconPath)
 	connectStores(srv) // STORAGE=postgres|memory picks the backends

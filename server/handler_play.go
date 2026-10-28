@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"log/slog"
+	"minecraft-server/anticheat"
 	"minecraft-server/game"
 	"minecraft-server/protocol"
 	"minecraft-server/world"
@@ -14,6 +15,11 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 	if c.isClosed() {
 		return fmt.Errorf("server closed")
 	}
+	// Packet budget (anticheat.go): a flood is kicked before it costs
+	// anything else.
+	if !c.allowPacket() {
+		return nil
+	}
 
 	switch packetID {
 	case SbPlayKeepAlive:
@@ -21,7 +27,16 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		if err != nil {
 			return fmt.Errorf("reading keep alive response: %w", err)
 		}
-		c.onKeepAliveResponse(id)
+		if !c.onKeepAliveResponse(id) {
+			c.flag("badpackets.keepalive", fmt.Sprintf("keep-alive %d was never sent", id))
+		}
+
+	case SbPlayPong:
+		id, err := protocol.ReadInt(packet)
+		if err != nil {
+			return fmt.Errorf("pong: %w", err)
+		}
+		c.onPong(id)
 
 	case SbPlayChatMessage:
 		message, err := protocol.ReadStringFromBuf(packet)
@@ -76,7 +91,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			c.kickInvalidMove()
 			break
 		}
-		if !c.acceptMove(x, y, z) {
+		if c.awaitingTeleport() || !c.acceptMove(x, y, z) {
 			break
 		}
 		c.player.MoveTo(x, y, z, onGround)
@@ -95,7 +110,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			c.kickInvalidMove()
 			break
 		}
-		if !c.acceptMove(x, y, z) {
+		if c.awaitingTeleport() || !c.acceptLook(pitch) || !c.acceptMove(x, y, z) {
 			break
 		}
 		c.player.MoveAndLook(x, y, z, yaw, pitch, onGround)
@@ -111,12 +126,19 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			c.kickInvalidMove()
 			break
 		}
+		if c.awaitingTeleport() || !c.acceptLook(pitch) {
+			break
+		}
 		c.player.LookAt(yaw, pitch, onGround)
 		c.broadcastEntityTeleport()
 		c.broadcastHeadRotation()
 
 	case SbPlayTeleportConfirm:
-		_, _ = protocol.ReadVarInt(packet) // teleport id, no-op
+		id, err := protocol.ReadVarInt(packet)
+		if err != nil {
+			return fmt.Errorf("teleport confirm: %w", err)
+		}
+		c.onTeleportConfirm(int32(id))
 
 	case SbPlayClientInfo:
 		// Sent right after LoginSuccess (locale, view distance, chat mode,
@@ -374,19 +396,32 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 
 	case SbPlayPlayerCommand:
 		// entity_id (VarInt) + action (VarInt) + jump_boost (VarInt).
-		// We track sprint start/stop (actions 3/4) so combat can apply the
-		// 1.9 sprint-knockback bonus; the rest is ignored for now.
-		_, _ = protocol.ReadVarInt(packet)
+		// We track sneak (0/1) and sprint (3/4) input — combat applies the
+		// 1.9 sprint-knockback bonus, anticheat keeps the sneak state in the
+		// position history; the rest is ignored for now.
+		eid, err := protocol.ReadVarInt(packet)
+		if err != nil {
+			return fmt.Errorf("player command entity: %w", err)
+		}
 		action, err := protocol.ReadVarInt(packet)
 		if err != nil {
 			return fmt.Errorf("player command action: %w", err)
 		}
 		_, _ = protocol.ReadVarInt(packet)
+		// The vanilla client only ever names itself.
+		if int32(eid) != c.player.EntityID {
+			c.flag("badpackets.command", fmt.Sprintf("player command for entity %d", eid))
+			break
+		}
 		switch action {
+		case 0: // start sneaking
+			c.ac.Sneaking.Store(true)
+		case 1: // stop sneaking
+			c.ac.Sneaking.Store(false)
 		case 3: // start sprinting
-			c.sprinting.Store(true)
+			c.ac.Sprinting.Store(true)
 		case 4: // stop sprinting
-			c.sprinting.Store(false)
+			c.ac.Sprinting.Store(false)
 		}
 
 	case SbPlayClientCommand:
@@ -469,6 +504,12 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			return fmt.Errorf("set held item: %w", err)
 		}
 		slot := int16(raw) // signed cast preserves bits; vanilla sends 0..8
+		// Anything else would address main-inventory slots as "held"
+		// (hotbarStart + slot): using a sword straight from the backpack.
+		if !anticheat.ValidHotbarSlot(int(slot)) {
+			c.flag("badpackets.helditem", fmt.Sprintf("held slot %d", slot))
+			break
+		}
 		c.heldSlot.Store(int32(slot))
 		c.cancelUse()
 		c.equipmentChanged()

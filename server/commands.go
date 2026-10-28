@@ -307,10 +307,7 @@ func cmdTp(c *ClientConnection, args []string) {
 // via the standard entity-teleport broadcast on the next tick.
 func teleportConnTo(c *ClientConnection, x, y, z float64) {
 	c.player.MoveTo(x, y, z, false)
-	// Teleport ID is arbitrary but should change; using nanos is plenty
-	// unique within a session.
-	teleportID := int32(1) // TODO: bump per-connection counter when we add server tick.
-	_ = c.sendSyncPlayerPosition(x, y, z, teleportID)
+	_ = c.sendSyncPlayerPosition(x, y, z)
 	c.broadcastEntityTeleport()
 }
 

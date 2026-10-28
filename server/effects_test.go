@@ -188,7 +188,7 @@ func TestSpeedEffectSyncsMovementAttribute(t *testing.T) {
 
 	// Sprinting players keep their sprint boost in the sync, else the
 	// client drops it along with the modifiers it replaces.
-	c.sprinting.Store(true)
+	c.ac.Sprinting.Store(true)
 	c.applyEffect(EffectSlowness, 1, time.Minute)
 	mods = readMovementAttribute(t, lastPacket(t, c, CbPlayUpdateAttributes))
 	if len(mods) != 3 || mods[hex.EncodeToString(slownessModifierUUID)] != -0.15 || mods[sprintUUID] != sprintBoost {
@@ -196,7 +196,7 @@ func TestSpeedEffectSyncsMovementAttribute(t *testing.T) {
 	}
 
 	// Removal syncs an empty list (plus the sprint boost).
-	c.sprinting.Store(false)
+	c.ac.Sprinting.Store(false)
 	c.removeEffect(EffectSpeed)
 	c.removeEffect(EffectSlowness)
 	mods = readMovementAttribute(t, lastPacket(t, c, CbPlayUpdateAttributes))

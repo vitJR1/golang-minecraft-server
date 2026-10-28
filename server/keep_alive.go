@@ -91,8 +91,9 @@ func (c *ClientConnection) keepAlive() {
 }
 
 // onKeepAliveResponse clears the pending state if the client's echo matches
-// the ID we sent. Stale acks (from before a timeout-induced re-send) are
-// ignored — CompareAndSwap fails and the new outstanding ID stays put.
-func (c *ClientConnection) onKeepAliveResponse(id int64) {
-	c.keepAlivePendingID.CompareAndSwap(id, 0)
+// the ID we sent. False = the id isn't the outstanding one: the server never
+// re-sends (a late reply means a timeout kick), so that's a forged echo — the
+// caller flags it, and the real outstanding ID stays put.
+func (c *ClientConnection) onKeepAliveResponse(id int64) bool {
+	return c.keepAlivePendingID.CompareAndSwap(id, 0)
 }

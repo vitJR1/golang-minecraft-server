@@ -7,6 +7,7 @@ import (
 	"minecraft-server/protocol"
 	"minecraft-server/world"
 	"net"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,6 +20,10 @@ type testClient struct {
 	conn      net.Conn
 	threshold int
 	server    *Server // the Server backing this client (handy in multi-client tests)
+
+	// writeMu serialises frames: the drain goroutines answer teleports and
+	// Pings (autoReply) while the test itself writes.
+	writeMu sync.Mutex
 }
 
 // pipeServer wires HandleConn to one side of a net.Pipe and returns a
@@ -54,9 +59,44 @@ func pipeClientOn(t *testing.T, s *Server) *testClient {
 
 func (tc *testClient) write(t *testing.T, id int32, payload []byte) {
 	t.Helper()
-	if err := protocol.WritePacket(tc.conn, id, payload, tc.threshold); err != nil {
+	tc.writeMu.Lock()
+	err := protocol.WritePacket(tc.conn, id, payload, tc.threshold)
+	tc.writeMu.Unlock()
+	if err != nil {
 		t.Fatalf("write packet 0x%02X: %v", id, err)
 	}
+}
+
+// autoReply answers what a vanilla client answers on its own: Confirm
+// Teleportation for every Synchronize Player Position (the server ignores
+// movement until then) and Pong for every Ping. body is the packet payload
+// after the id; it is read from a copy, so the caller's buffer is untouched.
+// Write errors are ignored — the pipe closing ends the test anyway.
+func (tc *testClient) autoReply(id int, body []byte) {
+	var reply []byte
+	var replyID int32
+	switch id {
+	case CbPlaySyncPos:
+		// x, y, z (3×Double) + yaw, pitch (2×Float) + flags (Byte) = 33 bytes.
+		if len(body) < 33 {
+			return
+		}
+		tp, _, err := protocol.ReadVarIntFromBytes(body[33:])
+		if err != nil {
+			return
+		}
+		replyID, reply = SbPlayTeleportConfirm, protocol.WriteVarInt32(int32(tp))
+	case CbPlayPing:
+		if len(body) < 4 {
+			return
+		}
+		replyID, reply = SbPlayPong, append([]byte(nil), body[:4]...)
+	default:
+		return
+	}
+	tc.writeMu.Lock()
+	_ = protocol.WritePacket(tc.conn, replyID, reply, tc.threshold)
+	tc.writeMu.Unlock()
 }
 
 // startDiscardDrain spawns a goroutine that reads every subsequent packet
@@ -67,8 +107,12 @@ func (tc *testClient) write(t *testing.T, id int32, payload []byte) {
 func (tc *testClient) startDiscardDrain() {
 	go func() {
 		for {
-			if _, err := protocol.ReadPacket(tc.conn, tc.threshold); err != nil {
+			buf, err := protocol.ReadPacket(tc.conn, tc.threshold)
+			if err != nil {
 				return
+			}
+			if id, err := protocol.ReadVarInt(buf); err == nil {
+				tc.autoReply(id, buf.Bytes())
 			}
 		}
 	}()
@@ -92,6 +136,7 @@ func (tc *testClient) startDrain() <-chan int {
 			if err != nil {
 				return
 			}
+			tc.autoReply(id, buf.Bytes())
 			ids <- id
 		}
 	}()
@@ -110,6 +155,7 @@ func (tc *testClient) read(t *testing.T) (id int, payload *bytes.Buffer) {
 	if err != nil {
 		t.Fatalf("decode packet id: %v", err)
 	}
+	tc.autoReply(id, buf.Bytes())
 	return id, buf
 }
 
