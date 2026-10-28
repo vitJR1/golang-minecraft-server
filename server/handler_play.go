@@ -204,6 +204,10 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 
 		clickedPos := world.Position{X: bx, Y: by, Z: bz}
 		placePos := offsetByFace(clickedPos, face)
+		// Right-clicking grass & co. puts the block where the plant was.
+		if world.ReplacedInPlace(c.instance.World.GetBlock(clickedPos)) {
+			placePos = clickedPos
+		}
 		held := c.heldItemName()
 
 		// Plugins get first refusal on the click (selection wands, tools).
@@ -268,6 +272,13 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		// happens; the always-place-stone fallback is gone.
 		block, ok := world.BlockByName(held)
 		if !ok || block == world.Air {
+			break
+		}
+		// Only into air, fluid or vegetation: a forged click must not
+		// overwrite a map block (or an enemy bed). Not flagged — a vanilla
+		// client gets here too when someone else just built on the spot.
+		if !world.Replaceable(c.instance.World.GetBlock(placePos)) {
+			_ = c.sendBlockUpdate(placePos, c.instance.World.GetBlock(placePos))
 			break
 		}
 		// Games/plugins may swap the block (BedWars: team-coloured beds).
@@ -431,6 +442,14 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			return fmt.Errorf("client command action: %w", err)
 		}
 		if action == 0 {
+			// Only from the death screen: a living player would get a free
+			// heal + teleport home, and under custom respawn (BedWars) the
+			// client never sees a death screen — the game respawns it.
+			if !c.player.IsDead() || c.instance.CustomRespawn() {
+				c.flag("badpackets.respawn", fmt.Sprintf("respawn request (dead=%v, custom respawn=%v)",
+					c.player.IsDead(), c.instance.CustomRespawn()))
+				break
+			}
 			if err := c.respawn(); err != nil {
 				return fmt.Errorf("respawn: %w", err)
 			}

@@ -13,7 +13,7 @@ nuker, fly); **P2** — эвристики и полировка.
 
 ## P0 — критично
 
-### 1. Set Creative Slot принимается в любом режиме
+### 1. ~~Set Creative Slot принимается в любом режиме~~ — исправлено
 `server/handler_play.go:481` → `onSetCreativeSlot` (`server/inventory.go:158`)
 пишет предмет в модель без проверки gamemode.
 
@@ -22,6 +22,9 @@ nuker, fly); **P2** — эвристики и полировка.
   предмет (TNT, обсидиан, незеритовый меч) из воздуха.
 - **Фикс:** игнорировать (и считать нарушением), если `c.gamemode() != Creative`.
   Дополнительно — валидировать слот (`-1` = drop, `1..45`) и `Count` 1..maxStack.
+- **Сделано:** `onSetCreativeSlot` — вне creative флаг `inventory.creative`
+  + слот пересылается из модели; слот вне 1..45 и стек больше максимума —
+  флаг `badpackets.creativeslot`. Тесты: `server/exploit_fixes_test.go`.
 
 ### 2. Клики инвентаря/сундуков доверяют массиву «changed slots»
 `applyInventoryClick` (`server/inventory.go:119`), `applyChestClick`
@@ -54,7 +57,7 @@ Knockback, Protection в `armor.go`, Efficiency в копании).
   данные от клиента — лишь для сравнения. В creative — ограничить уровни
   чар (например ≤ 10) и `Count`.
 
-### 4. Respawn без смерти
+### 4. ~~Respawn без смерти~~ — исправлено
 `server/handler_play.go:399` → `respawn()` (`server/combat.go:238`) не
 проверяет `IsDead()`.
 
@@ -63,6 +66,8 @@ Knockback, Protection в `armor.go`, Efficiency в копании).
   мёртвый игрок пропускает 5 с спектатора, а после FINAL KILL — возвращается
   в игру живым.
 - **Фикс:** `if !c.player.IsDead() || c.instance.CustomRespawn() { return }`.
+- **Сделано:** ровно так, в обработчике Client Command; флаг
+  `badpackets.respawn`.
 
 ### 5. ~~NBT-бомба: аллокация по длине из пакета~~ — исправлено
 `nbt/unmarshal.go:139,162,181,198,219` — `make(..., n)` с `n` до 2³¹−1 из
@@ -80,7 +85,7 @@ Knockback, Protection в `armor.go`, Efficiency в копании).
   (2 MiB, учёт по мотивам vanilla `NbtAccounter`). Файлы (`Unmarshal`,
   схематики) — без квоты. Тесты: `nbt/limits_test.go`.
 
-### 6. Установка блока поверх существующего
+### 6. ~~Установка блока поверх существующего~~ — исправлено
 `server/handler_play.go:270` — `SetBlock(placePos, block)` без проверки, что
 `placePos` — воздух/заменяемый блок. BedWars `OnBlockPlace` помечает позицию
 как `placed` (`games/bedwars/bedwars.go:374`), после чего она ломаема.
@@ -90,6 +95,11 @@ Knockback, Protection в `armor.go`, Efficiency в копании).
   уничтожение половины кровати без копания.
 - **Фикс:** разрешать только при `Air` / жидкости / заменяемых (трава, снег
   слоем); иначе откат через `sendBlockUpdate`.
+- **Сделано:** `world.Replaceable` (воздух, вода/лава, трава, папоротник,
+  мёртвый куст, лоза, огонь…; двойные растения и снег — нет). Проверка в
+  Use Item On Block и для обеих половин кровати. Без флага: vanilla-клиент
+  попадает сюда при рассинхроне. Заодно клик по траве ставит блок на её
+  место (`world.ReplacedInPlace`), как в vanilla.
 
 ---
 
@@ -289,7 +299,7 @@ JSON-файл по аналогии с `banlist.json`. Для админов н�
 ## Порядок работ
 
 1. ~~**P0 #5** NBT-лимиты (падение сервера).~~ ✅
-2. **P0 #1, #4, #6** — по 1–5 строк каждый.
+2. ~~**P0 #1, #4, #6** — по 1–5 строк каждый.~~ ✅
 3. **P0 #2/#3** — сначала инвариант «сумма по id не растёт» + State ID,
    затем полная симуляция кликов.
 4. **Лестница статусов + журнал наказаний** (таблица, миграция, `/ac`),

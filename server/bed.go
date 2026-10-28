@@ -74,7 +74,8 @@ func (c *ClientConnection) placeBed(pos world.Position, bed world.Block) {
 	foot := world.Block{StateID: minState + facingIdx*4 + bedFootOffset, Name: bed.Name}
 	head := world.Block{StateID: minState + facingIdx*4 + bedHeadOffset, Name: bed.Name}
 
-	if c.instance.blockedByPlayer(pos) || c.instance.blockedByPlayer(headPos) ||
+	if !world.Replaceable(c.instance.World.GetBlock(pos)) || !world.Replaceable(c.instance.World.GetBlock(headPos)) ||
+		c.instance.blockedByPlayer(pos) || c.instance.blockedByPlayer(headPos) ||
 		!c.instance.allowBlockPlace(c, pos, foot) {
 		// Veto: roll both targeted positions back to what they were.
 		_ = c.sendBlockUpdate(pos, c.instance.World.GetBlock(pos))

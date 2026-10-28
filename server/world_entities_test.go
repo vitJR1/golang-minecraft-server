@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"minecraft-server/player"
 	"testing"
 
 	"minecraft-server/protocol"
@@ -114,7 +115,9 @@ func TestLoadWorldEntitiesAssignsIDs(t *testing.T) {
 }
 
 func TestCreativeSlotHeldItem(t *testing.T) {
-	c := &ClientConnection{}
+	// Set Creative Mode Slot is only honoured in creative.
+	c := &ClientConnection{player: player.New(1, "Creator", [16]byte{})}
+	c.player.SetGamemode(player.Creative)
 	c.heldSlot.Store(0) // hotbar 0 → inventory slot 36
 
 	frameID, ok := world.ItemByName("minecraft:item_frame")

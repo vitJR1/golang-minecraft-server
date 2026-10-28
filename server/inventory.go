@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"fmt"
 	"minecraft-server/player"
 
 	"minecraft-server/protocol"
@@ -155,6 +156,11 @@ func (c *ClientConnection) stripNavigatorItems() {
 // onSetCreativeSlot records the item a creative player put in a slot. Reads
 // Short slot + Slot(item); creative is where inventory edits are synced (the
 // client is authoritative in creative), so this keeps the held item accurate.
+//
+// Only in creative: in any other mode this packet would conjure items out of
+// thin air (a stack of emeralds for the BedWars shop), so it is refused,
+// flagged, and the slot re-sent from the model to undo the client's view.
+// Slot -1 (drop from the creative tab) changes no slot and is ignored.
 func (c *ClientConnection) onSetCreativeSlot(packet *bytes.Buffer) {
 	raw, err := protocol.ReadUShortFromBuf(packet)
 	if err != nil {
@@ -164,7 +170,25 @@ func (c *ClientConnection) onSetCreativeSlot(packet *bytes.Buffer) {
 	if !ok {
 		return
 	}
-	c.inv.set(int16(raw), st)
+	slot := int16(raw)
+	inRange := slot >= 1 && slot < playerInvSize // 0 is the crafting output
+	switch {
+	case c.gamemode() != player.Creative:
+		c.flag("inventory.creative", fmt.Sprintf("creative slot %d ← item %d ×%d in %v", slot, st.ID, st.Count, c.gamemode()))
+	case slot == -1:
+		return
+	case !inRange:
+		c.flag("badpackets.creativeslot", fmt.Sprintf("creative slot %d", slot))
+		return
+	case !st.empty() && int(st.Count) > maxStackFor(st.ID):
+		c.flag("badpackets.creativeslot", fmt.Sprintf("item %d ×%d over its stack size", st.ID, st.Count))
+	default:
+		c.inv.set(slot, st)
+		return
+	}
+	if inRange {
+		_ = c.sendSetSlot(0, slot, c.inv.get(slot))
+	}
 }
 
 // giveItem adds count of itemID to the player's inventory. It first tops up
