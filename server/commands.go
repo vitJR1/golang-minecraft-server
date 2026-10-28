@@ -126,8 +126,14 @@ func init() {
 	registerCommand(&Command{
 		Name:    "bot",
 		NeedsOp: true,
-		Help:    "/bot add <team> [easy|normal|hard] | remove <name> | list | clear — AI players",
+		Help:    "/bot add <team> [easy|normal|hard] | match <mode> [difficulty] | remove <name> | list | clear — AI players",
 		Run:     cmdBot,
+	})
+	registerCommand(&Command{
+		Name:    "spectate",
+		Aliases: []string{"watch"},
+		Help:    "/spectate [arena] — watch a running game in spectator mode",
+		Run:     cmdSpectate,
 	})
 	registerCommand(&Command{
 		Name:    "forcestart",

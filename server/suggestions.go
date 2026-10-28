@@ -87,6 +87,10 @@ func (s *Server) Suggestions(c *ClientConnection, text string) (start, length in
 		}
 	case cmd == "bot":
 		candidates = s.botSuggestions(c, parts, argIdx)
+	case cmd == "spectate" || cmd == "watch":
+		if argIdx == 1 {
+			candidates = s.ArenasOfKind("")
+		}
 	case cmd == "template" || cmd == "templates":
 		if argIdx == 1 {
 			candidates = []string{"list"}

@@ -247,7 +247,7 @@ func (s *Server) botsIn(inst *Instance) []*ClientConnection {
 // the game in c's instance (game.BotTeams), remove <name> with the bots.
 func (s *Server) botSuggestions(c *ClientConnection, parts []string, argIdx int) []string {
 	if argIdx == 1 {
-		return []string{"add", "remove", "list", "clear"}
+		return []string{"add", "match", "remove", "list", "clear"}
 	}
 	if len(parts) < 2 {
 		return nil
@@ -259,6 +259,15 @@ func (s *Server) botSuggestions(c *ClientConnection, parts []string, argIdx int)
 			return s.botTeamNames(c.instance)
 		case 3:
 			return []string{"easy", "normal", "hard"}
+		}
+	case "match":
+		switch argIdx {
+		case 2:
+			return botMatchKinds()
+		case 3:
+			return []string{"easy", "normal", "hard"}
+		case 4:
+			return s.TemplateNames()
 		}
 	case "remove":
 		if argIdx == 2 {
@@ -284,9 +293,12 @@ func (s *Server) botTeamNames(inst *Instance) []string {
 	return nil
 }
 
+// botMatchKinds are the arena kinds /bot match offers.
+func botMatchKinds() []string { return game.ArenaKinds() }
+
 // cmdBot: /bot add <team> [easy|normal|hard] | remove <name> | list | clear
 func cmdBot(c *ClientConnection, args []string) {
-	usage := "Usage: /bot add <team> [easy|normal|hard]  |  /bot remove <name>  |  /bot list  |  /bot clear"
+	usage := "Usage: /bot add <team> [easy|normal|hard]  |  /bot match <mode> [difficulty]  |  /bot remove <name>  |  /bot list  |  /bot clear"
 	if len(args) == 0 {
 		_ = c.sendSystemMessage(usage)
 		return
@@ -325,6 +337,8 @@ func cmdBot(c *ClientConnection, args []string) {
 		}
 		s.RemoveBot(b)
 		_ = c.sendSystemMessage("Removed " + b.playerName)
+	case "match":
+		cmdBotMatch(c, args[1:])
 	case "list":
 		bots := s.botsIn(nil)
 		if len(bots) == 0 {

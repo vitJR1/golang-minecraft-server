@@ -500,7 +500,7 @@ func TestBotSuggestions(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := map[string][]string{
-		"/bot ":         {"add", "clear", "list", "remove"},
+		"/bot ":         {"add", "clear", "list", "match", "remove"},
 		"/bot a":        {"add"},
 		"/bot add ":     {"blue", "red"},
 		"/bot add r":    {"red"},

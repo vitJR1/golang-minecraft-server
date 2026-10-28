@@ -61,6 +61,9 @@ func (i *Instance) fireStop() {
 }
 
 func (i *Instance) fireJoin(c *ClientConnection) {
+	if c.watching(i) {
+		return // a watcher isn't in the game (spectate.go)
+	}
 	ctx, p := i.pluginCtx(), playerBridge{conn: c}
 	for _, l := range i.listeners {
 		l := l
@@ -72,6 +75,9 @@ func (i *Instance) fireJoin(c *ClientConnection) {
 }
 
 func (i *Instance) fireLeave(c *ClientConnection) {
+	if c.watching(i) {
+		return
+	}
 	ctx, p := i.pluginCtx(), playerBridge{conn: c}
 	for _, l := range i.listeners {
 		l := l

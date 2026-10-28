@@ -361,6 +361,7 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 	//    removes c from old.Players). Whatever sidebar that instance's game
 	//    left up comes down with it, so the next game starts clean.
 	old.LeaveAndAnnounce(c)
+	c.endWatch(old)
 	c.clearSidebar()
 
 	// 2. Wipe c's tab list. Respawn doesn't do this, and the next
@@ -672,6 +673,9 @@ type ClientConnection struct {
 	// nameTags are the name-tag groups the client has (name_tags.go),
 	// under sidebarMu.
 	nameTags map[string]shownTag
+
+	// watch: the instance this player only watches (spectate.go).
+	watch watchState
 
 	// writerDone is closed by writerLoop on exit. cleanup waits on it
 	// (with a timeout) so any in-flight frames — particularly the Pong that
