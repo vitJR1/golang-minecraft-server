@@ -69,3 +69,55 @@ func TestSeenFrom(t *testing.T) {
 		t.Fatalf("confirmed tick from the future (old epoch) must fall back: %d", got)
 	}
 }
+
+func TestLookVector(t *testing.T) {
+	cases := []struct {
+		yaw, pitch float32
+		want       Vec
+	}{
+		{0, 0, Vec{0, 0, 1}},   // south, +Z
+		{90, 0, Vec{-1, 0, 0}}, // west, −X
+		{180, 0, Vec{0, 0, -1}},
+		{0, 90, Vec{0, -1, 0}}, // straight down
+	}
+	for _, tc := range cases {
+		got := Look(tc.yaw, tc.pitch)
+		if Dist(got, tc.want) > 1e-9 {
+			t.Errorf("Look(%v, %v) = %+v, want %+v", tc.yaw, tc.pitch, got, tc.want)
+		}
+	}
+}
+
+func TestRayAndAngle(t *testing.T) {
+	box := FeetBox(Vec{0, 64, 3}, 0.6, 1.8)
+	eye := Vec{0, 65.62, 0}
+	if !RayHitsBox(eye, Vec{0, 0, 1}, box, 6) {
+		t.Fatal("straight-ahead ray missed")
+	}
+	if RayHitsBox(eye, Vec{0, 0, -1}, box, 6) {
+		t.Fatal("ray behind hit")
+	}
+	if RayHitsBox(eye, Vec{0, 0, 1}, box, 2) {
+		t.Fatal("ray hit past its length")
+	}
+	if a := AngleTo(eye, Vec{1, 0, 0}, Vec{0, 65.62, 5}); math.Abs(a-90) > 1e-6 {
+		t.Fatalf("angle %v, want 90", a)
+	}
+}
+
+func TestFaceVisible(t *testing.T) {
+	// Block at (2, 63, 0); eye above it and west of it.
+	eye := Vec{0.5, 65.62, 0.5}
+	if !FaceVisible(eye, 2, 63, 0, 1, 0.1) { // top
+		t.Error("top face hidden from above")
+	}
+	if !FaceVisible(eye, 2, 63, 0, 4, 0.1) { // west side faces the eye
+		t.Error("west face hidden from the west")
+	}
+	if FaceVisible(eye, 2, 63, 0, 5, 0.1) { // east side faces away
+		t.Error("east face visible from the west")
+	}
+	if FaceVisible(eye, 2, 63, 0, 0, 0.1) { // bottom
+		t.Error("bottom face visible from above")
+	}
+}

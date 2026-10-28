@@ -122,6 +122,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		if c.awaitingTeleport() || !c.acceptLook(pitch) || !c.acceptMove(x, y, z) {
 			break
 		}
+		c.rememberLook()
 		c.player.MoveAndLook(x, y, z, yaw, pitch, onGround)
 		c.broadcastEntityTeleport()
 		c.broadcastHeadRotation()
@@ -139,6 +140,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		if c.awaitingTeleport() || !c.acceptLook(pitch) {
 			break
 		}
+		c.rememberLook()
 		c.player.LookAt(yaw, pitch, onGround)
 		c.broadcastEntityTeleport()
 		c.broadcastHeadRotation()
@@ -192,6 +194,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			anim = 3
 		}
 		c.broadcastEntityAnimation(anim)
+		c.swung()
 
 	case SbPlayUseItemOnBlock:
 		// hand(VarInt) + Position(8) + face(VarInt) + cursor x/y/z(3×Float)
@@ -205,11 +208,11 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		if err != nil {
 			return fmt.Errorf("use item on: face: %w", err)
 		}
-		// Drain cursor floats + inside_block; we don't need them yet.
-		_, _ = protocol.ReadFloat(packet)
-		_, _ = protocol.ReadFloat(packet)
-		_, _ = protocol.ReadFloat(packet)
-		_, _ = protocol.ReadBool(packet)
+		// Cursor: where on the face the click landed, each axis in [0, 1].
+		cx, _ := protocol.ReadFloat(packet)
+		cy, _ := protocol.ReadFloat(packet)
+		cz, _ := protocol.ReadFloat(packet)
+		_, _ = protocol.ReadBool(packet) // inside_block
 		seq, err := protocol.ReadVarInt(packet)
 		if err != nil {
 			return fmt.Errorf("use item on: sequence: %w", err)
@@ -225,6 +228,11 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		}
 		held := c.heldItemName()
 
+		if !cursorValid(cx, cy, cz) {
+			c.flag("badpackets.place", fmt.Sprintf("cursor %.3f,%.3f,%.3f outside the block", cx, cy, cz))
+			_ = c.sendBlockUpdate(placePos, c.instance.World.GetBlock(placePos))
+			break
+		}
 		// Dead players and spectators click nothing, and the block must be
 		// within vanilla's use range (reach.go).
 		if !c.mayAct() || !c.useInReach(clickedPos) {
@@ -265,8 +273,9 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			break
 		}
 
-		// Everything below changes the world, which adventure mode can't.
-		if !c.mayBuild() {
+		// Everything below changes the world, which adventure mode can't;
+		// and it's a placement: rate and clicked-face checks (actions.go).
+		if !c.mayBuild() || !c.placeAllowed(clickedPos, int(face)) {
 			_ = c.sendBlockUpdate(placePos, c.instance.World.GetBlock(placePos))
 			break
 		}
@@ -364,8 +373,9 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			c.releaseUse()
 		case 0:
 			c.cancelUse()
-			// Only survival/creative dig, within vanilla's dig range.
-			if !c.mayBuild() || !c.digInReach(pos) {
+			// Only survival/creative dig, within vanilla's dig range, at a
+			// sane rate, at a block in front (actions.go).
+			if !c.mayBuild() || !c.digInReach(pos) || !c.breakAllowed(pos) {
 				_ = c.sendBlockUpdate(pos, c.instance.World.GetBlock(pos))
 				break
 			}
@@ -384,7 +394,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			c.consumedDig = nil
 			c.cancelDig()
 		case 2:
-			if !c.mayBuild() || !c.digInReach(pos) {
+			if !c.mayBuild() || !c.digInReach(pos) || !c.breakAllowed(pos) {
 				c.consumedDig = nil
 				c.cancelDig()
 				_ = c.sendBlockUpdate(pos, c.instance.World.GetBlock(pos))
@@ -427,7 +437,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			if victim, ok := c.instance.Players.Get(int32(target)); ok && victim != c && victim.player != nil {
 				// Lag-compensated reach (reach.go): an out-of-reach hit is
 				// cancelled and flagged.
-				if !c.attackInReach(victim) {
+				if !c.attackInReach(victim) || !c.attackAllowed(victim) {
 					break
 				}
 				// The game logic hook gets first refusal: returning false

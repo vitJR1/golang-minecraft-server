@@ -45,6 +45,11 @@ type State struct {
 	// items the player throws (AllowDrop).
 	Chat  RateLimiter
 	Drops RateLimiter
+	// Breaks / Places / Attacks budget world and combat actions
+	// (actions.go).
+	Breaks  RateLimiter
+	Places  RateLimiter
+	Attacks RateLimiter
 
 	// Sprinting / Sneaking mirror the client's Player Command input. They are
 	// the client's claim, not verified physics.
@@ -86,6 +91,33 @@ type MoveState struct {
 	// ends (the client may still be moving with it); *Hold counts down.
 	SpeedLevel, SpeedHold int
 	JumpLevel, JumpHold   int
+
+	// PrevFeet is where the player stood before the latest move (HasPrev
+	// once set); PrevYaw / PrevPitch the rotation before the latest look
+	// change. The client acts between its packets, so action checks accept
+	// either the previous or the current pose.
+	PrevFeet           Vec
+	HasPrev            bool
+	PrevYaw, PrevPitch float32
+
+	// SwingDue: an attack is waiting for the arm swing a vanilla client
+	// sends right after it, in the same tick.
+	SwingDue bool
+
+	// Knock is the push being verified against anti-knockback.
+	Knock KnockCheck
+}
+
+// KnockCheck follows one confirmed push over the next moves: a client that
+// applied it moves along it; one that cancelled it (anti-knockback)
+// doesn't.
+type KnockCheck struct {
+	Active        bool
+	DirX, DirZ    float64 // unit horizontal direction of the push
+	H, Up         float64 // its horizontal and upward speed
+	Start         Vec     // where the player was when the client applied it
+	Moves         int
+	BestH, BestUp float64 // furthest along DirX/DirZ, highest above Start
 }
 
 // Held returns the level to allow for an effect now at cur: a level that

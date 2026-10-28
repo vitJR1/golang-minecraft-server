@@ -36,6 +36,7 @@ const (
 
 // countMove feeds one movement packet to the timer check.
 func (c *ClientConnection) countMove() {
+	c.tickEnded() // a movement packet closes the client's tick (actions.go)
 	if ahead, flagged := c.ac.Timer.Move(time.Now()); flagged {
 		c.flag("movement.timer", fmt.Sprintf("%d ms ahead of real time", ahead.Milliseconds()))
 	}
@@ -111,6 +112,7 @@ func (c *ClientConnection) phased(from, to anticheat.Vec) bool {
 // moved records an accepted move from → to in the server's movement state.
 func (c *ClientConnection) moved(from, to anticheat.Vec) {
 	c.ac.Move.LastDY = to.Y - from.Y
+	c.ac.Move.PrevFeet, c.ac.Move.HasPrev = from, true
 }
 
 // serverOnGround is the server's ground state, worked out from the blocks
@@ -208,6 +210,7 @@ func (c *ClientConnection) checkMotion(from, to anticheat.Vec) (check, detail st
 	gm := c.gamemode()
 	if gm == player.Creative || gm == player.Spectator || c.player.IsDead() {
 		c.landedAt(to.Y)
+		c.ac.Move.Knock.Active = false
 		return "", ""
 	}
 	inst, m := c.instance, &c.ac.Move
@@ -227,6 +230,12 @@ func (c *ClientConnection) checkMotion(from, to anticheat.Vec) (check, detail st
 	speedLvl := anticheat.Held(c.effectLevel(EffectSpeed), &m.SpeedLevel, &m.SpeedHold, effectHold)
 	jumpLvl := anticheat.Held(c.effectLevel(EffectJumpBoost), &m.JumpLevel, &m.JumpHold, effectHold)
 	pushH, pushUp := c.ac.Velocity.Allowance()
+	exempt := inst.motionExempt(to, c.ac.Sneaking.Load())
+	if ev := c.checkKnock(to, exempt); ev != "" {
+		// Flag only: the push is the client's to apply, there's nothing to
+		// roll back.
+		c.flag("combat.velocity", ev)
+	}
 
 	// Horizontal.
 	h := math.Hypot(to.X-from.X, to.Z-from.Z)
@@ -249,7 +258,7 @@ func (c *ClientConnection) checkMotion(from, to anticheat.Vec) (check, detail st
 	}
 
 	// Vertical.
-	if ground || !m.HasGround || m.BounceLeft > 0 || inst.motionExempt(to, c.ac.Sneaking.Load()) {
+	if ground || !m.HasGround || m.BounceLeft > 0 || exempt {
 		c.landedAt(to.Y)
 		return "", ""
 	}

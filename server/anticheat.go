@@ -102,7 +102,10 @@ func (c *ClientConnection) giveVelocity(vx, vy, vz float64) {
 		return
 	}
 	im := c.ac.Velocity.Add(vx, vy, vz)
-	c.sendTransaction(func() { c.ac.Velocity.Confirm(im) })
+	c.sendTransaction(func() {
+		c.ac.Velocity.Confirm(im)
+		c.pushApplied(im) // anti-knockback check (actions.go)
+	})
 }
 
 // sendTransaction sends a Ping numbered in c.ac.Transactions; onConfirm (may

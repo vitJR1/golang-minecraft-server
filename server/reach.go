@@ -83,6 +83,17 @@ func (c *ClientConnection) entityInReach(e world.Entity) bool {
 	return false
 }
 
+// victimSamples are the positions c's client may have shown victim at: its
+// history from InterpolationTicks before c's newest Pong-confirmed tick (the
+// last second without transactions), plus where it is now.
+func (c *ClientConnection) victimSamples(victim *ClientConnection) []anticheat.Sample {
+	now := c.instance.Tick()
+	confirmed, ok := c.ac.Transactions.LastConfirmedTick()
+	samples := victim.ac.History.Since(anticheat.SeenFrom(now, confirmed, ok))
+	vs := victim.player.Snapshot()
+	return append(samples, anticheat.Sample{Tick: now, X: vs.X, Y: vs.Y, Z: vs.Z, Sneaking: victim.ac.Sneaking.Load()})
+}
+
 // attackInReach is the lag-compensated melee reach check. The victim may be
 // anywhere the attacker's client could have shown it: from InterpolationTicks
 // before the newest tick the attacker confirmed with a Pong up to now (or the
@@ -94,12 +105,7 @@ func (c *ClientConnection) attackInReach(victim *ClientConnection) bool {
 	if c.gamemode() == player.Creative {
 		limit = anticheat.CreativeAttackReach
 	}
-	now := c.instance.Tick()
-	confirmed, ok := c.ac.Transactions.LastConfirmedTick()
-	samples := victim.ac.History.Since(anticheat.SeenFrom(now, confirmed, ok))
-	vs := victim.player.Snapshot()
-	samples = append(samples, anticheat.Sample{Tick: now, X: vs.X, Y: vs.Y, Z: vs.Z, Sneaking: victim.ac.Sneaking.Load()})
-
+	samples := c.victimSamples(victim)
 	d, _ := anticheat.MinReach(c.eye(), samples)
 	if d <= limit {
 		return true

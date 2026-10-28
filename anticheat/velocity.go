@@ -29,6 +29,8 @@ const (
 // Impulse is one push the server sent.
 type Impulse struct {
 	H, Up     float64 // horizontal speed, upward speed (blocks/tick)
+	DirX      float64 // unit horizontal direction (0, 0 when H is 0)
+	DirZ      float64
 	confirmed bool
 	moves     int  // moves since confirmed
 	landed    bool // touched the ground after confirmation
@@ -45,6 +47,9 @@ type Velocity struct {
 // caller to Confirm when the client's Pong arrives.
 func (v *Velocity) Add(vx, vy, vz float64) *Impulse {
 	im := &Impulse{H: math.Hypot(vx, vz), Up: math.Max(0, vy)}
+	if im.H > 0 {
+		im.DirX, im.DirZ = vx/im.H, vz/im.H
+	}
 	v.mu.Lock()
 	v.list = append(v.list, im)
 	v.mu.Unlock()

@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"math"
 	"testing"
 	"time"
 
@@ -24,14 +25,35 @@ func pvpInstance() *Instance {
 	return inst
 }
 
-// attack sends Interact (attack) from c on victim.
+// attack is a vanilla hit from c on victim: look at the victim's chest,
+// send Interact (attack), then the arm swing that follows it.
 func attack(t *testing.T, c, victim *ClientConnection) {
+	t.Helper()
+	aimAt(c, victim)
+	attackRaw(t, c, victim)
+	play(t, c, SbPlaySwingArm, protocol.WriteVarInt32(0))
+}
+
+// attackRaw sends only the Interact (attack) packet, with whatever view
+// c has.
+func attackRaw(t *testing.T, c, victim *ClientConnection) {
 	t.Helper()
 	var p bytes.Buffer
 	protocol.WriteVarInt32ToBuffer(&p, victim.player.EntityID)
 	protocol.WriteVarInt32ToBuffer(&p, 1) // attack
 	p.WriteByte(0)                        // sneaking
 	play(t, c, SbPlayInteract, p.Bytes())
+}
+
+// aimAt turns c's view to victim's chest (server-side, like a rotation
+// packet would).
+func aimAt(c, victim *ClientConnection) {
+	a, v := c.player.Snapshot(), victim.player.Snapshot()
+	dx, dy, dz := v.X-a.X, (v.Y+1.0)-(a.Y+anticheat.EyeHeight), v.Z-a.Z
+	yaw := float32(math.Atan2(-dx, dz) * 180 / math.Pi)
+	pitch := float32(-math.Atan2(dy, math.Hypot(dx, dz)) * 180 / math.Pi)
+	c.player.LookAt(yaw, pitch, a.OnGround)
+	c.ac.Move.PrevYaw, c.ac.Move.PrevPitch = yaw, pitch
 }
 
 // interactEntity sends Interact (interact, main hand) from c on eid.

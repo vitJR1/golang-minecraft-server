@@ -105,6 +105,16 @@ var Thresholds = map[string]float64{
 	// and effects; each violation already costs a setback.
 	"movement.speed": 5,
 	"movement.fly":   5,
+	// Action heuristics (server/actions.go): a rate over the budget is
+	// near-proof, a pose-based test is evidence.
+	"world.fastbreak": 3,
+	"world.fastplace": 4,
+	"world.scaffold":  5,
+	"world.angle":     6,
+	"combat.cps":      4,
+	"combat.noswing":  4,
+	"combat.aim":      6,
+	"combat.velocity": 5,
 }
 
 // Threshold is the detection level for check.
