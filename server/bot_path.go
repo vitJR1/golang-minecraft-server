@@ -198,6 +198,42 @@ func findPath(at blockAt, start world.Position, aim world.Position, goal func(wo
 	return nil
 }
 
+// findRoute prefers walking over building: a walk-only search first — it
+// finds bridges already there, this bot's from an earlier trip or anyone
+// else's — and a search that may bridge only when walking can't get there.
+// Without it the greedy search would happily lay a fresh bridge alongside
+// an existing one.
+func findRoute(at blockAt, start, aim world.Position, goal func(world.Position) bool, maxBridge, budget int) []routeStep {
+	if r := findPath(at, start, aim, goal, 0, budget); r != nil || maxBridge == 0 {
+		return r
+	}
+	return findPath(at, start, aim, goal, maxBridge, budget)
+}
+
+// resumeAt finds where a route can be picked up again from cell here: the
+// index of the step after the one the bot stands on (or next to, at the same
+// level), or -1. A bot knocked off its bridge mid-way continues that bridge
+// instead of starting a new one from wherever it landed.
+func resumeAt(route []routeStep, here world.Position) int {
+	best, bestD := -1, 2
+	for i, s := range route {
+		dx, dz := s.Cell.X-here.X, s.Cell.Z-here.Z
+		if s.Cell.Y != here.Y || dx < -1 || dx > 1 || dz < -1 || dz > 1 {
+			continue
+		}
+		if d := dx*dx + dz*dz; d < bestD || (d == bestD && i > best) {
+			best, bestD = i, d
+		}
+	}
+	if best < 0 {
+		return -1
+	}
+	if bestD == 0 {
+		return best + 1 // standing on it: go on to the next
+	}
+	return best // next to it: walk onto it first
+}
+
 // feetCell is the cell a player's feet at y are in, nudged up so standing
 // on a full block (y exactly an integer) or on a slab maps to one cell.
 func feetCell(x, y, z float64) world.Position {

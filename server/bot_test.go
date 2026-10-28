@@ -208,3 +208,23 @@ func TestBotLeavesWithItsGame(t *testing.T) {
 		t.Fatal("removed bot still in the player list")
 	}
 }
+
+func TestBotFightsWithItsBestWeapon(t *testing.T) {
+	inst, _ := botWorld()
+	guide := &fakeGuide{plan: game.BotPlan{}}
+	b := addTestBot(t, inst, guide, DifficultyHard, 0.5, 0.5)
+	b.inv.set(hotbarStart, woolStack(t, 32)) // in hand: wool from bridging
+	sword, _ := world.ItemByName("minecraft:iron_sword")
+	b.inv.set(mainInvStart+5, itemStack{ID: sword, Count: 1}) // in the backpack
+	b.heldSlot.Store(0)
+	enemy := offlineConn(inst, "Enemy", player.Survival, 2.5, 64, 0.5)
+
+	runTicks(inst, 60)
+	drain(enemy)
+	if b.heldItemName() != "minecraft:iron_sword" {
+		t.Fatalf("fighting with %q, want the iron sword", b.heldItemName())
+	}
+	if enemy.player.Health() >= player.MaxHealth {
+		t.Fatal("no hit landed")
+	}
+}

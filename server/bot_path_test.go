@@ -103,9 +103,9 @@ func TestPathDropsFromALedge(t *testing.T) {
 // TestPathDoesntClimbWalls: a wall / fence is 1.5 blocks tall — beyond a
 // jump — so the path goes round it, never over.
 func TestPathDoesntClimbWalls(t *testing.T) {
-	wall, ok := world.BlockByName("minecraft:cobblestone_wall")
+	wall, ok := world.BlockByName("minecraft:mossy_stone_brick_wall")
 	if !ok {
-		t.Skip("cobblestone_wall not registered")
+		t.Fatal("mossy_stone_brick_wall not registered")
 	}
 	w := testWorld{}
 	w.floor(63, -2, 10, -4, 4)
@@ -120,5 +120,48 @@ func TestPathDoesntClimbWalls(t *testing.T) {
 		if s.Cell.Y > 64 {
 			t.Fatalf("path climbs onto the wall at %v", s.Cell)
 		}
+	}
+}
+
+// TestRouteUsesAnExistingBridge: with a bridge already across the gap, the
+// route walks it instead of laying a new one straight at the target.
+func TestRouteUsesAnExistingBridge(t *testing.T) {
+	w := testWorld{}
+	w.floor(63, -3, 2, -3, 3) // island A
+	w.floor(63, 8, 12, -3, 3) // island B
+	for x := 3; x <= 7; x++ { // an old bridge along z=-3
+		w[at(x, 63, -3)] = world.Stone
+	}
+	goal := reach(at(10, 64, 2))
+	greedy := findPath(w.at, at(0, 64, 2), at(10, 64, 2), goal, 64, pathNearNodes)
+	if bridgesIn(greedy) == 0 {
+		t.Skip("the plain search already walks the old bridge here")
+	}
+	path := findRoute(w.at, at(0, 64, 2), at(10, 64, 2), goal, 64, pathNearNodes)
+	if path == nil || bridgesIn(path) != 0 {
+		t.Fatalf("built %d new bridge blocks next to an existing bridge", bridgesIn(path))
+	}
+	// Without an old bridge it still builds one.
+	w2 := testWorld{}
+	w2.floor(63, -3, 2, -3, 3)
+	w2.floor(63, 8, 12, -3, 3)
+	if p := findRoute(w2.at, at(0, 64, 2), at(10, 64, 2), goal, 64, pathNearNodes); bridgesIn(p) == 0 {
+		t.Fatal("no bridge where none exists")
+	}
+}
+
+func TestResumeAt(t *testing.T) {
+	route := []routeStep{{Cell: at(1, 64, 0)}, {Cell: at(2, 64, 0)}, {Cell: at(3, 64, 0), Bridge: true}, {Cell: at(4, 64, 0), Bridge: true}}
+	if i := resumeAt(route, at(2, 64, 0)); i != 2 {
+		t.Errorf("standing on step 1: resume at %d, want 2", i)
+	}
+	if i := resumeAt(route, at(3, 64, 1)); i != 2 {
+		t.Errorf("knocked beside step 2: resume at %d, want 2 (walk back onto it)", i)
+	}
+	if i := resumeAt(route, at(3, 60, 0)); i != -1 {
+		t.Errorf("fell below the route: resume at %d, want -1", i)
+	}
+	if i := resumeAt(route, at(9, 64, 9)); i != -1 {
+		t.Errorf("far away: resume at %d, want -1", i)
 	}
 }

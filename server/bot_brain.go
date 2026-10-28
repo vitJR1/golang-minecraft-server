@@ -73,8 +73,16 @@ type brainState struct {
 	farStart   world.Position
 	farRoute   bool // the current route came from a far search
 	needBlocks int
-	dig        *digJob
-	failed     map[world.Position]uint64
+
+	// lastRoute is a far route the bot fell off (knocked, stuck), kept to
+	// pick up again (resumeAt) rather than search afresh; resumedAt the step
+	// it was last resumed at, so a spot it keeps getting stuck on is searched
+	// anew after all.
+	lastRoute []routeStep
+	lastKey   string
+	resumedAt int
+	dig       *digJob
+	failed    map[world.Position]uint64
 
 	yaw, pitch float32
 }
@@ -228,6 +236,9 @@ func (b *bot) fight(now uint64, t *ClientConnection) physInput {
 	}
 
 	d := b.reach(t)
+	if d <= botAttackReach+1 {
+		b.holdBestWeapon() // the sword, not the wool it bridged with
+	}
 	if d <= botAttackReach && now >= br.targetAt+b.skill.reaction && now >= br.nextSwing {
 		br.nextSwing = now + uint64(20/b.skill.cps) + uint64(b.rng.Intn(2))
 		c.broadcastEntityAnimation(0)
@@ -439,7 +450,7 @@ func (b *bot) goTo(now uint64, key string, aim world.Position, goal func(world.P
 	}
 	stale := br.routeKey != key || br.route == nil || now >= br.routeAt+botRouteEvery || now >= br.progressAt+botStuckTicks
 	if stale && b.phys.OnGround {
-		br.route = findPath(c.instance.World.GetBlock, here, aim, goal, maxBridge, pathNearNodes)
+		br.route = findRoute(c.instance.World.GetBlock, here, aim, goal, maxBridge, pathNearNodes)
 		br.routeIdx, br.routeKey, br.routeAt, br.routeStart, br.progressAt, br.farRoute = 0, key, now, here, now, false
 		if br.route == nil {
 			// Not within a quick search (another island, a long way round):
@@ -452,6 +463,15 @@ func (b *bot) goTo(now uint64, key string, aim world.Position, goal func(world.P
 		return physInput{}
 	}
 	return b.follow(now)
+}
+
+// dropRoute abandons the current route, keeping a far one to resume.
+func (b *bot) dropRoute() {
+	br := &b.brain
+	if br.farRoute && br.route != nil {
+		br.lastRoute, br.lastKey = br.route, br.routeKey
+	}
+	br.route = nil
 }
 
 // Far-route search states (goToFar).
@@ -468,8 +488,22 @@ const (
 // recomputed on a timer.
 func (b *bot) goToFar(now uint64, key string, aim world.Position, goal func(world.Position) bool, maxBridge int) (physInput, int) {
 	c, br := b.c, &b.brain
-	if br.routeKey == key && br.route != nil && now < br.progressAt+botStuckTicks {
-		return b.follow(now), farReady
+	if br.routeKey == key && br.route != nil {
+		if now < br.progressAt+botStuckTicks {
+			return b.follow(now), farReady
+		}
+		b.dropRoute() // stuck: resume from where it stands, or search anew
+	}
+	// Fell off a route to this goal: carry on along it if the bot is still
+	// on (or by) it, instead of laying a new one from here.
+	if br.lastKey == key && br.lastRoute != nil && b.phys.OnGround {
+		here := c.feetCellNow()
+		if i := resumeAt(br.lastRoute, here); i >= 0 && i < len(br.lastRoute) && i != br.resumedAt {
+			br.route, br.routeIdx, br.routeKey, br.routeStart, br.progressAt, br.farRoute = br.lastRoute, i, key, here, now, true
+			br.resumedAt, br.lastRoute = i, nil
+			return b.follow(now), farReady
+		}
+		br.lastRoute = nil
 	}
 	if br.far != nil && br.farKey == key {
 		select {
@@ -479,7 +513,7 @@ func (b *bot) goToFar(now uint64, key string, aim world.Position, goal func(worl
 				return physInput{}, farFailed
 			}
 			br.route, br.routeIdx, br.routeKey, br.routeAt, br.routeStart, br.progressAt = route, 0, key, now, br.farStart, now
-			br.farRoute = true
+			br.farRoute, br.resumedAt = true, -1
 			return b.follow(now), farReady
 		default:
 			return physInput{}, farPending
@@ -495,7 +529,7 @@ func (b *bot) goToFar(now uint64, key string, aim world.Position, goal func(worl
 	ch := make(chan []routeStep, 1)
 	br.far, br.farKey, br.farStart = ch, key, here
 	at := c.instance.World.GetBlock // MemoryWorld reads are locked: safe off the tick
-	go func() { ch <- findPath(at, here, aim, goal, maxBridge, pathFarNodes) }()
+	go func() { ch <- findRoute(at, here, aim, goal, maxBridge, pathFarNodes) }()
 	return physInput{}, farPending
 }
 
@@ -529,7 +563,7 @@ func (b *bot) follow(now uint64) physInput {
 	}
 	here := c.feetCellNow()
 	if here != prev && here != step.Cell && b.phys.OnGround {
-		br.route = nil // knocked off the route: plan again
+		b.dropRoute() // knocked off the route: pick it up again or plan anew
 		return physInput{}
 	}
 
@@ -622,6 +656,37 @@ func (c *ClientConnection) botHold(match func(itemStack) bool) bool {
 		}
 	}
 	return false
+}
+
+// weaponDamage is how hard a stack hits: the item's attack damage plus
+// Sharpness, as handleAttack computes it.
+func weaponDamage(st itemStack) float32 {
+	name, _ := world.ItemName(st.ID)
+	d := world.AttackDamage(name)
+	if lvl := st.enchantLevel(EnchantSharpness); lvl > 0 {
+		d += 0.5*float32(lvl) + 0.5
+	}
+	return d
+}
+
+// holdBestWeapon holds the hardest-hitting stack it carries, when that beats
+// what's in hand.
+func (b *bot) holdBestWeapon() {
+	c := b.c
+	held := c.inv.held(c.heldSlot.Load())
+	best, bestDamage := itemStack{}, float32(1) // a bare hand
+	if !held.empty() {
+		bestDamage = weaponDamage(held)
+	}
+	for s := int16(mainInvStart); s < hotbarStart+9; s++ {
+		if st := c.inv.get(s); !st.empty() && weaponDamage(st) > bestDamage {
+			best, bestDamage = st, weaponDamage(st)
+		}
+	}
+	if best.empty() {
+		return
+	}
+	c.botHold(func(st itemStack) bool { return st.sameKind(best) && st.Count == best.Count })
 }
 
 // holdBestTool holds whatever digs blk fastest (the hand included).
