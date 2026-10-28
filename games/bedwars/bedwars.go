@@ -119,6 +119,8 @@ type bedWars struct {
 	countdownAt uint64
 	// chosen is the team each waiting player picked (team_select.go).
 	chosen map[int32]int
+	// tagged is the name-tag group each player was last given (sidebar.go).
+	tagged map[int32]string
 }
 
 func newBedWars(arena *Arena, teams []Team, teamSize int) *bedWars {
@@ -192,6 +194,7 @@ func (g *bedWars) OnPlayerJoin(ctx *game.Ctx, p game.PlayerHandle) {
 	g.mu.Unlock()
 
 	p.SetSidebar(sidebarTitle, g.sidebarLines(p, tick))
+	g.syncNameTag(p)
 	p.SetGamemode(player.Survival)
 	teleport(p, spawn)
 	g.equip(p, ts, k)
@@ -203,6 +206,7 @@ func (g *bedWars) OnPlayerJoin(ctx *game.Ctx, p game.PlayerHandle) {
 func (g *bedWars) OnPlayerLeave(ctx *game.Ctx, p game.PlayerHandle) {
 	p.ClearSidebar()
 	g.mu.Lock()
+	delete(g.tagged, p.EntityID()) // the server drops the tag with the player
 	if !g.started {
 		g.mu.Unlock()
 		g.leaveLobby(ctx, p)

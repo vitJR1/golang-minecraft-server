@@ -352,10 +352,23 @@ type PlayerHandle interface {
 	SetSidebar(title string, lines []string)
 	ClearSidebar()
 
+	// SetNameTag groups the player under a coloured prefix shown before
+	// their name in the tab list and over their head, for everyone in the
+	// instance (a team). A zero NameTag takes them out. Leaving the
+	// instance does too.
+	SetNameTag(tag NameTag)
+
 	// Respawn brings a dead player back at (x, y, z) with full health,
 	// re-sending effects and equipment. Used with SetCustomRespawn.
 	Respawn(x, y, z float64)
 
 	// Kill kills the player as an environmental death (void, game rule).
 	Kill()
+}
+
+// NameTag is a player's group in the tab list and over their head.
+type NameTag struct {
+	Group  string // players of one group share it; "" = none
+	Prefix string // shown before the name, §-codes work ("§c● ")
+	Colour byte   // § colour code of the name itself ('c' = red); 0 = default
 }

@@ -35,6 +35,7 @@ type fakePlayer struct {
 	sounds   []string
 	respawns int
 	sidebar  []string // last SetSidebar lines (nil after ClearSidebar)
+	nameTag  game.NameTag
 
 	menuTitle string
 	menuItems []game.MenuItem
@@ -270,6 +271,11 @@ func (p *fakePlayer) SetSidebar(_ string, lines []string) {
 func (p *fakePlayer) ClearSidebar() {
 	p.mu.Lock()
 	p.sidebar = nil
+	p.mu.Unlock()
+}
+func (p *fakePlayer) SetNameTag(tag game.NameTag) {
+	p.mu.Lock()
+	p.nameTag = tag
 	p.mu.Unlock()
 }
 func (p *fakePlayer) PlaySound(name string, _, _ float32) {

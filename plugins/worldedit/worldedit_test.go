@@ -53,6 +53,7 @@ func (p *fakePlayer) SendTitle(string, string, int, int, int)                   
 func (p *fakePlayer) PlaySound(string, float32, float32)                          {}
 func (p *fakePlayer) SetSidebar(string, []string)                                 {}
 func (p *fakePlayer) ClearSidebar()                                               {}
+func (p *fakePlayer) SetNameTag(game.NameTag)                                     {}
 func (p *fakePlayer) Respawn(float64, float64, float64)                           {}
 func (p *fakePlayer) Kill()                                                       {}
 

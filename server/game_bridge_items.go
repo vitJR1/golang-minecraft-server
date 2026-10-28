@@ -127,6 +127,11 @@ func (b playerBridge) SendTitle(title, subtitle string, fadeIn, stay, fadeOut in
 
 func (b playerBridge) SetSidebar(title string, lines []string) { b.conn.setSidebar(title, lines) }
 func (b playerBridge) ClearSidebar()                           { b.conn.clearSidebar() }
+func (b playerBridge) SetNameTag(tag game.NameTag) {
+	if inst := b.conn.instance; inst != nil {
+		inst.setNameTag(b.conn.playerName, tag)
+	}
+}
 
 func (b playerBridge) PlaySound(name string, volume, pitch float32) {
 	s := b.conn.player.Snapshot()

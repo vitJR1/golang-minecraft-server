@@ -669,6 +669,9 @@ type ClientConnection struct {
 	// sidebarMu guards it. See sidebar.go.
 	sidebarMu sidebarMutex
 	sidebar   *sidebarState
+	// nameTags are the name-tag groups the client has (name_tags.go),
+	// under sidebarMu.
+	nameTags map[string]shownTag
 
 	// writerDone is closed by writerLoop on exit. cleanup waits on it
 	// (with a timeout) so any in-flight frames — particularly the Pong that

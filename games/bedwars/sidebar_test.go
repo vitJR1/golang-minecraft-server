@@ -64,8 +64,14 @@ func TestSidebarCountsKillsAndBeds(t *testing.T) {
 	if !strings.Contains(lines, "Diamond: §fTier I") || !strings.Contains(lines, "Emerald: §fTier I") || !strings.Contains(lines, "Next: ") {
 		t.Errorf("tier lines missing:\n%s", lines)
 	}
-	if !strings.Contains(lines, "Team: ") {
-		t.Errorf("team line missing:\n%s", lines)
+	// One line per team: alive with its bed, or out (struck through).
+	if !strings.Contains(lines, "§c■ §fRed §a✔ §71/4 §7(you)") || !strings.Contains(lines, "§9■ §7§mBlue§r §c✘ §70/4") ||
+		!strings.Contains(lines, "§a■ §fGreen §a✔ §70/4") {
+		t.Errorf("team lines:\n%s", lines)
+	}
+	// The tab list / name tag: "● " in the team colour.
+	if tag := red.nameTag; tag.Group != "bw_red" || tag.Prefix != "§c● " || tag.Colour != 'c' {
+		t.Errorf("red's name tag %+v", tag)
 	}
 	// Blue's own board stays at zero.
 	if b := strings.Join(blue.sidebar, "\n"); !strings.Contains(b, "Kills: §a0") || !strings.Contains(b, "Beds broken: §a0") {

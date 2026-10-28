@@ -2,6 +2,7 @@ package bedwars
 
 import (
 	"fmt"
+	"strings"
 
 	"minecraft-server/game"
 )
@@ -113,6 +114,34 @@ func (g *bedWars) announceUpgrades(ctx *game.Ctx, tick uint64) {
 func (g *bedWars) refreshSidebars(ctx *game.Ctx, tick uint64) {
 	for _, p := range ctx.Instance.Players() {
 		p.SetSidebar(sidebarTitle, g.sidebarLines(p, tick))
+		g.syncNameTag(p)
+	}
+}
+
+// syncNameTag puts p's team before their name in the tab list and over
+// their head — "● Name" in the team's colour — once they're on a team or
+// have picked one in the lobby. Only a change goes to the server.
+func (g *bedWars) syncNameTag(p game.PlayerHandle) {
+	eid := p.EntityID()
+	g.mu.Lock()
+	id, ok := g.byEntity[eid]
+	if !ok && !g.started {
+		id, ok = g.chosen[eid]
+	}
+	var tag game.NameTag
+	if ok && id >= 0 && id < len(g.teams) {
+		t := g.teams[id].team
+		code := teamColour(t)
+		tag = game.NameTag{Group: "bw_" + strings.ToLower(t.Name), Prefix: code + "● ", Colour: code[len(code)-1]}
+	}
+	if g.tagged == nil {
+		g.tagged = map[int32]string{}
+	}
+	changed := g.tagged[eid] != tag.Group
+	g.tagged[eid] = tag.Group
+	g.mu.Unlock()
+	if changed {
+		p.SetNameTag(tag)
 	}
 }
 
@@ -128,10 +157,8 @@ func (g *bedWars) sidebarLines(p game.PlayerHandle, tick uint64) []string {
 	if s := g.stats[p.EntityID()]; s != nil {
 		st = *s
 	}
-	teamName := ""
-	if id, ok := g.byEntity[p.EntityID()]; ok {
-		teamName = g.teams[id].team.Name
-	}
+	own, onTeam := g.byEntity[p.EntityID()]
+	teamLines := g.teamLinesLocked(own, onTeam)
 	g.mu.Unlock()
 
 	lines := []string{
@@ -146,8 +173,34 @@ func (g *bedWars) sidebarLines(p game.PlayerHandle, tick uint64) []string {
 	} else {
 		lines = append(lines, "§eGenerators maxed")
 	}
-	if teamName != "" {
-		lines = append(lines, "", "§fTeam: §e"+teamName)
+	lines = append(lines, "")
+	return append(lines, teamLines...)
+}
+
+// teamLinesLocked is one sidebar line per team: its colour and name, ✔
+// while the bed stands, ✘ once it's gone (struck through when nobody's
+// left), the players still in out of the team size, and "(you)" on the
+// viewer's own team. Caller holds g.mu.
+func (g *bedWars) teamLinesLocked(own int, onTeam bool) []string {
+	lines := make([]string, 0, len(g.teams))
+	for _, ts := range g.teams {
+		alive := len(ts.members)
+		name, status := "§f"+ts.team.Name, "§a✔"
+		switch {
+		case !ts.bedAlive && alive == 0:
+			name, status = "§7§m"+ts.team.Name+"§r", "§c✘"
+		case !ts.bedAlive:
+			status = "§c✘"
+		}
+		count := fmt.Sprintf("§7%d", alive)
+		if g.teamSize > 0 {
+			count = fmt.Sprintf("§7%d/%d", alive, g.teamSize)
+		}
+		you := ""
+		if onTeam && own == ts.team.ID {
+			you = " §7(you)"
+		}
+		lines = append(lines, fmt.Sprintf("%s■ %s %s %s%s", teamColour(ts.team), name, status, count, you))
 	}
 	return lines
 }

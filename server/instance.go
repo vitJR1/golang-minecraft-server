@@ -251,6 +251,11 @@ type Instance struct {
 	// (bot_team.go). Touched only on the tick goroutine.
 	botTeams map[string]*teamBrain
 
+	// tags are the players' name-tag groups by player name (name_tags.go),
+	// guarded by tagsMu.
+	tagsMu sync.Mutex
+	tags   map[string]game.NameTag
+
 	// OnRewritePlace, when set, may swap the block a player is about to
 	// place (game.PlacementRewriter). Runs before OnBlockPlace.
 	OnRewritePlace func(c *ClientConnection, pos world.Position, blk world.Block) world.Block
@@ -456,6 +461,9 @@ func (i *Instance) JoinAndAnnounce(c *ClientConnection) {
 
 	i.joinMu.Unlock()
 
+	// The instance's name-tag groups replace the previous instance's.
+	c.syncNameTags(i)
+
 	// Hooks fire outside the lock so game logic can call back into the
 	// instance without deadlocking.
 	i.fireJoin(c)
@@ -487,6 +495,13 @@ func (i *Instance) LeaveAndAnnounce(c *ClientConnection) {
 		c.player.EntityID,
 	)
 	i.Players.Remove(c.player.EntityID)
+	i.tagsMu.Lock()
+	_, tagged := i.tags[c.playerName]
+	delete(i.tags, c.playerName)
+	i.tagsMu.Unlock()
+	if tagged {
+		i.Players.Range(func(o *ClientConnection) { o.syncNameTags(i) })
+	}
 }
 
 // safeHook runs a hook function with panic recovery and a labelled log
