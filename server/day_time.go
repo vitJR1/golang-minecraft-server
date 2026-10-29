@@ -1,6 +1,9 @@
 package server
 
-import "minecraft-server/protocol"
+import (
+	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
+)
 
 // day_time.go: a fixed time of day per instance (BedWars: always noon).
 //
@@ -46,5 +49,5 @@ func (c *ClientConnection) sendDayTime() {
 	var payload []byte
 	payload = append(payload, protocol.WriteLong(int64(inst.Tick()))...)
 	payload = append(payload, protocol.WriteLong(t)...)
-	_ = c.safeWrite(CbPlayUpdateTime, payload)
+	_ = c.safeWrite(packetid.CbPlayUpdateTime, payload)
 }

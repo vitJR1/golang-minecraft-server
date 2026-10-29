@@ -7,6 +7,7 @@ import (
 
 	"minecraft-server/game"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 )
 
 // name_tags.go: players grouped under a coloured prefix — "● Name" in the
@@ -113,11 +114,11 @@ func (c *ClientConnection) syncNameTags(inst *Instance) {
 	for team, w := range want {
 		h, ok := have[team]
 		if !ok {
-			_ = c.safeWrite(CbPlayUpdateTeams, tagTeamPayload(team, teamModeCreate, w, sortedNames(w.members)))
+			_ = c.safeWrite(packetid.CbPlayUpdateTeams, tagTeamPayload(team, teamModeCreate, w, sortedNames(w.members)))
 			continue
 		}
 		if h.prefix != w.prefix || h.colour != w.colour {
-			_ = c.safeWrite(CbPlayUpdateTeams, tagTeamPayload(team, teamModeUpdate, w, nil))
+			_ = c.safeWrite(packetid.CbPlayUpdateTeams, tagTeamPayload(team, teamModeUpdate, w, nil))
 		}
 		var add, remove []string
 		for n := range w.members {
@@ -132,16 +133,16 @@ func (c *ClientConnection) syncNameTags(inst *Instance) {
 		}
 		if len(add) > 0 {
 			sort.Strings(add)
-			_ = c.safeWrite(CbPlayUpdateTeams, teamMembersPayload(team, teamModeAddMembers, add))
+			_ = c.safeWrite(packetid.CbPlayUpdateTeams, teamMembersPayload(team, teamModeAddMembers, add))
 		}
 		if len(remove) > 0 {
 			sort.Strings(remove)
-			_ = c.safeWrite(CbPlayUpdateTeams, teamMembersPayload(team, teamModeRemoveMembers, remove))
+			_ = c.safeWrite(packetid.CbPlayUpdateTeams, teamMembersPayload(team, teamModeRemoveMembers, remove))
 		}
 	}
 	for team := range have {
 		if _, ok := want[team]; !ok {
-			_ = c.safeWrite(CbPlayUpdateTeams, teamRemovePayload(team))
+			_ = c.safeWrite(packetid.CbPlayUpdateTeams, teamRemovePayload(team))
 		}
 	}
 	c.nameTags = want

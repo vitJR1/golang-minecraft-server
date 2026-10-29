@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"minecraft-server/cfg"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"strings"
 	"unicode/utf8"
 )
@@ -91,7 +92,7 @@ func promoOnlySample() []map[string]any {
 
 func (c *ClientConnection) handleStatus(packet *bytes.Buffer, packetID int) error {
 	switch packetID {
-	case SbStatusRequest:
+	case packetid.SbStatusRequest:
 		slog.Debug("status request", "addr", c.conn.RemoteAddr().String())
 		resp := map[string]any{
 			"version": map[string]any{
@@ -125,15 +126,15 @@ func (c *ClientConnection) handleStatus(packet *bytes.Buffer, packetID int) erro
 			resp["favicon"] = icon
 		}
 		data, _ := json.Marshal(resp)
-		return c.safeWrite(CbStatusResponse, protocol.WriteString(string(data)))
+		return c.safeWrite(packetid.CbStatusResponse, protocol.WriteString(string(data)))
 
-	case SbStatusPing:
+	case packetid.SbStatusPing:
 		slog.Debug("status ping", "addr", c.conn.RemoteAddr().String())
 		payload := make([]byte, 8)
 		if _, err := packet.Read(payload); err != nil {
 			return fmt.Errorf("reading ping payload: %w", err)
 		}
-		if err := c.safeWrite(CbStatusPong, payload); err != nil {
+		if err := c.safeWrite(packetid.CbStatusPong, payload); err != nil {
 			return err
 		}
 		// Status handshakes are one-shot — close after pong.

@@ -8,6 +8,7 @@ import (
 
 	"minecraft-server/nbt"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -404,7 +405,7 @@ func (c *ClientConnection) sendChestInventory(slots [chestSlotCount]itemStack) e
 	}
 	c.writeInventoryMirror(&buf)
 	writeStack(&buf, c.cursor)
-	return c.safeWrite(CbPlaySetContainerContent, buf.Bytes())
+	return c.safeWrite(packetid.CbPlaySetContainerContent, buf.Bytes())
 }
 
 // readSlot reads one wire Slot from buf: present bool, then (item id, count,

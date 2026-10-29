@@ -3,6 +3,7 @@ package server
 import (
 	"minecraft-server/cfg"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"testing"
 	"time"
 )
@@ -51,13 +52,13 @@ func TestMaxPlayersRejectsOverCap(t *testing.T) {
 
 	// Third tries to join — must be kicked with Login Disconnect.
 	c := pipeClientOn(t, s)
-	c.write(t, SbHandshake, buildHandshake(763, "localhost", 25565, 2))
-	c.write(t, SbLoginStart, protocol.WriteString("Charlie"))
+	c.write(t, packetid.SbHandshake, buildHandshake(763, "localhost", 25565, 2))
+	c.write(t, packetid.SbLoginStart, protocol.WriteString("Charlie"))
 
 	// First reply is the disconnect packet.
 	id, _ := c.read(t)
-	if id != CbLoginDisconnect {
-		t.Fatalf("expected LoginDisconnect (0x%02X), got 0x%02X", CbLoginDisconnect, id)
+	if id != packetid.CbLoginDisconnect {
+		t.Fatalf("expected LoginDisconnect (0x%02X), got 0x%02X", packetid.CbLoginDisconnect, id)
 	}
 
 	// Server-side: Charlie never registered.

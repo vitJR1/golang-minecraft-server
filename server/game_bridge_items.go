@@ -5,6 +5,7 @@ import (
 
 	"minecraft-server/game"
 	"minecraft-server/player"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -135,7 +136,7 @@ func (b playerBridge) SetNameTag(tag game.NameTag) {
 
 func (b playerBridge) PlaySound(name string, volume, pitch float32) {
 	s := b.conn.player.Snapshot()
-	_ = b.conn.safeWrite(CbPlaySoundEffect,
+	_ = b.conn.safeWrite(packetid.CbPlaySoundEffect,
 		soundEffectPayload(name, soundCategoryPlayer, s.X, s.Y, s.Z, volume, pitch))
 }
 

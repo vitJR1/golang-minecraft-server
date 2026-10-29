@@ -5,6 +5,7 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 )
 
 // fly_test.go: /fly and its interplay with the movement checks.
@@ -14,7 +15,7 @@ func abilitiesSent(t *testing.T, c *ClientConnection) []byte {
 	t.Helper()
 	var flags []byte
 	for _, p := range drainPackets(t, c) {
-		if p.id == CbPlayPlayerAbil {
+		if p.id == packetid.CbPlayPlayerAbil {
 			if len(p.body) != 9 {
 				t.Fatalf("abilities body is %d bytes, want 9 (flags + 2 floats)", len(p.body))
 			}
@@ -28,7 +29,7 @@ func abilitiesSent(t *testing.T, c *ClientConnection) []byte {
 func pongAll(t *testing.T, c *ClientConnection) {
 	t.Helper()
 	for id := int32(1); c.ac.Transactions.Outstanding() > 0 && id < 100; id++ {
-		play(t, c, SbPlayPong, protocol.WriteInt(id))
+		play(t, c, packetid.SbPlayPong, protocol.WriteInt(id))
 	}
 }
 
@@ -117,14 +118,14 @@ func TestGamemodeChangeAndRespawnDropFlight(t *testing.T) {
 func TestClientClaimingFlightFlagged(t *testing.T) {
 	inst := fieldWorld()
 	c := offlineConn(inst, "Hacker", player.Survival, 0.5, 64, 0.5)
-	play(t, c, SbPlayPlayerAbilities, []byte{abilityFlying})
+	play(t, c, packetid.SbPlayPlayerAbilities, []byte{abilityFlying})
 	if !flaggedNow(c, "badpackets.abilities") {
 		t.Fatal("flying without permission not flagged")
 	}
 	ok := offlineConn(inst, "Pilot", player.Survival, 2.5, 64, 0.5)
 	ok.setFlight(true)
 	drain(ok)
-	play(t, ok, SbPlayPlayerAbilities, []byte{abilityFlying})
+	play(t, ok, packetid.SbPlayPlayerAbilities, []byte{abilityFlying})
 	if flaggedNow(ok, "badpackets.abilities") {
 		t.Fatal("flying with /fly flagged")
 	}

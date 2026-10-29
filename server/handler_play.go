@@ -8,6 +8,7 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 	"strings"
 )
@@ -23,7 +24,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 	}
 
 	switch packetID {
-	case SbPlayKeepAlive:
+	case packetid.SbPlayKeepAlive:
 		id, err := protocol.ReadLong(packet)
 		if err != nil {
 			return fmt.Errorf("reading keep alive response: %w", err)
@@ -32,14 +33,14 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			c.flag("badpackets.keepalive", fmt.Sprintf("keep-alive %d was never sent", id))
 		}
 
-	case SbPlayPong:
+	case packetid.SbPlayPong:
 		id, err := protocol.ReadInt(packet)
 		if err != nil {
 			return fmt.Errorf("pong: %w", err)
 		}
 		c.onPong(id)
 
-	case SbPlayChatMessage:
+	case packetid.SbPlayChatMessage:
 		message, err := protocol.ReadStringFromBuf(packet)
 		if err != nil {
 			return fmt.Errorf("reading chat message: %w", err)
@@ -74,7 +75,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		}
 		c.instance.BroadcastChat(c.playerName, rewrite)
 
-	case SbPlayChatCommand:
+	case packetid.SbPlayChatCommand:
 		raw, err := protocol.ReadStringFromBuf(packet)
 		if err != nil {
 			return fmt.Errorf("reading chat command: %w", err)
@@ -89,7 +90,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		slog.Info("command", "player", c.playerName, "cmd", raw)
 		c.server.RunCommand(c, raw)
 
-	case SbPlaySetPos:
+	case packetid.SbPlaySetPos:
 		c.countMove()
 		x, y, z, onGround, err := readPosOnGround(packet)
 		if err != nil {
@@ -105,7 +106,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		c.player.MoveTo(x, y, z, onGround)
 		c.broadcastEntityTeleport()
 
-	case SbPlaySetPosRot:
+	case packetid.SbPlaySetPosRot:
 		c.countMove()
 		x, y, z, err := readXYZ(packet)
 		if err != nil {
@@ -127,7 +128,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		c.broadcastEntityTeleport()
 		c.broadcastHeadRotation()
 
-	case SbPlaySetRot:
+	case packetid.SbPlaySetRot:
 		c.countMove()
 		yaw, pitch, onGround, err := readYawPitchOnGround(packet)
 		if err != nil {
@@ -145,29 +146,29 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		c.broadcastEntityTeleport()
 		c.broadcastHeadRotation()
 
-	case SbPlayMoveStatus:
+	case packetid.SbPlayMoveStatus:
 		// On-ground flag only, sent when it changes; the server works out
 		// ground itself (movement.go), so it only counts for the timer.
 		c.countMove()
 
-	case SbPlayTeleportConfirm:
+	case packetid.SbPlayTeleportConfirm:
 		id, err := protocol.ReadVarInt(packet)
 		if err != nil {
 			return fmt.Errorf("teleport confirm: %w", err)
 		}
 		c.onTeleportConfirm(int32(id))
 
-	case SbPlayClientInfo:
+	case packetid.SbPlayClientInfo:
 		// Sent right after LoginSuccess (locale, view distance, chat mode,
 		// displayed skin parts, main hand). No-op for now.
 
-	case SbPlayPluginMessage:
+	case packetid.SbPlayPluginMessage:
 		// Custom-channel data, e.g. vanilla client sends "minecraft:brand"
 		// = "vanilla" right after login. We don't act on any of these yet.
 		// Read the channel just so logs aren't noisy, then drop.
 		_, _ = protocol.ReadStringFromBuf(packet)
 
-	case SbPlayCommandSuggestReq:
+	case packetid.SbPlayCommandSuggestReq:
 		// VarInt(transactionId) + String(text). The earlier "parse fails"
 		// was because we were listening on the wrong packet id (0x08 =
 		// settings, not tab_complete). With the right id (0x09) the
@@ -183,7 +184,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		start, length, matches := c.server.Suggestions(c, text)
 		_ = c.sendCommandSuggestionsResponse(int32(txID), start, length, matches)
 
-	case SbPlaySwingArm:
+	case packetid.SbPlaySwingArm:
 		hand, err := protocol.ReadVarInt(packet)
 		if err != nil {
 			return fmt.Errorf("swing arm: %w", err)
@@ -196,7 +197,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		c.broadcastEntityAnimation(anim)
 		c.swung()
 
-	case SbPlayUseItemOnBlock:
+	case packetid.SbPlayUseItemOnBlock:
 		// hand(VarInt) + Position(8) + face(VarInt) + cursor x/y/z(3×Float)
 		// + inside_block(bool) + sequence(VarInt)
 		_, _ = protocol.ReadVarInt(packet) // hand
@@ -347,7 +348,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			c.instance.absorbWater(placePos)
 		}
 
-	case SbPlayPlayerAction:
+	case packetid.SbPlayPlayerAction:
 		// action(VarInt) + Position(8) + face(Byte) + sequence(VarInt)
 		action, err := protocol.ReadVarInt(packet)
 		if err != nil {
@@ -417,7 +418,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			}
 		}
 
-	case SbPlayInteract:
+	case packetid.SbPlayInteract:
 		// target_eid(VarInt) + type(VarInt: 0=interact, 1=attack, 2=interact_at)
 		// + (if type==2) 3×Float + hand(VarInt) + sneaking(bool).
 		target, err := protocol.ReadVarInt(packet)
@@ -465,7 +466,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			c.instance.FrameInteract(int32(target), held)
 		}
 
-	case SbPlayPlayerAbilities:
+	case packetid.SbPlayPlayerAbilities:
 		// 1-byte flags. Bit 0x02 = flying (creative double-tap-space, /fly).
 		// Flying without permission is a fly module (fly.go).
 		flags, err := packet.ReadByte()
@@ -474,7 +475,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		}
 		c.onClientAbilities(flags)
 
-	case SbPlayPlayerCommand:
+	case packetid.SbPlayPlayerCommand:
 		// entity_id (VarInt) + action (VarInt) + jump_boost (VarInt).
 		// We track sneak (0/1) and sprint (3/4) input — combat applies the
 		// 1.9 sprint-knockback bonus, anticheat keeps the sneak state in the
@@ -504,7 +505,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			c.ac.Sprinting.Store(false)
 		}
 
-	case SbPlayClientCommand:
+	case packetid.SbPlayClientCommand:
 		// action (VarInt): 0 = perform respawn, 1 = request stats.
 		action, err := protocol.ReadVarInt(packet)
 		if err != nil {
@@ -524,7 +525,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			}
 		}
 
-	case SbPlayUseItem:
+	case packetid.SbPlayUseItem:
 		// hand(VarInt) + sequence(VarInt). Dispatches by the player's
 		// currently-held hotbar slot (tracked via SbPlaySetHeldItem)
 		// against the items we hand out:
@@ -587,7 +588,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			}
 		}
 
-	case SbPlaySetHeldItem:
+	case packetid.SbPlaySetHeldItem:
 		// Int16 — the new hotbar slot (0..8). Saved on the connection
 		// for SbPlayUseItem dispatch above.
 		raw, err := protocol.ReadUShortFromBuf(packet)
@@ -605,14 +606,14 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		c.cancelUse()
 		c.equipmentChanged()
 
-	case SbPlaySetCreativeSlot:
+	case packetid.SbPlaySetCreativeSlot:
 		// Short slot + Slot(item). Creative players send this whenever they
 		// pick/replace an inventory item; we record the item's name per slot so
 		// UseItemOnBlock can place what's actually held. Trailing item NBT (if
 		// any) is left unread — the per-packet buffer is discarded after.
 		c.onSetCreativeSlot(packet)
 
-	case SbPlayClickContainer:
+	case packetid.SbPlayClickContainer:
 		// Window ID(UByte) + State ID(VarInt) + Slot(Short) + Button(Byte)
 		// + Mode(VarInt) + array of changed slots + carried item. Menus use
 		// Slot plus Button/Mode (shift-click, right click); the changed
@@ -685,7 +686,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			}
 		}
 
-	case SbPlayCloseContainer:
+	case packetid.SbPlayCloseContainer:
 		// Window ID(UByte). Clear our menu state if it matches AND re-send
 		// the whole player inventory from the model — a stray ghost-click
 		// on a menu icon can leave the client's cursor/slots out of step,

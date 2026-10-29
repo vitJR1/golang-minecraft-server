@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 )
 
 // Declare Commands (Cb 0x10) sends the brigadier command tree to the
@@ -94,7 +95,7 @@ func (c *ClientConnection) sendDeclareCommands() error {
 	// rootIndex
 	protocol.WriteVarInt32ToBuffer(&buf, 0)
 
-	return c.safeWrite(CbPlayDeclareCommands, buf.Bytes())
+	return c.safeWrite(packetid.CbPlayDeclareCommands, buf.Bytes())
 }
 
 // uniqueRegisteredCommands returns each registered Command once — built-ins

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 )
 
 // Bit values for the Player Info Update "Actions" mask. Per the 1.20.1 spec
@@ -81,7 +82,7 @@ func removeEntitiesPayload(ids []int32) []byte {
 // handlers — once c.player has been updated via MoveTo/MoveAndLook/LookAt.
 func (c *ClientConnection) broadcastEntityTeleport() {
 	c.instance.Players.Broadcast(
-		CbPlayTeleportEntity,
+		packetid.CbPlayTeleportEntity,
 		teleportEntityPayload(c.player),
 		c.player.EntityID,
 	)
@@ -94,7 +95,7 @@ func (c *ClientConnection) broadcastEntityAnimation(anim byte) {
 	var buf bytes.Buffer
 	protocol.WriteVarInt32ToBuffer(&buf, c.player.EntityID)
 	buf.WriteByte(anim)
-	c.instance.Players.Broadcast(CbPlayEntityAnimation, buf.Bytes(), c.player.EntityID)
+	c.instance.Players.Broadcast(packetid.CbPlayEntityAnimation, buf.Bytes(), c.player.EntityID)
 }
 
 // broadcastHeadRotation syncs head yaw separately from body yaw. Vanilla
@@ -107,7 +108,7 @@ func (c *ClientConnection) broadcastHeadRotation() {
 	var buf bytes.Buffer
 	protocol.WriteVarInt32ToBuffer(&buf, s.EntityID)
 	buf.WriteByte(protocol.AngleToByte(s.Yaw))
-	c.instance.Players.Broadcast(CbPlayHeadRotation, buf.Bytes(), s.EntityID)
+	c.instance.Players.Broadcast(packetid.CbPlayHeadRotation, buf.Bytes(), s.EntityID)
 }
 
 // teleportEntityPayload sends an absolute-coordinate entity position. Used

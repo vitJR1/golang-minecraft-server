@@ -6,6 +6,7 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -159,16 +160,16 @@ func TestTNTExplosionHurtsSurvivalNotCreative(t *testing.T) {
 
 	// The victim's Explosion packet carries their own knockback, pointing
 	// away from the blast (+X).
-	got := lastPacket(t, victim, CbPlayExplosion)
+	got := lastPacket(t, victim, packetid.CbPlayExplosion)
 	if got == nil {
 		t.Fatal("victim never received an Explosion packet")
 	}
 	// The player 20 blocks out is within the 64-block packet range and gets
 	// it with zero motion; sounds (16-block range) don't reach them.
-	if lastPacket(t, far, CbPlayExplosion) == nil {
+	if lastPacket(t, far, packetid.CbPlayExplosion) == nil {
 		t.Error("player within 64 blocks should receive the Explosion packet")
 	}
-	if lastPacket(t, far, CbPlaySoundEffect) != nil {
+	if lastPacket(t, far, packetid.CbPlaySoundEffect) != nil {
 		t.Error("hurt sound should not reach a player 20 blocks away")
 	}
 	// Skip x,y,z (3 doubles) + strength (float), then records, then motion.
@@ -210,10 +211,10 @@ func TestExplosionPacketSkipsDistantPlayers(t *testing.T) {
 	near := tntConn(inst, "Near", player.Survival, 30, 64, 0.5)
 	distant := tntConn(inst, "Distant", player.Survival, 100, 64, 0.5)
 	inst.explode(0.5, 64.06, 0.5, tntPower, nil)
-	if lastPacket(t, near, CbPlayExplosion) == nil {
+	if lastPacket(t, near, packetid.CbPlayExplosion) == nil {
 		t.Error("player 30 blocks away should get the Explosion packet")
 	}
-	if lastPacket(t, distant, CbPlayExplosion) != nil {
+	if lastPacket(t, distant, packetid.CbPlayExplosion) != nil {
 		t.Error("player 100 blocks away should not get the Explosion packet")
 	}
 }
@@ -223,15 +224,15 @@ func TestBroadcastNearFiltersByDistance(t *testing.T) {
 	in := tntConn(inst, "In", player.Survival, 10, 64, 0)
 	out := tntConn(inst, "Out", player.Survival, 0, 64, 17)
 	inst.playSound("minecraft:entity.tnt.primed", soundCategoryBlocks, 0, 64, 0, 1, 1)
-	if lastPacket(t, in, CbPlaySoundEffect) == nil {
+	if lastPacket(t, in, packetid.CbPlaySoundEffect) == nil {
 		t.Error("player 10 blocks away should hear a volume-1 sound")
 	}
-	if lastPacket(t, out, CbPlaySoundEffect) != nil {
+	if lastPacket(t, out, packetid.CbPlaySoundEffect) != nil {
 		t.Error("player 17 blocks away should not be sent a volume-1 sound")
 	}
 	// Louder sounds carry proportionally further.
 	inst.playSound("minecraft:entity.generic.explode", soundCategoryBlocks, 0, 64, 0, 4, 1)
-	if lastPacket(t, out, CbPlaySoundEffect) == nil {
+	if lastPacket(t, out, packetid.CbPlaySoundEffect) == nil {
 		t.Error("volume-4 sound should reach 17 blocks")
 	}
 }
@@ -339,7 +340,7 @@ func TestExplosionBehindWoolWallWithArmor(t *testing.T) {
 			t.Fatalf("bad frame: len %d err %v body %d", n, err, buf.Len())
 		}
 		id, _ := protocol.ReadVarInt(buf)
-		if int32(id) != CbPlayExplosion {
+		if int32(id) != packetid.CbPlayExplosion {
 			continue
 		}
 		explosions++

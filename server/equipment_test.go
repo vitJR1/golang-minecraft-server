@@ -6,6 +6,7 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -44,7 +45,7 @@ func TestEquipmentBroadcastToOthersOnly(t *testing.T) {
 	alice.heldSlot.Store(2)
 	alice.equipmentChanged()
 
-	body := lastPacket(t, bob, CbPlaySetEquipment)
+	body := lastPacket(t, bob, packetid.CbPlaySetEquipment)
 	if body == nil {
 		t.Fatal("Bob should receive Alice's equipment")
 	}
@@ -64,7 +65,7 @@ func TestEquipmentBroadcastToOthersOnly(t *testing.T) {
 	if len(eq) != 6 {
 		t.Errorf("all six slots expected, got %d", len(eq))
 	}
-	if lastPacket(t, alice, CbPlaySetEquipment) != nil {
+	if lastPacket(t, alice, packetid.CbPlaySetEquipment) != nil {
 		t.Error("the player must not receive their own equipment packet")
 	}
 }
@@ -77,7 +78,7 @@ func TestOthersEquipmentSentOnJoin(t *testing.T) {
 
 	bob := tntConn(inst, "Bob", player.Survival, 2, 64, 0)
 	bob.sendOthersEquipment()
-	body := lastPacket(t, bob, CbPlaySetEquipment)
+	body := lastPacket(t, bob, packetid.CbPlaySetEquipment)
 	if body == nil {
 		t.Fatal("joining player should get the others' equipment")
 	}
@@ -97,7 +98,7 @@ func TestHeldSlotChangeRebroadcastsEquipment(t *testing.T) {
 	// Consuming the held stack and swapping the held slot both notify.
 	alice.heldSlot.Store(1)
 	alice.swapHeld("minecraft:bucket")
-	_, eq := readEquipment(t, lastPacket(t, bob, CbPlaySetEquipment))
+	_, eq := readEquipment(t, lastPacket(t, bob, packetid.CbPlaySetEquipment))
 	bucket, _ := world.ItemByName("minecraft:bucket")
 	if eq[equipMainHand].ID != bucket {
 		t.Errorf("after swapHeld main hand = %+v, want bucket", eq[equipMainHand])

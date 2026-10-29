@@ -6,6 +6,7 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -152,8 +153,8 @@ func (c *ClientConnection) launch(p *projectile, speed float64) bool {
 	c.instance.projMu.Unlock()
 
 	// Spawn for everyone with the initial velocity so the client animates it.
-	c.instance.Players.Broadcast(CbPlaySpawnEntity, spawnProjectilePayload(p), -1)
-	c.instance.Players.Broadcast(CbPlayEntityVelocity,
+	c.instance.Players.Broadcast(packetid.CbPlaySpawnEntity, spawnProjectilePayload(p), -1)
+	c.instance.Players.Broadcast(packetid.CbPlayEntityVelocity,
 		entityVelocityPayload(p.eid, p.vx, p.vy, p.vz), -1)
 	return true
 }
@@ -196,7 +197,7 @@ func (i *Instance) stepProjectiles() []*projectile {
 				kept = append(kept, p)
 				continue
 			}
-			i.Players.Broadcast(CbPlayRemoveEntities, removeEntitiesPayload([]int32{p.eid}), -1)
+			i.Players.Broadcast(packetid.CbPlayRemoveEntities, removeEntitiesPayload([]int32{p.eid}), -1)
 			continue
 		}
 
@@ -235,7 +236,7 @@ func (i *Instance) stepProjectiles() []*projectile {
 		if p.item == "minecraft:arrow" {
 			if v := i.arrowHitPlayer(p, nx, ny, nz); v != nil {
 				p.hitPlayer = v
-				i.Players.Broadcast(CbPlayRemoveEntities, removeEntitiesPayload([]int32{p.eid}), -1)
+				i.Players.Broadcast(packetid.CbPlayRemoveEntities, removeEntitiesPayload([]int32{p.eid}), -1)
 				landed = append(landed, p)
 				continue
 			}
@@ -246,7 +247,7 @@ func (i *Instance) stepProjectiles() []*projectile {
 			// park it where it hit (facing along its last flight) so the
 			// client's arrow agrees, then keep it still.
 			p.x, p.y, p.z = nx, ny, nz
-			i.Players.Broadcast(CbPlayTeleportEntity, projectileTeleportPayload(p), -1)
+			i.Players.Broadcast(packetid.CbPlayTeleportEntity, projectileTeleportPayload(p), -1)
 			p.stuck, p.stuckTicks = true, arrowStuckTicks
 			p.vx, p.vy, p.vz = 0, 0, 0
 			kept = append(kept, p)
@@ -256,7 +257,7 @@ func (i *Instance) stepProjectiles() []*projectile {
 			// Still flying: commit the move and show it; a game hook may end
 			// the flight here.
 			p.x, p.y, p.z = nx, ny, nz
-			i.Players.Broadcast(CbPlayTeleportEntity, projectileTeleportPayload(p), -1)
+			i.Players.Broadcast(packetid.CbPlayTeleportEntity, projectileTeleportPayload(p), -1)
 			if p.onTick == nil || p.onTick(p.x, p.y, p.z) {
 				kept = append(kept, p)
 				continue
@@ -265,7 +266,7 @@ func (i *Instance) stepProjectiles() []*projectile {
 
 		// Impact (or expired, or stopped by the hook): despawn now, act
 		// after the lock is released.
-		i.Players.Broadcast(CbPlayRemoveEntities, removeEntitiesPayload([]int32{p.eid}), -1)
+		i.Players.Broadcast(packetid.CbPlayRemoveEntities, removeEntitiesPayload([]int32{p.eid}), -1)
 		landed = append(landed, p)
 	}
 	// Zero out the drained tail so removed projectiles can be GC'd.
@@ -294,8 +295,8 @@ func (i *Instance) collectArrow(p *projectile, c *ClientConnection) bool {
 	default:
 		return false
 	}
-	i.Players.Broadcast(CbPlayPickupItem, pickupItemPayload(p.eid, c.player.EntityID, 1), -1)
-	i.Players.Broadcast(CbPlayRemoveEntities, removeEntitiesPayload([]int32{p.eid}), -1)
+	i.Players.Broadcast(packetid.CbPlayPickupItem, pickupItemPayload(p.eid, c.player.EntityID, 1), -1)
+	i.Players.Broadcast(packetid.CbPlayRemoveEntities, removeEntitiesPayload([]int32{p.eid}), -1)
 	return true
 }
 

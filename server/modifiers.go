@@ -9,6 +9,7 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -169,7 +170,7 @@ func (t *effectTable) apply(c *ClientConnection, effect Effect, level int, d tim
 	t.players[c][effect.Name] = activeEffect{level: level, expires: time.Now().Add(d)}
 	t.mu.Unlock()
 	if c.player != nil {
-		_ = c.safeWrite(CbPlayEntityEffect, entityEffectPayload(c.player.EntityID, effect, level, d))
+		_ = c.safeWrite(packetid.CbPlayEntityEffect, entityEffectPayload(c.player.EntityID, effect, level, d))
 	}
 	if effect == EffectInvisibility {
 		c.broadcastEntityFlags()
@@ -250,7 +251,7 @@ func (c *ClientConnection) sendEffectsRemoved(list []Effect) {
 		var buf bytes.Buffer
 		protocol.WriteVarInt32ToBuffer(&buf, c.player.EntityID)
 		protocol.WriteVarInt32ToBuffer(&buf, e.ID)
-		_ = c.safeWrite(CbPlayRemoveEntityEffect, buf.Bytes())
+		_ = c.safeWrite(packetid.CbPlayRemoveEntityEffect, buf.Bytes())
 		if e == EffectInvisibility {
 			invisible = true
 		}
@@ -323,7 +324,7 @@ func (c *ClientConnection) resendEffects() {
 		return
 	}
 	for _, ae := range c.activeEffects() {
-		_ = c.safeWrite(CbPlayEntityEffect, entityEffectPayload(c.player.EntityID, ae.Effect, ae.Level, ae.Remaining))
+		_ = c.safeWrite(packetid.CbPlayEntityEffect, entityEffectPayload(c.player.EntityID, ae.Effect, ae.Level, ae.Remaining))
 	}
 	_ = c.sendMovementAttributes() // Respawn reset the attribute too
 	c.syncAbsorption(true)         // …and the yellow hearts (player metadata)
@@ -382,7 +383,7 @@ func (c *ClientConnection) broadcastEntityFlags() {
 	if c.player == nil || c.instance == nil {
 		return
 	}
-	c.instance.Players.Broadcast(CbPlaySetEntityMetadata, entityFlagsPayload(c.player.EntityID, c.entityFlags()), -1)
+	c.instance.Players.Broadcast(packetid.CbPlaySetEntityMetadata, entityFlagsPayload(c.player.EntityID, c.entityFlags()), -1)
 }
 
 // forget drops a disconnected player's effects.
@@ -455,7 +456,7 @@ func (c *ClientConnection) damageHeldTool(n int) {
 		st = itemStack{}
 		if c.player != nil {
 			s := c.player.Snapshot()
-			_ = c.safeWrite(CbPlaySoundEffect,
+			_ = c.safeWrite(packetid.CbPlaySoundEffect,
 				soundEffectPayload("minecraft:entity.item.break", soundCategoryPlayer, s.X, s.Y, s.Z, 0.8, 1))
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"math"
 
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -98,7 +99,7 @@ func (i *Instance) spawnStack(st itemStack, x, y, z, vx, vy, vz float64, pickupA
 				it.ticks = 0 // a topped-up stack is "fresh" again for despawn purposes
 				meta := itemMetadataPayload(it)
 				i.itemsMu.Unlock()
-				i.Players.Broadcast(CbPlaySetEntityMetadata, meta, -1)
+				i.Players.Broadcast(packetid.CbPlaySetEntityMetadata, meta, -1)
 				return true
 			}
 		}
@@ -119,8 +120,8 @@ func (i *Instance) spawnStack(st itemStack, x, y, z, vx, vy, vz float64, pickupA
 	spawn, meta := spawnItemPayload(it), itemMetadataPayload(it)
 	i.itemsMu.Unlock()
 
-	i.Players.Broadcast(CbPlaySpawnEntity, spawn, -1)
-	i.Players.Broadcast(CbPlaySetEntityMetadata, meta, -1)
+	i.Players.Broadcast(packetid.CbPlaySpawnEntity, spawn, -1)
+	i.Players.Broadcast(packetid.CbPlaySetEntityMetadata, meta, -1)
 	return true
 }
 
@@ -224,18 +225,18 @@ func (i *Instance) itemTick(uint64) {
 	}
 	var out []outPkt
 	for _, it := range moved {
-		out = append(out, outPkt{CbPlayTeleportEntity, itemTeleportPayload(it)})
+		out = append(out, outPkt{packetid.CbPlayTeleportEntity, itemTeleportPayload(it)})
 	}
 	for _, p := range pickups {
-		out = append(out, outPkt{CbPlayPickupItem, pickupItemPayload(p.it.eid, p.collector.player.EntityID, p.taken)})
+		out = append(out, outPkt{packetid.CbPlayPickupItem, pickupItemPayload(p.it.eid, p.collector.player.EntityID, p.taken)})
 		if p.remaining > 0 {
-			out = append(out, outPkt{CbPlaySetEntityMetadata, itemMetadataPayload(p.it)})
+			out = append(out, outPkt{packetid.CbPlaySetEntityMetadata, itemMetadataPayload(p.it)})
 		} else {
 			removed = append(removed, p.it.eid)
 		}
 	}
 	if len(removed) > 0 {
-		out = append(out, outPkt{CbPlayRemoveEntities, removeEntitiesPayload(removed)})
+		out = append(out, outPkt{packetid.CbPlayRemoveEntities, removeEntitiesPayload(removed)})
 	}
 	i.itemsMu.Unlock()
 
@@ -310,8 +311,8 @@ func (c *ClientConnection) sendItemEntities() error {
 	pkts := make([]outPkt, 0, 2*len(c.instance.items))
 	for _, it := range c.instance.items {
 		pkts = append(pkts,
-			outPkt{CbPlaySpawnEntity, spawnItemPayload(it)},
-			outPkt{CbPlaySetEntityMetadata, itemMetadataPayload(it)})
+			outPkt{packetid.CbPlaySpawnEntity, spawnItemPayload(it)},
+			outPkt{packetid.CbPlaySetEntityMetadata, itemMetadataPayload(it)})
 	}
 	c.instance.itemsMu.Unlock()
 

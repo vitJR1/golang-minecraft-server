@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"minecraft-server/game"
+	"minecraft-server/protocol/packetid"
 	"testing"
 
 	"minecraft-server/player"
@@ -94,7 +95,7 @@ func TestCursorDropOutsideWindowAndOnClose(t *testing.T) {
 	// Close the inventory with 7 still on the cursor: all of it drops.
 	var p bytes.Buffer
 	p.WriteByte(0)
-	play(t, c, SbPlayCloseContainer, p.Bytes())
+	play(t, c, packetid.SbPlayCloseContainer, p.Bytes())
 	if itemsIn(inst)[iron] != 8 {
 		t.Errorf("closing should drop the cursor, ground has %v", itemsIn(inst))
 	}
@@ -182,7 +183,7 @@ func TestNoDropItemStaysInInventory(t *testing.T) {
 	// Closing the inventory with it on the cursor puts it back.
 	var p bytes.Buffer
 	p.WriteByte(0)
-	play(t, c, SbPlayCloseContainer, p.Bytes())
+	play(t, c, packetid.SbPlayCloseContainer, p.Bytes())
 	if !c.cursor.empty() || c.countItem(wool.ID) != 1 {
 		t.Fatalf("after close: cursor %+v, in inventory %d", c.cursor, c.countItem(wool.ID))
 	}

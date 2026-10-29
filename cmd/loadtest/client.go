@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"minecraft-server/protocol"
-	"minecraft-server/server"
+	"minecraft-server/protocol/packetid"
 )
 
 // runClient simulates one Minecraft client: connects, logs in offline, then
@@ -80,12 +80,12 @@ func doLogin(conn net.Conn, name string, s *stats) (int, error) {
 	hs.WriteByte(0x63) // port hi (25565 = 0x63DD)
 	hs.WriteByte(0xDD) // port lo
 	hs.Write(protocol.WriteVarInt32(2))
-	if err := writeAndCount(conn, server.SbHandshake, hs.Bytes(), threshold, s); err != nil {
+	if err := writeAndCount(conn, packetid.SbHandshake, hs.Bytes(), threshold, s); err != nil {
 		return 0, err
 	}
 
 	// Login Start: just the username for 1.20.1.
-	if err := writeAndCount(conn, server.SbLoginStart, protocol.WriteString(name), threshold, s); err != nil {
+	if err := writeAndCount(conn, packetid.SbLoginStart, protocol.WriteString(name), threshold, s); err != nil {
 		return 0, err
 	}
 
@@ -94,8 +94,8 @@ func doLogin(conn net.Conn, name string, s *stats) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("read Set Compression: %w", err)
 	}
-	if id != server.CbLoginSetCompr {
-		return 0, fmt.Errorf("expected Set Compression (0x%02X), got 0x%02X", server.CbLoginSetCompr, id)
+	if id != packetid.CbLoginSetCompr {
+		return 0, fmt.Errorf("expected Set Compression (0x%02X), got 0x%02X", packetid.CbLoginSetCompr, id)
 	}
 	thr, err := protocol.ReadVarInt(body)
 	if err != nil {
@@ -108,8 +108,8 @@ func doLogin(conn net.Conn, name string, s *stats) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("read LoginSuccess: %w", err)
 	}
-	if id != server.CbLoginSuccess {
-		return 0, fmt.Errorf("expected LoginSuccess (0x%02X), got 0x%02X", server.CbLoginSuccess, id)
+	if id != packetid.CbLoginSuccess {
+		return 0, fmt.Errorf("expected LoginSuccess (0x%02X), got 0x%02X", packetid.CbLoginSuccess, id)
 	}
 
 	// sendPlayPackets order: Login(Play), Chunk Data, SyncPos, World State (no-op for empty world).
@@ -193,7 +193,7 @@ func sendSetPos(conn net.Conn, threshold int, x, y, z float64, onGround bool) er
 	} else {
 		buf.WriteByte(0)
 	}
-	return protocol.WritePacket(conn, server.SbPlaySetPos, buf.Bytes(), threshold)
+	return protocol.WritePacket(conn, packetid.SbPlaySetPos, buf.Bytes(), threshold)
 }
 
 // --- Small wrappers around net.Conn that count bytes flowing through. ---

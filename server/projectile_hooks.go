@@ -3,6 +3,7 @@ package server
 import (
 	"math"
 
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -52,7 +53,7 @@ func (i *Instance) launchProjectile(thrower *ClientConnection, item string, spee
 	i.projectiles = append(i.projectiles, p)
 	i.projMu.Unlock()
 
-	i.Players.Broadcast(CbPlaySpawnEntity, spawnProjectilePayload(p), -1)
-	i.Players.Broadcast(CbPlayEntityVelocity, entityVelocityPayload(p.eid, p.vx, p.vy, p.vz), -1)
+	i.Players.Broadcast(packetid.CbPlaySpawnEntity, spawnProjectilePayload(p), -1)
+	i.Players.Broadcast(packetid.CbPlayEntityVelocity, entityVelocityPayload(p.eid, p.vx, p.vy, p.vz), -1)
 	return true
 }

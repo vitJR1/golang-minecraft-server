@@ -1,4 +1,4 @@
-package server
+package packetid
 
 // Packet IDs for Minecraft Java protocol 763 (1.20.1).
 // Reference: https://wiki.vg/index.php?title=Protocol&oldid=18375

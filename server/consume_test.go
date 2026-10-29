@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"minecraft-server/player"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -113,7 +114,7 @@ func TestFireballFliesStraightAndExplodes(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		inst.projectileTick(uint64(i))
 	}
-	if lastPacket(t, c, CbPlayExplosion) == nil {
+	if lastPacket(t, c, packetid.CbPlayExplosion) == nil {
 		t.Error("fireball should explode on the wall")
 	}
 	inst.projMu.Lock()
@@ -163,7 +164,7 @@ func TestCustomRespawnKeepsPlayerDeadWithoutDeathScreen(t *testing.T) {
 	if deaths != 1 {
 		t.Errorf("OnPlayerDeath fired %d times, want 1", deaths)
 	}
-	if lastPacket(t, v, CbPlayCombatDeath) != nil {
+	if lastPacket(t, v, packetid.CbPlayCombatDeath) != nil {
 		t.Error("custom respawn must not show the death screen")
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"math"
 
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 )
 
 // absorption.go: the Absorption effect's yellow hearts. The pool lives on
@@ -51,9 +52,9 @@ func (c *ClientConnection) syncAbsorption(force bool) {
 	c.sentAbsorption.Store(bits)
 	payload := absorptionMetadataPayload(c.player.EntityID, cur)
 	if c.instance != nil {
-		c.instance.Players.Broadcast(CbPlaySetEntityMetadata, payload, -1)
+		c.instance.Players.Broadcast(packetid.CbPlaySetEntityMetadata, payload, -1)
 	} else {
-		_ = c.safeWrite(CbPlaySetEntityMetadata, payload)
+		_ = c.safeWrite(packetid.CbPlaySetEntityMetadata, payload)
 	}
 }
 

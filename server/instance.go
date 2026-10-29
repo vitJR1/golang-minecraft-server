@@ -9,6 +9,7 @@ import (
 	"minecraft-server/cfg"
 	"minecraft-server/game"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 	"sync"
 	"sync/atomic"
@@ -443,7 +444,7 @@ func (i *Instance) JoinAndAnnounce(c *ClientConnection) {
 
 	// 1. Newcomer gets the full tab list (everyone in THIS instance).
 	if payload := playerInfoAddPayload(others); payload != nil {
-		_ = c.safeWrite(CbPlayPlayerInfoUpdate, payload)
+		_ = c.safeWrite(packetid.CbPlayPlayerInfoUpdate, payload)
 	}
 
 	// 2. Newcomer spawns the visible entity for every other player here.
@@ -451,7 +452,7 @@ func (i *Instance) JoinAndAnnounce(c *ClientConnection) {
 		if other == c {
 			continue
 		}
-		_ = c.safeWrite(CbPlaySpawnPlayer, spawnPlayerPayload(other.player))
+		_ = c.safeWrite(packetid.CbPlaySpawnPlayer, spawnPlayerPayload(other.player))
 	}
 
 	c.sendOthersEquipment()
@@ -459,9 +460,9 @@ func (i *Instance) JoinAndAnnounce(c *ClientConnection) {
 	// 3. Everyone else in the instance learns about the newcomer.
 	addNewcomer := playerInfoAddPayload([]*ClientConnection{c})
 	spawnNewcomer := spawnPlayerPayload(c.player)
-	i.Players.Broadcast(CbPlayPlayerInfoUpdate, addNewcomer, c.player.EntityID)
-	i.Players.Broadcast(CbPlaySpawnPlayer, spawnNewcomer, c.player.EntityID)
-	i.Players.Broadcast(CbPlaySetEquipment, c.equipmentPayload(), c.player.EntityID)
+	i.Players.Broadcast(packetid.CbPlayPlayerInfoUpdate, addNewcomer, c.player.EntityID)
+	i.Players.Broadcast(packetid.CbPlaySpawnPlayer, spawnNewcomer, c.player.EntityID)
+	i.Players.Broadcast(packetid.CbPlaySetEquipment, c.equipmentPayload(), c.player.EntityID)
 
 	i.joinMu.Unlock()
 
@@ -491,12 +492,12 @@ func (i *Instance) LeaveAndAnnounce(c *ClientConnection) {
 	defer i.joinMu.Unlock()
 
 	i.Players.Broadcast(
-		CbPlayRemoveEntities,
+		packetid.CbPlayRemoveEntities,
 		removeEntitiesPayload([]int32{c.player.EntityID}),
 		c.player.EntityID,
 	)
 	i.Players.Broadcast(
-		CbPlayPlayerInfoRemove,
+		packetid.CbPlayPlayerInfoRemove,
 		playerInfoRemovePayload([][16]byte{c.player.UUID}),
 		c.player.EntityID,
 	)
@@ -531,7 +532,7 @@ func (i *Instance) SetBlock(p world.Position, b world.Block) {
 	var buf bytes.Buffer
 	buf.Write(protocol.WritePosition(p.X, p.Y, p.Z))
 	protocol.WriteVarInt32ToBuffer(&buf, b.StateID)
-	i.Players.Broadcast(CbPlayBlockUpdate, buf.Bytes(), -1)
+	i.Players.Broadcast(packetid.CbPlayBlockUpdate, buf.Bytes(), -1)
 }
 
 // BroadcastChat sends a chat line to every player in this instance. Format
@@ -543,7 +544,7 @@ func (i *Instance) BroadcastChat(sender, message string) {
 	} else {
 		line = fmt.Sprintf("<%s> %s", sender, message)
 	}
-	i.Players.Broadcast(CbPlaySystemChat, buildSystemChatPayload(line), -1)
+	i.Players.Broadcast(packetid.CbPlaySystemChat, buildSystemChatPayload(line), -1)
 }
 
 // buildSystemChatPayload assembles a System Chat (Cb 0x64) body: JSON chat

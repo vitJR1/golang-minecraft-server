@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"minecraft-server/player"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -129,13 +130,13 @@ func TestKnockbackEnchantAddsHorizontalStrength(t *testing.T) {
 	stick, _ := world.ItemByName("minecraft:stick")
 	a.inv.set(hotbarStart, itemStack{ID: stick, Count: 1})
 	a.handleAttack(v)
-	plain := lastPacket(t, v, CbPlayEntityVelocity)
+	plain := lastPacket(t, v, packetid.CbPlayEntityVelocity)
 
 	v.player.SetHealth(player.MaxHealth)
 	a.instance.tickCount.Add(1000)
 	a.inv.set(hotbarStart, itemStack{ID: stick, Count: 1, Enchantments: map[string]int{EnchantKnockback: 2}})
 	a.handleAttack(v)
-	boosted := lastPacket(t, v, CbPlayEntityVelocity)
+	boosted := lastPacket(t, v, packetid.CbPlayEntityVelocity)
 	if plain == nil || boosted == nil {
 		t.Fatal("expected velocity packets")
 	}

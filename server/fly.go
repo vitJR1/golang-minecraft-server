@@ -5,6 +5,7 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 )
 
 // fly.go: /fly — lets a survival or adventure player fly (double-tap jump),
@@ -56,7 +57,7 @@ func (c *ClientConnection) sendAbilities(flying bool) error {
 	payload := []byte{flags}
 	payload = append(payload, protocol.WriteFloat(defaultFlySpeed)...)
 	payload = append(payload, protocol.WriteFloat(defaultFOVMod)...)
-	return c.safeWrite(CbPlayPlayerAbil, payload)
+	return c.safeWrite(packetid.CbPlayPlayerAbil, payload)
 }
 
 // setFlight turns /fly on or off. Off keeps the movement checks away until

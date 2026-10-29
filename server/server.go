@@ -13,6 +13,7 @@ import (
 	"minecraft-server/db"
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/redisc"
 	"minecraft-server/store"
 	"minecraft-server/templates"
@@ -367,7 +368,7 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 	// 2. Wipe c's tab list. Respawn doesn't do this, and the next
 	//    JoinAndAnnounce will rebuild it for the new instance.
 	if len(oldUUIDs) > 0 {
-		_ = c.safeWrite(CbPlayPlayerInfoRemove, playerInfoRemovePayload(oldUUIDs))
+		_ = c.safeWrite(packetid.CbPlayPlayerInfoRemove, playerInfoRemovePayload(oldUUIDs))
 	}
 
 	// 2b. Landing in the hub or a lobby means the game is over for this
@@ -499,7 +500,7 @@ func (c *ClientConnection) Instance() *Instance { return c.instance }
 // sendSystemMessage delivers a SystemChat line to a single player. Used by
 // command responses and other server → one-player notifications.
 func (c *ClientConnection) sendSystemMessage(text string) error {
-	return c.safeWrite(CbPlaySystemChat, buildSystemChatPayload(text))
+	return c.safeWrite(packetid.CbPlaySystemChat, buildSystemChatPayload(text))
 }
 
 // HandleConn drives a single client connection through its state machine.

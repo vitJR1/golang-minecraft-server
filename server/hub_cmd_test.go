@@ -3,6 +3,7 @@ package server
 import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 	"testing"
 	"time"
@@ -24,14 +25,14 @@ func TestCmdHubFromArenaReturnsToHub(t *testing.T) {
 	cli.startDiscardDrain()
 
 	// Step 1: arena via wire.
-	cli.write(t, SbPlayChatCommand, protocol.WriteString("instance join arena"))
+	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("instance join arena"))
 	waitFor(t, 2*time.Second, func() bool {
 		_, inst, ok := s.FindPlayer("Wanderer")
 		return ok && inst == arena
 	}, "Wanderer to enter arena")
 
 	// Step 2: /hub back.
-	cli.write(t, SbPlayChatCommand, protocol.WriteString("hub"))
+	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("hub"))
 	waitFor(t, 2*time.Second, func() bool {
 		_, inst, ok := s.FindPlayer("Wanderer")
 		return ok && inst == s.Hub
@@ -45,10 +46,10 @@ func TestCmdHubWhileInHubIsNoop(t *testing.T) {
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Idler")
 	ch := cli.startDrain()
-	drainExpect(t, ch, "Idler bootstrap", CbPlayPlayerInfoUpdate)
+	drainExpect(t, ch, "Idler bootstrap", packetid.CbPlayPlayerInfoUpdate)
 
-	cli.write(t, SbPlayChatCommand, protocol.WriteString("hub"))
-	drainExpect(t, ch, "already-in-hub reply", CbPlaySystemChat)
+	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("hub"))
+	drainExpect(t, ch, "already-in-hub reply", packetid.CbPlaySystemChat)
 
 	if _, inst, _ := s.FindPlayer("Idler"); inst != s.Hub {
 		t.Errorf("Idler should still be in hub")
@@ -71,7 +72,7 @@ func TestCmdHubClearsMatchmakerQueue(t *testing.T) {
 		t.Fatalf("precondition: queue size %d", s.Matchmaker.QueueSize("mm-hub-cancel"))
 	}
 
-	cli.write(t, SbPlayChatCommand, protocol.WriteString("hub"))
+	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("hub"))
 
 	waitFor(t, time.Second, func() bool {
 		return s.Matchmaker.QueueSize("mm-hub-cancel") == 0
@@ -94,13 +95,13 @@ func leaveFrom(t *testing.T, name, gameID string) (*Server, *Instance) {
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, name)
 	cli.startDiscardDrain()
-	cli.write(t, SbPlayChatCommand, protocol.WriteString("instance join round-1"))
+	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("instance join round-1"))
 	waitFor(t, 2*time.Second, func() bool {
 		_, inst, ok := s.FindPlayer(name)
 		return ok && inst == game
 	}, name+" to enter the round")
 
-	cli.write(t, SbPlayChatCommand, protocol.WriteString("leave"))
+	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("leave"))
 	var landed *Instance
 	waitFor(t, 2*time.Second, func() bool {
 		_, inst, ok := s.FindPlayer(name)
@@ -138,10 +139,10 @@ func TestLeaveInHubIsNoop(t *testing.T) {
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Homebody")
 	ch := cli.startDrain()
-	drainExpect(t, ch, "Homebody bootstrap", CbPlayPlayerInfoUpdate)
+	drainExpect(t, ch, "Homebody bootstrap", packetid.CbPlayPlayerInfoUpdate)
 
-	cli.write(t, SbPlayChatCommand, protocol.WriteString("leave"))
-	drainExpect(t, ch, "not-in-a-game reply", CbPlaySystemChat)
+	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("leave"))
+	drainExpect(t, ch, "not-in-a-game reply", packetid.CbPlaySystemChat)
 	if _, inst, _ := s.FindPlayer("Homebody"); inst != s.Hub {
 		t.Error("Homebody should still be in the hub")
 	}

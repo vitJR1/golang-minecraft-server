@@ -6,6 +6,7 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -57,7 +58,7 @@ func digAt(t *testing.T, c *ClientConnection, pos world.Position, action int32) 
 	p.Write(protocol.WritePosition(pos.X, pos.Y, pos.Z))
 	p.WriteByte(1)
 	protocol.WriteVarInt32ToBuffer(&p, 1)
-	play(t, c, SbPlayPlayerAction, p.Bytes())
+	play(t, c, packetid.SbPlayPlayerAction, p.Bytes())
 }
 
 // placeOn sends Use Item On Block on the given face of clicked.
@@ -72,7 +73,7 @@ func placeOn(t *testing.T, c *ClientConnection, clicked world.Position, face int
 	p.Write(protocol.WriteFloat(0.5))
 	p.WriteByte(0)
 	protocol.WriteVarInt32ToBuffer(&p, 1)
-	play(t, c, SbPlayUseItemOnBlock, p.Bytes())
+	play(t, c, packetid.SbPlayUseItemOnBlock, p.Bytes())
 }
 
 // clickSlot sends a window-0 Click Container with the given changed slots
@@ -105,7 +106,7 @@ func clickWith(t *testing.T, c *ClientConnection, window byte, slot int16, butto
 		writeStack(&p, st)
 	}
 	writeStack(&p, cursor)
-	play(t, c, SbPlayClickContainer, p.Bytes())
+	play(t, c, packetid.SbPlayClickContainer, p.Bytes())
 }
 
 // hold puts one item in hotbar slot 0 and selects it.

@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"log/slog"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 )
 
 func (c *ClientConnection) handleHandshake(packet *bytes.Buffer, packetID int) error {
-	if packetID != SbHandshake {
+	if packetID != packetid.SbHandshake {
 		return fmt.Errorf("expected handshake packet (0x00), got 0x%02X", packetID)
 	}
 

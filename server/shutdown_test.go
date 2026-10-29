@@ -1,6 +1,7 @@
 package server
 
 import (
+	"minecraft-server/protocol/packetid"
 	"testing"
 	"time"
 )
@@ -23,7 +24,7 @@ func TestShutdownKicksPlayersAndStopsTicks(t *testing.T) {
 	// Play Disconnect must have gone on the wire before that.
 	sawDisconnect := false
 	for id := range idsA {
-		if id == CbPlayDisconnect {
+		if id == packetid.CbPlayDisconnect {
 			sawDisconnect = true
 		}
 	}

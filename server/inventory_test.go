@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"minecraft-server/player"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -172,12 +173,12 @@ func TestReturnToHubResetsSpectatorAndState(t *testing.T) {
 	// The Respawn packet must already carry Adventure, and the hearts are re-sent.
 	var respawns int
 	for _, p := range pkts {
-		if p.id == CbPlayRespawn {
+		if p.id == packetid.CbPlayRespawn {
 			respawns++
 		}
 	}
-	if respawns == 0 || countIDs(pkts, CbPlaySetHealth) == 0 {
-		t.Errorf("respawn=%d setHealth=%d", respawns, countIDs(pkts, CbPlaySetHealth))
+	if respawns == 0 || countIDs(pkts, packetid.CbPlaySetHealth) == 0 {
+		t.Errorf("respawn=%d setHealth=%d", respawns, countIDs(pkts, packetid.CbPlaySetHealth))
 	}
 
 	// A dead player (custom respawn left them Dead) comes back alive too.

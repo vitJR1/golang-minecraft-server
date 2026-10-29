@@ -13,11 +13,12 @@ import (
 	"minecraft-server/mojang"
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"time"
 )
 
 func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error {
-	if packetID != SbLoginStart {
+	if packetID != packetid.SbLoginStart {
 		slog.Warn("unknown login packet", "packet_id", fmt.Sprintf("0x%02X", packetID))
 		return nil
 	}
@@ -42,7 +43,7 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 				"player", c.playerName, "until", until)
 			msg := []byte(`{"text":"IP banned (auth failures) until ` +
 				until.Format("2006-01-02 15:04:05") + `"}`)
-			_ = c.safeWrite(CbLoginDisconnect, protocol.WriteString(string(msg)))
+			_ = c.safeWrite(packetid.CbLoginDisconnect, protocol.WriteString(string(msg)))
 			c.cleanup()
 			return nil
 		}
@@ -58,7 +59,7 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 	if banned != nil {
 		msg := []byte(`{"text":"You are banned from this server.\nReason: ` + banned.Reason +
 			`. Expires: ` + banned.ExpiresAt.Format(time.RFC1123) + `"}`)
-		if err := c.safeWrite(CbLoginDisconnect, protocol.WriteString(string(msg))); err != nil {
+		if err := c.safeWrite(packetid.CbLoginDisconnect, protocol.WriteString(string(msg))); err != nil {
 			return fmt.Errorf("sending ban message: %w", err)
 		}
 		c.cleanup()
@@ -81,7 +82,7 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 		msg := []byte(`{"text":"Server is full (` +
 			fmt.Sprintf("%d/%d", c.server.PlayerCount(), cfg.MaxPlayers) +
 			`)"}`)
-		_ = c.safeWrite(CbLoginDisconnect, protocol.WriteString(string(msg)))
+		_ = c.safeWrite(packetid.CbLoginDisconnect, protocol.WriteString(string(msg)))
 		c.cleanup()
 		return nil
 	}
@@ -150,7 +151,7 @@ func (c *ClientConnection) enableCompression() error {
 	// Built with the *current* threshold (CompressionDisabled), so this packet
 	// goes on the wire uncompressed — the client decodes it before switching.
 	frame, err := protocol.BuildFrame(
-		CbLoginSetCompr,
+		packetid.CbLoginSetCompr,
 		protocol.WriteVarInt32(CompressionThreshold),
 		c.compressionThreshold,
 	)
@@ -189,7 +190,7 @@ func (c *ClientConnection) runOfflineLogin() error {
 	payload = append(payload, protocol.WriteString(c.playerName)...)
 	payload = append(payload, protocol.WriteVarInt32(0)...) // properties count = 0
 
-	if err := c.safeWrite(CbLoginSuccess, payload); err != nil {
+	if err := c.safeWrite(packetid.CbLoginSuccess, payload); err != nil {
 		return fmt.Errorf("sending login success: %w", err)
 	}
 	return nil
@@ -216,7 +217,7 @@ func (c *ClientConnection) runOnlineLogin() error {
 	if err != nil {
 		slog.Warn("mojang verification failed", "player", c.playerName, "err", err)
 		msg := []byte(`{"text":"Authentication failed: ` + err.Error() + `"}`)
-		_ = c.safeWrite(CbLoginDisconnect, protocol.WriteString(string(msg)))
+		_ = c.safeWrite(packetid.CbLoginDisconnect, protocol.WriteString(string(msg)))
 		return fmt.Errorf("mojang verification: %w", err)
 	}
 	slog.Info("mojang verified", "player", profile.Name, "uuid", profile.ID)
@@ -245,7 +246,7 @@ func (c *ClientConnection) runOnlineLogin() error {
 	payload = append(payload, uuid[:]...)
 	payload = append(payload, protocol.WriteString(profile.Name)...)
 	payload = append(payload, protocol.WriteVarInt32(0)...) // properties count = 0
-	if err := c.safeWrite(CbLoginSuccess, payload); err != nil {
+	if err := c.safeWrite(packetid.CbLoginSuccess, payload); err != nil {
 		return fmt.Errorf("sending login success: %w", err)
 	}
 	slog.Debug("login success sent", "player", profile.Name)
@@ -268,7 +269,7 @@ func (c *ClientConnection) sendEncryptionRequest(verifyToken []byte) error {
 	payload = append(payload, protocol.WriteVarInt32(int32(len(verifyToken)))...)
 	payload = append(payload, verifyToken...)
 
-	if err := c.safeWrite(CbLoginEncRequest, payload); err != nil {
+	if err := c.safeWrite(packetid.CbLoginEncRequest, payload); err != nil {
 		return fmt.Errorf("sending encryption request: %w", err)
 	}
 	return nil
@@ -287,7 +288,7 @@ func (c *ClientConnection) recvAndVerifyEncryptionResponse(verifyToken []byte) (
 		}
 		return nil, fmt.Errorf("reading encryption response: %w", err)
 	}
-	if id != SbLoginEncResponse {
+	if id != packetid.SbLoginEncResponse {
 		return nil, fmt.Errorf("expected encryption response (0x01), got 0x%02X", id)
 	}
 

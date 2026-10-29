@@ -4,6 +4,7 @@ import (
 	"math"
 
 	"minecraft-server/player"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -206,11 +207,11 @@ func (p *projectile) arrowHit(i *Instance, victim *ClientConnection) {
 		return
 	}
 	s := vp.Snapshot()
-	i.Players.Broadcast(CbPlayHurtAnimation, hurtAnimationPayload(s.EntityID, 0), -1)
+	i.Players.Broadcast(packetid.CbPlayHurtAnimation, hurtAnimationPayload(s.EntityID, 0), -1)
 	i.playSound("minecraft:entity.arrow.hit_player", soundCategoryPlayer, s.X, s.Y, s.Z, 1, 1)
 	if p.punch > 0 && speed > 0 {
 		k := punchStrength * float64(p.punch)
-		i.Players.Broadcast(CbPlayEntityVelocity,
+		i.Players.Broadcast(packetid.CbPlayEntityVelocity,
 			entityVelocityPayload(s.EntityID, p.vx/speed*k, 0.1, p.vz/speed*k), -1)
 		victim.giveVelocity(p.vx/speed*k, 0.1, p.vz/speed*k)
 	}

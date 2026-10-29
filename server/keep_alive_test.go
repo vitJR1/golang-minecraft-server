@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/binary"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"testing"
 	"time"
 )
@@ -85,7 +86,7 @@ func TestKeepAliveAckKeepsClientAlive(t *testing.T) {
 			if err != nil {
 				return
 			}
-			if id != CbPlayKeepAlive {
+			if id != packetid.CbPlayKeepAlive {
 				continue
 			}
 			payload := buf.Next(8)
@@ -94,7 +95,7 @@ func TestKeepAliveAckKeepsClientAlive(t *testing.T) {
 			}
 			keepID := int64(binary.BigEndian.Uint64(payload))
 			// Echo it back.
-			if err := protocol.WritePacket(cli.conn, int32(SbPlayKeepAlive),
+			if err := protocol.WritePacket(cli.conn, int32(packetid.SbPlayKeepAlive),
 				protocol.WriteLong(keepID), cli.threshold); err != nil {
 				return
 			}

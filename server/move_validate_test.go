@@ -5,6 +5,7 @@ import (
 	"math"
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"testing"
 	"time"
 )
@@ -17,7 +18,7 @@ func writeSetPos(t *testing.T, cli *testClient, x, y, z float64) {
 	p.Write(protocol.WriteDouble(y))
 	p.Write(protocol.WriteDouble(z))
 	p.WriteByte(1) // onGround
-	cli.write(t, SbPlaySetPos, p.Bytes())
+	cli.write(t, packetid.SbPlaySetPos, p.Bytes())
 }
 
 // awaitSetback waits for the server's rubber-band Synchronize Player
@@ -31,7 +32,7 @@ func awaitSetback(t *testing.T, ids <-chan int) {
 			if !ok {
 				t.Fatal("connection closed before the setback")
 			}
-			if id == CbPlaySyncPos {
+			if id == packetid.CbPlaySyncPos {
 				return
 			}
 		case <-deadline:

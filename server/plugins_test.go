@@ -10,6 +10,7 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -119,7 +120,7 @@ func TestListenerConsumesBlockInteract(t *testing.T) {
 		p.Write(protocol.WritePosition(x, y, z))
 		p.WriteByte(1)
 		protocol.WriteVarInt32ToBuffer(&p, 1)
-		cli.write(t, SbPlayPlayerAction, p.Bytes())
+		cli.write(t, packetid.SbPlayPlayerAction, p.Bytes())
 	}
 
 	// Consumed click: block stays, even after the survival "finished

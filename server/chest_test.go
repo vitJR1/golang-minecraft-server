@@ -6,6 +6,7 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -32,7 +33,7 @@ func TestRightClickChestOpens(t *testing.T) {
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Opener")
 	ch := cli.startDrain()
-	drainExpect(t, ch, "Opener solo", CbPlayPlayerInfoUpdate)
+	drainExpect(t, ch, "Opener solo", packetid.CbPlayPlayerInfoUpdate)
 
 	var p bytes.Buffer
 	protocol.WriteVarInt32ToBuffer(&p, 0) // hand
@@ -43,12 +44,12 @@ func TestRightClickChestOpens(t *testing.T) {
 	p.Write(protocol.WriteFloat(0.5))
 	p.WriteByte(0)                        // inside_block
 	protocol.WriteVarInt32ToBuffer(&p, 7) // sequence
-	cli.write(t, SbPlayUseItemOnBlock, p.Bytes())
+	cli.write(t, packetid.SbPlayUseItemOnBlock, p.Bytes())
 
 	// Ack the click, then the chest GUI (Open Screen + contents). No
 	// Block Update — nothing was placed.
 	drainExpect(t, ch, "chest opens",
-		CbPlayAckBlockChange, CbPlayOpenScreen, CbPlaySetContainerContent)
+		packetid.CbPlayAckBlockChange, packetid.CbPlayOpenScreen, packetid.CbPlaySetContainerContent)
 
 	conn := findConn(t, s, "Opener")
 	if conn.menu.Load() == nil {

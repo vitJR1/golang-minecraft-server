@@ -1,6 +1,9 @@
 package server
 
-import "fmt"
+import (
+	"fmt"
+	"minecraft-server/protocol/packetid"
+)
 
 // resyncView wipes everything the client currently sees and rebuilds it from
 // the player's CURRENT instance and position. It's the "clear everything the
@@ -52,13 +55,13 @@ func (c *ClientConnection) resyncView() error {
 	// 5. Rebuild the tab list + the other players' entities for this client.
 	others := c.instance.Players.snapshot()
 	if payload := playerInfoAddPayload(others); payload != nil {
-		_ = c.safeWrite(CbPlayPlayerInfoUpdate, payload)
+		_ = c.safeWrite(packetid.CbPlayPlayerInfoUpdate, payload)
 	}
 	for _, other := range others {
 		if other == c {
 			continue
 		}
-		_ = c.safeWrite(CbPlaySpawnPlayer, spawnPlayerPayload(other.player))
+		_ = c.safeWrite(packetid.CbPlaySpawnPlayer, spawnPlayerPayload(other.player))
 	}
 	c.sendOthersEquipment()
 	// 6. Make sure everyone else sees this player at the current position

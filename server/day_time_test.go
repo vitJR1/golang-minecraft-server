@@ -6,6 +6,7 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -14,7 +15,7 @@ func dayTimes(t *testing.T, pkts []sentPacket) []int64 {
 	t.Helper()
 	var out []int64
 	for _, p := range pkts {
-		if p.id != CbPlayUpdateTime {
+		if p.id != packetid.CbPlayUpdateTime {
 			continue
 		}
 		if len(p.body) != 16 {

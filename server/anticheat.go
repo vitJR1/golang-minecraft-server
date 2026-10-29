@@ -8,6 +8,7 @@ import (
 
 	"minecraft-server/anticheat"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 )
 
 // anticheat.go wires the anticheat package into the connection: teleport
@@ -129,7 +130,7 @@ func (c *ClientConnection) sendTransaction(onConfirm func()) {
 		c.kickFor("Timed out", fmt.Sprintf("%d unanswered transactions", anticheat.MaxOutstanding))
 		return
 	}
-	_ = c.safeWrite(CbPlayPing, protocol.WriteInt(id))
+	_ = c.safeWrite(packetid.CbPlayPing, protocol.WriteInt(id))
 }
 
 // onPong handles Sb Pong. Unknown or out-of-order ids are flagged.

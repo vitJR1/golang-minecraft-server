@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"minecraft-server/player"
+	"minecraft-server/protocol/packetid"
 
 	"minecraft-server/protocol"
 	"minecraft-server/world"
@@ -90,7 +91,7 @@ func (c *ClientConnection) sendInventoryContents() error {
 		writeStack(&buf, c.inv.get(slot))
 	}
 	writeStack(&buf, c.cursor)
-	return c.safeWrite(CbPlaySetContainerContent, buf.Bytes())
+	return c.safeWrite(packetid.CbPlaySetContainerContent, buf.Bytes())
 }
 
 // stripNavigatorItems removes the server-given hub UI items (navigator rod,
@@ -311,7 +312,7 @@ func (c *ClientConnection) sendSetSlot(windowID byte, slot int16, st itemStack) 
 	protocol.WriteVarInt32ToBuffer(&buf, 0) // state id
 	buf.Write(protocol.WriteShort(slot))
 	writeStack(&buf, st) // keeps name / lore / enchantments / damage
-	return c.safeWrite(CbPlaySetContainerSlot, buf.Bytes())
+	return c.safeWrite(packetid.CbPlaySetContainerSlot, buf.Bytes())
 }
 
 // consumeHeld removes one unit from the held stack after a successful

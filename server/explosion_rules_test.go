@@ -5,6 +5,7 @@ import (
 
 	"minecraft-server/game"
 	"minecraft-server/player"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -138,7 +139,7 @@ func TestFireballThrownAtOwnFeet(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		inst.projectileTick(uint64(i))
 	}
-	if lastPacket(t, c, CbPlayExplosion) == nil {
+	if lastPacket(t, c, packetid.CbPlayExplosion) == nil {
 		t.Error("the fireball should explode on the floor under the thrower")
 	}
 	if h := c.player.Health(); h >= player.MaxHealth {

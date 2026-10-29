@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 )
 
 // sidebar.go: the per-player scoreboard sidebar (the panel on the right).
@@ -61,35 +62,35 @@ func (c *ClientConnection) setSidebar(title string, lines []string) {
 	prev := c.sidebar
 	next := &sidebarState{title: title, lines: append([]string(nil), lines...)}
 	if prev == nil {
-		_ = c.safeWrite(CbPlayUpdateObjectives, objectivePayload(sidebarObjective, objectiveCreate, title))
+		_ = c.safeWrite(packetid.CbPlayUpdateObjectives, objectivePayload(sidebarObjective, objectiveCreate, title))
 		for i, line := range lines {
-			_ = c.safeWrite(CbPlayUpdateTeams, teamCreatePayload(sidebarTeam(i), line, sidebarHolder(i)))
-			_ = c.safeWrite(CbPlayUpdateScore, scorePayload(sidebarHolder(i), sidebarObjective, int32(len(lines)-i)))
+			_ = c.safeWrite(packetid.CbPlayUpdateTeams, teamCreatePayload(sidebarTeam(i), line, sidebarHolder(i)))
+			_ = c.safeWrite(packetid.CbPlayUpdateScore, scorePayload(sidebarHolder(i), sidebarObjective, int32(len(lines)-i)))
 		}
-		_ = c.safeWrite(CbPlayDisplayObjective, displayObjectivePayload(sidebarSlot, sidebarObjective))
+		_ = c.safeWrite(packetid.CbPlayDisplayObjective, displayObjectivePayload(sidebarSlot, sidebarObjective))
 		c.sidebar = next
 		return
 	}
 	if title != prev.title {
-		_ = c.safeWrite(CbPlayUpdateObjectives, objectivePayload(sidebarObjective, objectiveUpdate, title))
+		_ = c.safeWrite(packetid.CbPlayUpdateObjectives, objectivePayload(sidebarObjective, objectiveUpdate, title))
 	}
 	rescore := len(lines) != len(prev.lines) // every position shifts
 	for i, line := range lines {
 		switch {
 		case i >= len(prev.lines):
-			_ = c.safeWrite(CbPlayUpdateTeams, teamCreatePayload(sidebarTeam(i), line, sidebarHolder(i)))
-			_ = c.safeWrite(CbPlayUpdateScore, scorePayload(sidebarHolder(i), sidebarObjective, int32(len(lines)-i)))
+			_ = c.safeWrite(packetid.CbPlayUpdateTeams, teamCreatePayload(sidebarTeam(i), line, sidebarHolder(i)))
+			_ = c.safeWrite(packetid.CbPlayUpdateScore, scorePayload(sidebarHolder(i), sidebarObjective, int32(len(lines)-i)))
 			continue
 		case line != prev.lines[i]:
-			_ = c.safeWrite(CbPlayUpdateTeams, teamUpdatePayload(sidebarTeam(i), line))
+			_ = c.safeWrite(packetid.CbPlayUpdateTeams, teamUpdatePayload(sidebarTeam(i), line))
 		}
 		if rescore {
-			_ = c.safeWrite(CbPlayUpdateScore, scorePayload(sidebarHolder(i), sidebarObjective, int32(len(lines)-i)))
+			_ = c.safeWrite(packetid.CbPlayUpdateScore, scorePayload(sidebarHolder(i), sidebarObjective, int32(len(lines)-i)))
 		}
 	}
 	for i := len(lines); i < len(prev.lines); i++ {
-		_ = c.safeWrite(CbPlayUpdateScore, scoreRemovePayload(sidebarHolder(i), sidebarObjective))
-		_ = c.safeWrite(CbPlayUpdateTeams, teamRemovePayload(sidebarTeam(i)))
+		_ = c.safeWrite(packetid.CbPlayUpdateScore, scoreRemovePayload(sidebarHolder(i), sidebarObjective))
+		_ = c.safeWrite(packetid.CbPlayUpdateTeams, teamRemovePayload(sidebarTeam(i)))
 	}
 	c.sidebar = next
 }
@@ -107,10 +108,10 @@ func (c *ClientConnection) clearSidebar() {
 		return
 	}
 	for i := range prev.lines {
-		_ = c.safeWrite(CbPlayUpdateTeams, teamRemovePayload(sidebarTeam(i)))
+		_ = c.safeWrite(packetid.CbPlayUpdateTeams, teamRemovePayload(sidebarTeam(i)))
 	}
 	// Removing the objective drops its scores and the display slot.
-	_ = c.safeWrite(CbPlayUpdateObjectives, objectivePayload(sidebarObjective, objectiveRemove, ""))
+	_ = c.safeWrite(packetid.CbPlayUpdateObjectives, objectivePayload(sidebarObjective, objectiveRemove, ""))
 }
 
 // --- wire payloads ---------------------------------------------------------

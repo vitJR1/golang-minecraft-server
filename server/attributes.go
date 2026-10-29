@@ -4,6 +4,7 @@ import (
 	"bytes"
 
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 )
 
 // attributes.go: the generic.movement_speed attribute.
@@ -101,5 +102,5 @@ func (c *ClientConnection) sendMovementAttributes() error {
 		return nil
 	}
 	mods := movementSpeedModifiers(c.effectLevel(EffectSpeed), c.effectLevel(EffectSlowness), c.ac.Sprinting.Load())
-	return c.safeWrite(CbPlayUpdateAttributes, movementSpeedAttributePayload(c.player.EntityID, mods))
+	return c.safeWrite(packetid.CbPlayUpdateAttributes, movementSpeedAttributePayload(c.player.EntityID, mods))
 }

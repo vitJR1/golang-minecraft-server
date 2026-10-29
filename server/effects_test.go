@@ -9,6 +9,7 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -28,7 +29,7 @@ func TestEffectAPIAndActiveList(t *testing.T) {
 		t.Errorf("remaining should be close to a minute, got %v", active[1].Remaining)
 	}
 	// Entity Effect went to the client with the vanilla id.
-	body := lastPacket(t, c, CbPlayEntityEffect)
+	body := lastPacket(t, c, packetid.CbPlayEntityEffect)
 	if body == nil {
 		t.Fatal("no Entity Effect packet")
 	}
@@ -40,7 +41,7 @@ func TestEffectAPIAndActiveList(t *testing.T) {
 	}
 
 	c.removeEffect(EffectSpeed)
-	if c.effectLevel(EffectSpeed) != 0 || lastPacket(t, c, CbPlayRemoveEntityEffect) == nil {
+	if c.effectLevel(EffectSpeed) != 0 || lastPacket(t, c, packetid.CbPlayRemoveEntityEffect) == nil {
 		t.Error("removeEffect should end the effect and tell the client")
 	}
 	c.clearEffects()
@@ -82,7 +83,7 @@ func TestInvisibilityFlagAndExpirySweep(t *testing.T) {
 	watcher := tntConn(inst, "Watcher", player.Survival, 2, 64, 0)
 
 	ghost.applyEffect(EffectInvisibility, 1, 30*time.Millisecond)
-	meta := lastPacket(t, watcher, CbPlaySetEntityMetadata)
+	meta := lastPacket(t, watcher, packetid.CbPlaySetEntityMetadata)
 	if meta == nil {
 		t.Fatal("watcher should get the invisible flag")
 	}
@@ -95,10 +96,10 @@ func TestInvisibilityFlagAndExpirySweep(t *testing.T) {
 	if ghost.effectLevel(EffectInvisibility) != 0 {
 		t.Error("expired effect should be gone")
 	}
-	if lastPacket(t, ghost, CbPlayRemoveEntityEffect) == nil {
+	if lastPacket(t, ghost, packetid.CbPlayRemoveEntityEffect) == nil {
 		t.Error("expiry should tell the client the effect ended")
 	}
-	meta = lastPacket(t, watcher, CbPlaySetEntityMetadata)
+	meta = lastPacket(t, watcher, packetid.CbPlaySetEntityMetadata)
 	if meta == nil || meta[len(meta)-2]&0x20 != 0 {
 		t.Errorf("watcher should see the invisible flag cleared, got %v", meta)
 	}
@@ -106,7 +107,7 @@ func TestInvisibilityFlagAndExpirySweep(t *testing.T) {
 	// Fire and invisibility share the flag byte.
 	ghost.applyEffect(EffectInvisibility, 1, time.Minute)
 	ghost.setFire(100)
-	meta = lastPacket(t, watcher, CbPlaySetEntityMetadata)
+	meta = lastPacket(t, watcher, packetid.CbPlaySetEntityMetadata)
 	if flags := meta[len(meta)-2]; flags != 0x21 {
 		t.Errorf("flags %#x, want fire|invisible 0x21", flags)
 	}
@@ -115,9 +116,9 @@ func TestInvisibilityFlagAndExpirySweep(t *testing.T) {
 func TestResendEffectsAndDeathClearsThem(t *testing.T) {
 	_, a, v := duel(t)
 	v.applyEffect(EffectSpeed, 1, time.Minute)
-	lastPacket(t, v, CbPlayEntityEffect) // drain
+	lastPacket(t, v, packetid.CbPlayEntityEffect) // drain
 	v.resendEffects()
-	if lastPacket(t, v, CbPlayEntityEffect) == nil {
+	if lastPacket(t, v, packetid.CbPlayEntityEffect) == nil {
 		t.Error("resendEffects should re-send active effects")
 	}
 	// A lethal hit runs die(), which ends every effect.
@@ -177,7 +178,7 @@ func TestSpeedEffectSyncsMovementAttribute(t *testing.T) {
 	// Speed II → one modifier of 0.4 (0.2 × amplifier+1); the icon packet
 	// alone leaves the 1.20.1 client at normal speed.
 	c.applyEffect(EffectSpeed, 2, time.Minute)
-	body := lastPacket(t, c, CbPlayUpdateAttributes)
+	body := lastPacket(t, c, packetid.CbPlayUpdateAttributes)
 	if body == nil {
 		t.Fatal("Speed must send Update Attributes")
 	}
@@ -190,7 +191,7 @@ func TestSpeedEffectSyncsMovementAttribute(t *testing.T) {
 	// client drops it along with the modifiers it replaces.
 	c.ac.Sprinting.Store(true)
 	c.applyEffect(EffectSlowness, 1, time.Minute)
-	mods = readMovementAttribute(t, lastPacket(t, c, CbPlayUpdateAttributes))
+	mods = readMovementAttribute(t, lastPacket(t, c, packetid.CbPlayUpdateAttributes))
 	if len(mods) != 3 || mods[hex.EncodeToString(slownessModifierUUID)] != -0.15 || mods[sprintUUID] != sprintBoost {
 		t.Errorf("Speed II + Slowness I sprinting: %v", mods)
 	}
@@ -199,23 +200,23 @@ func TestSpeedEffectSyncsMovementAttribute(t *testing.T) {
 	c.ac.Sprinting.Store(false)
 	c.removeEffect(EffectSpeed)
 	c.removeEffect(EffectSlowness)
-	mods = readMovementAttribute(t, lastPacket(t, c, CbPlayUpdateAttributes))
+	mods = readMovementAttribute(t, lastPacket(t, c, packetid.CbPlayUpdateAttributes))
 	if len(mods) != 0 {
 		t.Errorf("after removal: %v, want none", mods)
 	}
 
 	// Unrelated effects don't touch the attribute.
 	c.applyEffect(EffectJumpBoost, 1, time.Minute)
-	if lastPacket(t, c, CbPlayUpdateAttributes) != nil {
+	if lastPacket(t, c, packetid.CbPlayUpdateAttributes) != nil {
 		t.Error("jump boost must not resend movement attributes")
 	}
 
 	// Expiry through the sweep syncs too.
 	c.applyEffect(EffectSpeed, 1, time.Millisecond)
-	_ = lastPacket(t, c, CbPlayUpdateAttributes)
+	_ = lastPacket(t, c, packetid.CbPlayUpdateAttributes)
 	time.Sleep(5 * time.Millisecond)
 	inst.effectsTick(20)
-	if lastPacket(t, c, CbPlayUpdateAttributes) == nil {
+	if lastPacket(t, c, packetid.CbPlayUpdateAttributes) == nil {
 		t.Error("expired Speed must resync movement attributes")
 	}
 }

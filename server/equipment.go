@@ -4,6 +4,7 @@ import (
 	"bytes"
 
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 )
 
 // equipment.go: Set Equipment (Cb 0x55) — what other players see in a
@@ -71,7 +72,7 @@ func (c *ClientConnection) equipmentChanged() {
 	if c.player == nil || c.instance == nil {
 		return
 	}
-	c.instance.Players.Broadcast(CbPlaySetEquipment, c.equipmentPayload(), c.player.EntityID)
+	c.instance.Players.Broadcast(packetid.CbPlaySetEquipment, c.equipmentPayload(), c.player.EntityID)
 }
 
 // sendOthersEquipment sends this client the equipment of every other player
@@ -85,6 +86,6 @@ func (c *ClientConnection) sendOthersEquipment() {
 		if other == c || other.player == nil {
 			continue
 		}
-		_ = c.safeWrite(CbPlaySetEquipment, other.equipmentPayload())
+		_ = c.safeWrite(packetid.CbPlaySetEquipment, other.equipmentPayload())
 	}
 }

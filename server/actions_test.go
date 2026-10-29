@@ -7,6 +7,7 @@ import (
 	"minecraft-server/anticheat"
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -83,7 +84,7 @@ func placeWith(t *testing.T, c *ClientConnection, clicked world.Position, face i
 	p.Write(protocol.WriteFloat(cz))
 	p.WriteByte(0)
 	protocol.WriteVarInt32ToBuffer(&p, 1)
-	play(t, c, SbPlayUseItemOnBlock, p.Bytes())
+	play(t, c, packetid.SbPlayUseItemOnBlock, p.Bytes())
 }
 
 func stoneStack(c *ClientConnection) {
@@ -151,14 +152,14 @@ func TestAttackWithoutSwingFlagged(t *testing.T) {
 	a := offlineConn(inst, "Aura", player.Survival, 0.5, 64, 0.5)
 	v := offlineConn(inst, "Victim", player.Survival, 2.5, 64, 0.5)
 	aimAt(a, v)
-	attackRaw(t, a, v)                      // no swing follows
-	play(t, a, SbPlayMoveStatus, []byte{1}) // the tick ends
+	attackRaw(t, a, v)                               // no swing follows
+	play(t, a, packetid.SbPlayMoveStatus, []byte{1}) // the tick ends
 	if !flaggedNow(a, "combat.noswing") {
 		t.Fatal("an attack without a swing wasn't flagged")
 	}
 	b := offlineConn(inst, "Honest", player.Survival, 0.5, 64, -2.5)
 	attack(t, b, v) // attack + swing
-	play(t, b, SbPlayMoveStatus, []byte{1})
+	play(t, b, packetid.SbPlayMoveStatus, []byte{1})
 	if flaggedNow(b, "combat.noswing") {
 		t.Fatal("a vanilla attack + swing was flagged")
 	}
@@ -200,7 +201,7 @@ func pushAndConfirm(t *testing.T, c *ClientConnection, vx, vy, vz float64) {
 		t.Fatal("no Ping followed the push")
 	}
 	// Ids count from 1 on a fresh connection.
-	play(t, c, SbPlayPong, protocol.WriteInt(int32(before+1)))
+	play(t, c, packetid.SbPlayPong, protocol.WriteInt(int32(before+1)))
 	if c.ac.Transactions.Outstanding() != before {
 		t.Fatal("Pong didn't settle the Ping")
 	}

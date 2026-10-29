@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"minecraft-server/game"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"sort"
 	"strings"
 )
@@ -207,5 +208,5 @@ func (c *ClientConnection) sendCommandSuggestionsResponse(txID, start, length in
 		buf.Write(protocol.WriteString(m))
 		buf.WriteByte(0) // hasTooltip = false
 	}
-	return c.safeWrite(CbPlayCommandSuggestResp, buf.Bytes())
+	return c.safeWrite(packetid.CbPlayCommandSuggestResp, buf.Bytes())
 }

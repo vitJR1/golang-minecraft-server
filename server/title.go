@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 )
 
 // title.go: on-screen titles ("You died!", trap alerts). Vanilla 1.20.1
@@ -25,13 +26,13 @@ const (
 // client with the given fade-in / stay / fade-out ticks (≤0 → vanilla
 // defaults).
 func (c *ClientConnection) sendTitle(title, subtitle string, fadeIn, stay, fadeOut int) error {
-	if err := c.safeWrite(CbPlaySetTitleAnimationTimes, titleTimesPayload(fadeIn, stay, fadeOut)); err != nil {
+	if err := c.safeWrite(packetid.CbPlaySetTitleAnimationTimes, titleTimesPayload(fadeIn, stay, fadeOut)); err != nil {
 		return err
 	}
-	if err := c.safeWrite(CbPlaySetSubtitleText, textComponentPayload(subtitle)); err != nil {
+	if err := c.safeWrite(packetid.CbPlaySetSubtitleText, textComponentPayload(subtitle)); err != nil {
 		return err
 	}
-	return c.safeWrite(CbPlaySetTitleText, textComponentPayload(title))
+	return c.safeWrite(packetid.CbPlaySetTitleText, textComponentPayload(title))
 }
 
 // sendClearTitles wipes whatever title / subtitle the client is showing and
@@ -39,14 +40,14 @@ func (c *ClientConnection) sendTitle(title, subtitle string, fadeIn, stay, fadeO
 // title across server switches, so the join sequence sends this once: a
 // "YOU DIED" from another server would otherwise greet the player here.
 func (c *ClientConnection) sendClearTitles() error {
-	return c.safeWrite(CbPlayClearTitles, []byte{1})
+	return c.safeWrite(packetid.CbPlayClearTitles, []byte{1})
 }
 
 // broadcastTitle shows the title to everyone in the instance.
 func (i *Instance) broadcastTitle(title, subtitle string, fadeIn, stay, fadeOut int) {
-	i.Players.Broadcast(CbPlaySetTitleAnimationTimes, titleTimesPayload(fadeIn, stay, fadeOut), -1)
-	i.Players.Broadcast(CbPlaySetSubtitleText, textComponentPayload(subtitle), -1)
-	i.Players.Broadcast(CbPlaySetTitleText, textComponentPayload(title), -1)
+	i.Players.Broadcast(packetid.CbPlaySetTitleAnimationTimes, titleTimesPayload(fadeIn, stay, fadeOut), -1)
+	i.Players.Broadcast(packetid.CbPlaySetSubtitleText, textComponentPayload(subtitle), -1)
+	i.Players.Broadcast(packetid.CbPlaySetTitleText, textComponentPayload(title), -1)
 }
 
 // textComponentPayload encodes a plain text chat component ({"text": …}).

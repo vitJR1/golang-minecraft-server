@@ -6,6 +6,7 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -58,7 +59,7 @@ func TestFullDrawArrowHitsAndConsumesArrow(t *testing.T) {
 	if st := a.inv.get(mainInvStart); st.Count != 1 {
 		t.Errorf("one arrow should be spent, left %+v", st)
 	}
-	if lastPacket(t, v, CbPlayHurtAnimation) == nil {
+	if lastPacket(t, v, packetid.CbPlayHurtAnimation) == nil {
 		t.Error("victim should flash red")
 	}
 }
@@ -133,12 +134,12 @@ func TestArrowRespectsAttackVeto(t *testing.T) {
 func TestArrowSpawnCarriesOwnerAndFacing(t *testing.T) {
 	inst, a, v := archery(t, 1)
 	a.player.MoveAndLook(0.5, 64, 0.5, -90, -30, true) // look +X, 30° up
-	_ = lastPacket(t, v, CbPlaySpawnEntity)
+	_ = lastPacket(t, v, packetid.CbPlaySpawnEntity)
 	a.startDraw()
 	inst.tickCount.Add(25)
 	a.releaseUse()
 
-	body := lastPacket(t, v, CbPlaySpawnEntity)
+	body := lastPacket(t, v, packetid.CbPlaySpawnEntity)
 	if body == nil {
 		t.Fatal("arrow spawn not broadcast")
 	}
@@ -168,29 +169,29 @@ func TestArrowSpawnCarriesOwnerAndFacing(t *testing.T) {
 
 func TestDrawPoseBroadcastToOthers(t *testing.T) {
 	inst, a, v := archery(t, 2) // one shot, one more draw to cancel
-	_ = lastPacket(t, v, CbPlaySetEntityMetadata)
-	_ = lastPacket(t, a, CbPlaySetEntityMetadata)
+	_ = lastPacket(t, v, packetid.CbPlaySetEntityMetadata)
+	_ = lastPacket(t, a, packetid.CbPlaySetEntityMetadata)
 	a.startDraw()
-	if got := handStateOf(t, lastPacket(t, v, CbPlaySetEntityMetadata)); got != handStateActive {
+	if got := handStateOf(t, lastPacket(t, v, packetid.CbPlaySetEntityMetadata)); got != handStateActive {
 		t.Errorf("watcher hand state %#x, want active", got)
 	}
-	if lastPacket(t, a, CbPlaySetEntityMetadata) != nil {
+	if lastPacket(t, a, packetid.CbPlaySetEntityMetadata) != nil {
 		t.Error("the shooter's own client tracks its draw; no metadata to self")
 	}
 	inst.tickCount.Add(25)
 	a.releaseUse()
-	if got := handStateOf(t, lastPacket(t, v, CbPlaySetEntityMetadata)); got != 0 {
+	if got := handStateOf(t, lastPacket(t, v, packetid.CbPlaySetEntityMetadata)); got != 0 {
 		t.Errorf("after release hand state %#x, want idle", got)
 	}
 	// A slot switch cancels the draw and the pose with it.
 	a.startDraw()
-	_ = lastPacket(t, v, CbPlaySetEntityMetadata)
+	_ = lastPacket(t, v, packetid.CbPlaySetEntityMetadata)
 	a.cancelUse()
-	if got := handStateOf(t, lastPacket(t, v, CbPlaySetEntityMetadata)); got != 0 {
+	if got := handStateOf(t, lastPacket(t, v, packetid.CbPlaySetEntityMetadata)); got != 0 {
 		t.Errorf("after cancel hand state %#x, want idle", got)
 	}
 	a.cancelUse()
-	if lastPacket(t, v, CbPlaySetEntityMetadata) != nil {
+	if lastPacket(t, v, packetid.CbPlaySetEntityMetadata) != nil {
 		t.Error("cancelling nothing must not spam metadata")
 	}
 }
@@ -272,7 +273,7 @@ func TestStuckArrowIsPickedUpBySurvivalPlayer(t *testing.T) {
 		t.Fatal("arrow should stay with nobody near it")
 	}
 	// Walk the other player onto it.
-	_ = lastPacket(t, v, CbPlayPickupItem)
+	_ = lastPacket(t, v, packetid.CbPlayPickupItem)
 	v.player.MoveTo(p.x, 64, p.z, true)
 	inst.projectileTick(3)
 	if projectileCount(inst) != 0 {
@@ -281,7 +282,7 @@ func TestStuckArrowIsPickedUpBySurvivalPlayer(t *testing.T) {
 	if v.countItem(arrowItemID()) != 1 {
 		t.Errorf("collector has %d arrows, want 1", v.countItem(arrowItemID()))
 	}
-	if lastPacket(t, v, CbPlayPickupItem) == nil {
+	if lastPacket(t, v, packetid.CbPlayPickupItem) == nil {
 		t.Error("pickup fly-in not broadcast")
 	}
 	if a.countItem(arrowItemID()) != 0 {

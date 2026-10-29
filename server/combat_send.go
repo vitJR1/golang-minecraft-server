@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 )
 
 // Sound categories (the VarInt "Sound Source" enum in Sound Effect).
@@ -23,7 +24,7 @@ func (i *Instance) playSound(name string, category int32, x, y, z float64, volum
 	if volume > 1 {
 		rng *= float64(volume)
 	}
-	i.Players.BroadcastNear(x, y, z, rng, CbPlaySoundEffect,
+	i.Players.BroadcastNear(x, y, z, rng, packetid.CbPlaySoundEffect,
 		soundEffectPayload(name, category, x, y, z, volume, pitch), -1)
 }
 
@@ -39,7 +40,7 @@ func (c *ClientConnection) sendSetHealth(health float32) error {
 	buf.Write(protocol.WriteFloat(health))
 	protocol.WriteVarInt32ToBuffer(&buf, 20) // food
 	buf.Write(protocol.WriteFloat(5))        // saturation
-	err := c.safeWrite(CbPlaySetHealth, buf.Bytes())
+	err := c.safeWrite(packetid.CbPlaySetHealth, buf.Bytes())
 	c.syncAbsorption(false)
 	return err
 }
@@ -125,7 +126,7 @@ func (c *ClientConnection) sendCombatAttributes() error {
 	if cfg.Version == PvP18 {
 		speed = pvp18AttackSpeed
 	}
-	return c.safeWrite(CbPlayUpdateAttributes, attackSpeedAttributePayload(c.player.EntityID, speed))
+	return c.safeWrite(packetid.CbPlayUpdateAttributes, attackSpeedAttributePayload(c.player.EntityID, speed))
 }
 
 // combatDeathPayload builds Combat Death (0x38), which makes the client open

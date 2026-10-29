@@ -7,6 +7,7 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -44,10 +45,10 @@ func TestAbsorptionEffectSyncsYellowHearts(t *testing.T) {
 	if a := c.player.Absorption(); a != 4 {
 		t.Fatalf("absorption after level I: %v, want 4", a)
 	}
-	if got := absorptionOf(t, lastPacket(t, c, CbPlaySetEntityMetadata)); got != 4 {
+	if got := absorptionOf(t, lastPacket(t, c, packetid.CbPlaySetEntityMetadata)); got != 4 {
 		t.Errorf("own client got absorption %v, want 4", got)
 	}
-	if got := absorptionOf(t, lastPacket(t, w, CbPlaySetEntityMetadata)); got != 4 {
+	if got := absorptionOf(t, lastPacket(t, w, packetid.CbPlaySetEntityMetadata)); got != 4 {
 		t.Errorf("watcher got absorption %v, want 4", got)
 	}
 
@@ -61,7 +62,7 @@ func TestAbsorptionEffectSyncsYellowHearts(t *testing.T) {
 	if a := c.player.Absorption(); a != 0 {
 		t.Errorf("removing the effect should empty the pool, got %v", a)
 	}
-	if got := absorptionOf(t, lastPacket(t, c, CbPlaySetEntityMetadata)); got != 0 {
+	if got := absorptionOf(t, lastPacket(t, c, packetid.CbPlaySetEntityMetadata)); got != 0 {
 		t.Errorf("own client after removal: %v, want 0", got)
 	}
 
@@ -76,7 +77,7 @@ func TestAbsorptionEffectSyncsYellowHearts(t *testing.T) {
 	if a := c.player.Absorption(); a != 0 {
 		t.Errorf("expiry should empty the pool, got %v", a)
 	}
-	if got := absorptionOf(t, lastPacket(t, c, CbPlaySetEntityMetadata)); got != 0 {
+	if got := absorptionOf(t, lastPacket(t, c, packetid.CbPlaySetEntityMetadata)); got != 0 {
 		t.Errorf("own client after expiry: %v, want 0", got)
 	}
 }
@@ -98,19 +99,19 @@ func TestDamageDrainsAbsorptionAndSyncs(t *testing.T) {
 	if a := c.player.Absorption(); a != 1 {
 		t.Errorf("absorption after 3 damage: %v, want 1", a)
 	}
-	if got := absorptionOf(t, lastPacket(t, c, CbPlaySetEntityMetadata)); got != 1 {
+	if got := absorptionOf(t, lastPacket(t, c, packetid.CbPlaySetEntityMetadata)); got != 1 {
 		t.Errorf("client absorption after the hit: %v, want 1", got)
 	}
 
 	// Nothing changed → no metadata spam on a plain health sync.
 	_ = c.sendSetHealth(c.player.Health())
-	if lastPacket(t, c, CbPlaySetEntityMetadata) != nil {
+	if lastPacket(t, c, packetid.CbPlaySetEntityMetadata) != nil {
 		t.Error("unchanged absorption must not be re-sent")
 	}
 
 	// resendEffects (resyncView after Respawn) forces the value out again.
 	c.resendEffects()
-	if got := absorptionOf(t, lastPacket(t, c, CbPlaySetEntityMetadata)); got != 1 {
+	if got := absorptionOf(t, lastPacket(t, c, packetid.CbPlaySetEntityMetadata)); got != 1 {
 		t.Errorf("resend after respawn: %v, want 1", got)
 	}
 

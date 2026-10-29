@@ -4,6 +4,7 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 	"sync/atomic"
 	"testing"
@@ -69,7 +70,7 @@ func TestAttachLogicWiresOnPlayerJoin(t *testing.T) {
 	_ = cli.startDrain()
 
 	// Move into the wired instance — that fires OnPlayerJoin on its logic.
-	cli.write(t, SbPlayChatCommand, protocol.WriteString("instance join arena"))
+	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("instance join arena"))
 
 	waitFor(t, time.Second, func() bool { return logic.joinCalls.Load() == 1 },
 		"OnPlayerJoin to fire")

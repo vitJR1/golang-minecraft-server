@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 )
 
 // hologram.go implements floating text: an invisible, gravity-less marker
@@ -62,8 +63,8 @@ func (i *Instance) SpawnHologram(x, y, z float64, text string) *hologram {
 	spawn, meta := spawnHologramPayload(h), hologramMetadataPayload(h)
 	i.holoMu.Unlock()
 
-	i.Players.Broadcast(CbPlaySpawnEntity, spawn, -1)
-	i.Players.Broadcast(CbPlaySetEntityMetadata, meta, -1)
+	i.Players.Broadcast(packetid.CbPlaySpawnEntity, spawn, -1)
+	i.Players.Broadcast(packetid.CbPlaySetEntityMetadata, meta, -1)
 	return h
 }
 
@@ -79,7 +80,7 @@ func (h *hologram) SetText(text string) {
 	h.text = text
 	meta := hologramMetadataPayload(h)
 	i.holoMu.Unlock()
-	i.Players.Broadcast(CbPlaySetEntityMetadata, meta, -1)
+	i.Players.Broadcast(packetid.CbPlaySetEntityMetadata, meta, -1)
 }
 
 // Text returns the current floating text.
@@ -103,7 +104,7 @@ func (h *hologram) Remove() {
 	}
 	i.holoMu.Unlock()
 	if found {
-		i.Players.Broadcast(CbPlayRemoveEntities, removeEntitiesPayload([]int32{h.eid}), -1)
+		i.Players.Broadcast(packetid.CbPlayRemoveEntities, removeEntitiesPayload([]int32{h.eid}), -1)
 	}
 }
 
@@ -118,8 +119,8 @@ func (c *ClientConnection) sendHolograms() error {
 	pkts := make([]outPkt, 0, 2*len(c.instance.holograms))
 	for _, h := range c.instance.holograms {
 		pkts = append(pkts,
-			outPkt{CbPlaySpawnEntity, spawnHologramPayload(h)},
-			outPkt{CbPlaySetEntityMetadata, hologramMetadataPayload(h)})
+			outPkt{packetid.CbPlaySpawnEntity, spawnHologramPayload(h)},
+			outPkt{packetid.CbPlaySetEntityMetadata, hologramMetadataPayload(h)})
 	}
 	c.instance.holoMu.Unlock()
 

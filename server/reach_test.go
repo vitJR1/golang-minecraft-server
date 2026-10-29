@@ -10,6 +10,7 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -31,7 +32,7 @@ func attack(t *testing.T, c, victim *ClientConnection) {
 	t.Helper()
 	aimAt(c, victim)
 	attackRaw(t, c, victim)
-	play(t, c, SbPlaySwingArm, protocol.WriteVarInt32(0))
+	play(t, c, packetid.SbPlaySwingArm, protocol.WriteVarInt32(0))
 }
 
 // attackRaw sends only the Interact (attack) packet, with whatever view
@@ -42,7 +43,7 @@ func attackRaw(t *testing.T, c, victim *ClientConnection) {
 	protocol.WriteVarInt32ToBuffer(&p, victim.player.EntityID)
 	protocol.WriteVarInt32ToBuffer(&p, 1) // attack
 	p.WriteByte(0)                        // sneaking
-	play(t, c, SbPlayInteract, p.Bytes())
+	play(t, c, packetid.SbPlayInteract, p.Bytes())
 }
 
 // aimAt turns c's view to victim's chest (server-side, like a rotation
@@ -64,7 +65,7 @@ func interactEntity(t *testing.T, c *ClientConnection, eid int32) {
 	protocol.WriteVarInt32ToBuffer(&p, 0) // interact
 	protocol.WriteVarInt32ToBuffer(&p, 0) // main hand
 	p.WriteByte(0)
-	play(t, c, SbPlayInteract, p.Bytes())
+	play(t, c, packetid.SbPlayInteract, p.Bytes())
 }
 
 func hurt(c *ClientConnection) bool { return c.player.Health() < player.MaxHealth }

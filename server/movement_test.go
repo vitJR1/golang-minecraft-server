@@ -7,6 +7,7 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -21,7 +22,7 @@ func setPos(t *testing.T, c *ClientConnection, x, y, z float64) {
 	p.Write(protocol.WriteDouble(y))
 	p.Write(protocol.WriteDouble(z))
 	p.WriteByte(1)
-	play(t, c, SbPlaySetPos, p.Bytes())
+	play(t, c, packetid.SbPlaySetPos, p.Bytes())
 }
 
 // wallWorld is an offline instance with a floor at y=63 and a one block
@@ -117,7 +118,7 @@ func TestTimerFlagsPacketBurst(t *testing.T) {
 	p.WriteByte(1)
 	// 20 rotation packets with no time passing: a client ticking flat out.
 	for i := 0; i < 20; i++ {
-		play(t, c, SbPlaySetRot, p.Bytes())
+		play(t, c, packetid.SbPlaySetRot, p.Bytes())
 	}
 	if !flaggedNow(c, "movement.timer") {
 		t.Fatal("timer not flagged")
@@ -128,7 +129,7 @@ func TestStatusOnlyMovePacketCounted(t *testing.T) {
 	inst := wallWorld()
 	c := offlineConn(inst, "Statuser", player.Survival, 0.5, 64, 0.5)
 	for i := 0; i < 20; i++ {
-		play(t, c, SbPlayMoveStatus, []byte{1})
+		play(t, c, packetid.SbPlayMoveStatus, []byte{1})
 	}
 	if !flaggedNow(c, "movement.timer") {
 		t.Fatal("on-ground-only packets escape the timer")

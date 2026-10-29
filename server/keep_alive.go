@@ -3,6 +3,7 @@ package server
 import (
 	"log/slog"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"sync/atomic"
 	"time"
 )
@@ -83,7 +84,7 @@ func (c *ClientConnection) keepAlive() {
 		c.keepAlivePendingSentNanos.Store(id)
 		c.keepAlivePendingID.Store(id)
 
-		if err := c.safeWrite(CbPlayKeepAlive, protocol.WriteLong(id)); err != nil {
+		if err := c.safeWrite(packetid.CbPlayKeepAlive, protocol.WriteLong(id)); err != nil {
 			slog.Warn("keep-alive write failed", "player", c.playerName, "err", err)
 			return
 		}

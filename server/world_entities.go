@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -62,9 +63,9 @@ func (i *Instance) AddWorldEntity(e world.Entity) {
 	meta := frameMetadataPayload(ie)
 	i.entitiesMu.Unlock()
 
-	i.Players.Broadcast(CbPlaySpawnEntity, spawn, -1)
+	i.Players.Broadcast(packetid.CbPlaySpawnEntity, spawn, -1)
 	if meta != nil {
-		i.Players.Broadcast(CbPlaySetEntityMetadata, meta, -1)
+		i.Players.Broadcast(packetid.CbPlaySetEntityMetadata, meta, -1)
 	}
 }
 
@@ -91,9 +92,9 @@ func (c *ClientConnection) sendWorldEntities() error {
 	c.instance.entitiesMu.Lock()
 	pkts := make([]outPkt, 0, len(c.instance.worldEntities))
 	for _, ie := range c.instance.worldEntities {
-		pkts = append(pkts, outPkt{CbPlaySpawnEntity, spawnEntityPayload(ie)})
+		pkts = append(pkts, outPkt{packetid.CbPlaySpawnEntity, spawnEntityPayload(ie)})
 		if meta := frameMetadataPayload(ie); meta != nil {
-			pkts = append(pkts, outPkt{CbPlaySetEntityMetadata, meta})
+			pkts = append(pkts, outPkt{packetid.CbPlaySetEntityMetadata, meta})
 		}
 	}
 	c.instance.entitiesMu.Unlock()
@@ -165,7 +166,7 @@ func (i *Instance) FrameInteract(eid int32, heldItem string) {
 	i.entitiesMu.Unlock()
 
 	if meta != nil {
-		i.Players.Broadcast(CbPlaySetEntityMetadata, meta, -1)
+		i.Players.Broadcast(packetid.CbPlaySetEntityMetadata, meta, -1)
 	}
 }
 

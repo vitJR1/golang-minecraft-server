@@ -7,6 +7,7 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -26,7 +27,7 @@ func TestSendTitleSendsTimesSubtitleThenTitle(t *testing.T) {
 		ids = append(ids, int32(id))
 		bodies = append(bodies, buf.Bytes())
 	}
-	want := []int32{CbPlaySetTitleAnimationTimes, CbPlaySetSubtitleText, CbPlaySetTitleText}
+	want := []int32{packetid.CbPlaySetTitleAnimationTimes, packetid.CbPlaySetSubtitleText, packetid.CbPlaySetTitleText}
 	if len(ids) != 3 || ids[0] != want[0] || ids[1] != want[1] || ids[2] != want[2] {
 		t.Fatalf("packet order %v, want %v", ids, want)
 	}
@@ -60,11 +61,11 @@ func TestBroadcastTitleReachesEveryoneAndDefaultsTimes(t *testing.T) {
 			id, _ := protocol.ReadVarInt(buf)
 			got[int32(id)] = buf.Bytes()
 		}
-		times := got[CbPlaySetTitleAnimationTimes]
+		times := got[packetid.CbPlaySetTitleAnimationTimes]
 		if times == nil || binary.BigEndian.Uint32(times[4:8]) != titleStay {
 			t.Errorf("%s: default stay expected, got %v", c.player.Name, times)
 		}
-		if got[CbPlaySetTitleText] == nil {
+		if got[packetid.CbPlaySetTitleText] == nil {
 			t.Errorf("%s: no title", c.player.Name)
 		}
 	}

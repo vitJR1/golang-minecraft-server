@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"minecraft-server/chunk"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -55,7 +56,7 @@ func (c *ClientConnection) sendLoginPlay() error {
 	// Portal cooldown (1.20+)
 	protocol.WriteVarInt32ToBuffer(&buf, 0)
 
-	return c.safeWrite(CbPlayLogin, buf.Bytes())
+	return c.safeWrite(packetid.CbPlayLogin, buf.Bytes())
 }
 
 // sendSyncPlayerPosition writes Synchronize Player Position (0x3C): an
@@ -89,14 +90,14 @@ func (c *ClientConnection) writeSyncPos(x, y, z float64, flags byte) error {
 	buf.Write(protocol.WriteFloat(0)) // pitch
 	buf.WriteByte(flags)
 	protocol.WriteVarInt32ToBuffer(&buf, id)
-	return c.safeWrite(CbPlaySyncPos, buf.Bytes())
+	return c.safeWrite(packetid.CbPlaySyncPos, buf.Bytes())
 }
 
 // sendAckBlockChange echoes the client's block-change sequence number back
 // to confirm its prediction. Without this the client visually rolls back
 // the place/break it just performed.
 func (c *ClientConnection) sendAckBlockChange(sequence int32) error {
-	return c.safeWrite(CbPlayAckBlockChange, protocol.WriteVarInt32(sequence))
+	return c.safeWrite(packetid.CbPlayAckBlockChange, protocol.WriteVarInt32(sequence))
 }
 
 // sendRespawn fully resets the client's view: it sends TWO Respawn packets,
@@ -129,7 +130,7 @@ func (c *ClientConnection) sendRespawnTo(dimension string) error {
 	buf.WriteByte(0x03)                        // copy metadata: keep status + equipment
 	buf.WriteByte(0)                           // has death location = false
 	protocol.WriteVarInt32ToBuffer(&buf, 0)    // portal cooldown
-	return c.safeWrite(CbPlayRespawn, buf.Bytes())
+	return c.safeWrite(packetid.CbPlayRespawn, buf.Bytes())
 }
 
 // sendBlockUpdate writes Block Update (0x09): a single block change at the
@@ -138,7 +139,7 @@ func (c *ClientConnection) sendBlockUpdate(p world.Position, b world.Block) erro
 	var buf bytes.Buffer
 	buf.Write(protocol.WritePosition(p.X, p.Y, p.Z))
 	protocol.WriteVarInt32ToBuffer(&buf, b.StateID)
-	return c.safeWrite(CbPlayBlockUpdate, buf.Bytes())
+	return c.safeWrite(packetid.CbPlayBlockUpdate, buf.Bytes())
 }
 
 // sendSetCenterChunk (Cb 0x4E "update_view_position") tells the client
@@ -150,7 +151,7 @@ func (c *ClientConnection) sendSetCenterChunk(chunkX, chunkZ int32) error {
 	var buf bytes.Buffer
 	protocol.WriteVarInt32ToBuffer(&buf, chunkX)
 	protocol.WriteVarInt32ToBuffer(&buf, chunkZ)
-	return c.safeWrite(CbPlaySetCenterChunk, buf.Bytes())
+	return c.safeWrite(packetid.CbPlaySetCenterChunk, buf.Bytes())
 }
 
 // sendSetDefaultSpawnPosition (Cb 0x50) seeds the world-spawn point used
@@ -162,7 +163,7 @@ func (c *ClientConnection) sendSetDefaultSpawnPosition(x, y, z int, angle float3
 	var buf bytes.Buffer
 	buf.Write(protocol.WritePosition(x, y, z))
 	buf.Write(protocol.WriteFloat(angle))
-	return c.safeWrite(CbPlaySpawnPos, buf.Bytes())
+	return c.safeWrite(packetid.CbPlaySpawnPos, buf.Bytes())
 }
 
 // sendStartWaitingForChunks fires Game Event id 13 — added in 1.20.1
@@ -174,7 +175,7 @@ func (c *ClientConnection) sendStartWaitingForChunks() error {
 	payload := make([]byte, 0, 5)
 	payload = append(payload, 13) // event id: start waiting for chunks
 	payload = append(payload, protocol.WriteFloat(0)...)
-	return c.safeWrite(CbPlayGameEvent, payload)
+	return c.safeWrite(packetid.CbPlayGameEvent, payload)
 }
 
 // sendExperience updates the XP bar overlay (Cb 0x56). The bar takes a
@@ -186,7 +187,7 @@ func (c *ClientConnection) sendExperience(bar float32, level, totalXP int32) err
 	buf.Write(protocol.WriteFloat(bar))
 	protocol.WriteVarInt32ToBuffer(&buf, level)
 	protocol.WriteVarInt32ToBuffer(&buf, totalXP)
-	return c.safeWrite(CbPlaySetExperience, buf.Bytes())
+	return c.safeWrite(packetid.CbPlaySetExperience, buf.Bytes())
 }
 
 // sendPlayDisconnect tells the client we're closing the connection with a
@@ -196,7 +197,7 @@ func (c *ClientConnection) sendExperience(bar float32, level, totalXP int32) err
 // callers typically follow up with cleanup() regardless.
 func (c *ClientConnection) sendPlayDisconnect(reason string) error {
 	payload, _ := json.Marshal(map[string]string{"text": reason})
-	return c.safeWrite(CbPlayDisconnect, protocol.WriteString(string(payload)))
+	return c.safeWrite(packetid.CbPlayDisconnect, protocol.WriteString(string(payload)))
 }
 
 // sendWorldChunks bakes the instance's world into real chunk-data packets:
@@ -378,7 +379,7 @@ func (c *ClientConnection) sendChunkColumn(chunkX, chunkZ int32, data []byte, be
 
 	writeFullDaylight(&buf)
 
-	return c.safeWrite(CbPlayChunkData, buf.Bytes())
+	return c.safeWrite(packetid.CbPlayChunkData, buf.Bytes())
 }
 
 // writeFullDaylight appends the light section of the Chunk Data packet: a full

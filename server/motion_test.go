@@ -7,6 +7,7 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -28,7 +29,7 @@ func fieldWorld() *Instance {
 func confirmTeleports(t *testing.T, c *ClientConnection) {
 	t.Helper()
 	for _, tp := range c.ac.Teleports.Pending() {
-		play(t, c, SbPlayTeleportConfirm, protocol.WriteVarInt32(tp.ID))
+		play(t, c, packetid.SbPlayTeleportConfirm, protocol.WriteVarInt32(tp.ID))
 	}
 }
 

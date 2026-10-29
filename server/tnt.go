@@ -7,6 +7,7 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -119,8 +120,8 @@ func (i *Instance) primeTNT(pos world.Position, fuse int, igniter *ClientConnect
 	i.tnts = append(i.tnts, t)
 	i.tntMu.Unlock()
 
-	i.Players.Broadcast(CbPlaySpawnEntity, spawnTNTPayload(t), -1)
-	i.Players.Broadcast(CbPlaySetEntityMetadata, tntMetadataPayload(t), -1)
+	i.Players.Broadcast(packetid.CbPlaySpawnEntity, spawnTNTPayload(t), -1)
+	i.Players.Broadcast(packetid.CbPlaySetEntityMetadata, tntMetadataPayload(t), -1)
 	i.playSound("minecraft:entity.tnt.primed", soundCategoryBlocks, t.x, t.y, t.z, 1, 1)
 	return true
 }
@@ -154,7 +155,7 @@ func (i *Instance) tntTick(uint64) {
 			exploding = append(exploding, t)
 		default:
 			kept = append(kept, t)
-			i.Players.Broadcast(CbPlayTeleportEntity, tntTeleportPayload(t), -1)
+			i.Players.Broadcast(packetid.CbPlayTeleportEntity, tntTeleportPayload(t), -1)
 		}
 	}
 	for j := len(kept); j < len(i.tnts); j++ {
@@ -164,7 +165,7 @@ func (i *Instance) tntTick(uint64) {
 	i.tntMu.Unlock()
 
 	if len(removed) > 0 {
-		i.Players.Broadcast(CbPlayRemoveEntities, removeEntitiesPayload(removed), -1)
+		i.Players.Broadcast(packetid.CbPlayRemoveEntities, removeEntitiesPayload(removed), -1)
 	}
 	for _, t := range exploding {
 		i.explode(t.x, t.y+tntHeight*0.0625, t.z, tntPower, t.igniter)
@@ -260,7 +261,7 @@ func (i *Instance) explodeWith(x, y, z, power, knockback float64, igniter *Clien
 				continue
 			}
 		}
-		_ = c.safeWrite(CbPlayExplosion, explosionPayload(x, y, z, float32(power), records, mx, my, mz))
+		_ = c.safeWrite(packetid.CbPlayExplosion, explosionPayload(x, y, z, float32(power), records, mx, my, mz))
 		if mx != 0 || my != 0 || mz != 0 {
 			c.giveVelocity(mx, my, mz) // the explosion pushes the client itself
 		}
@@ -405,7 +406,7 @@ func (i *Instance) explosionPlayers(x, y, z, power float64, actor *ClientConnect
 		if applied <= 0 {
 			continue
 		}
-		i.Players.Broadcast(CbPlayHurtAnimation, hurtAnimationPayload(s.EntityID, 0), -1)
+		i.Players.Broadcast(packetid.CbPlayHurtAnimation, hurtAnimationPayload(s.EntityID, 0), -1)
 		i.playSound("minecraft:entity.player.hurt", soundCategoryPlayer, s.X, s.Y, s.Z, 1, 1)
 		if killed {
 			var killer *ClientConnection
@@ -586,8 +587,8 @@ func (c *ClientConnection) sendTNTEntities() error {
 	pkts := make([]outPkt, 0, 2*len(c.instance.tnts))
 	for _, t := range c.instance.tnts {
 		pkts = append(pkts,
-			outPkt{CbPlaySpawnEntity, spawnTNTPayload(t)},
-			outPkt{CbPlaySetEntityMetadata, tntMetadataPayload(t)})
+			outPkt{packetid.CbPlaySpawnEntity, spawnTNTPayload(t)},
+			outPkt{packetid.CbPlaySetEntityMetadata, tntMetadataPayload(t)})
 	}
 	c.instance.tntMu.Unlock()
 	for _, p := range pkts {

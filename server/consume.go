@@ -7,6 +7,7 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -90,7 +91,7 @@ func (c *ClientConnection) broadcastHandState(active bool) {
 	if active {
 		flags = handStateActive
 	}
-	c.instance.Players.Broadcast(CbPlaySetEntityMetadata, handStatePayload(c.player.EntityID, flags), c.player.EntityID)
+	c.instance.Players.Broadcast(packetid.CbPlaySetEntityMetadata, handStatePayload(c.player.EntityID, flags), c.player.EntityID)
 }
 
 // consumeTick finishes uses that have run their course. Registered on the

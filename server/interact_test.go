@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -41,7 +42,7 @@ func TestOnPlayerAttackHookFires(t *testing.T) {
 	protocol.WriteVarInt32ToBuffer(&p, victimConn.player.EntityID)
 	protocol.WriteVarInt32ToBuffer(&p, 1) // attack
 	p.WriteByte(0)                        // not sneaking
-	attackerCli.write(t, SbPlayInteract, p.Bytes())
+	attackerCli.write(t, packetid.SbPlayInteract, p.Bytes())
 
 	waitFor(t, time.Second, func() bool { return hookFired.Load() == 1 },
 		"OnPlayerAttack to fire")
@@ -75,7 +76,7 @@ func TestOnPlayerAttackSelfAttackIgnored(t *testing.T) {
 	protocol.WriteVarInt32ToBuffer(&p, conn.player.EntityID) // target self
 	protocol.WriteVarInt32ToBuffer(&p, 1)
 	p.WriteByte(0)
-	cli.write(t, SbPlayInteract, p.Bytes())
+	cli.write(t, packetid.SbPlayInteract, p.Bytes())
 
 	// Give it a moment — nothing should fire.
 	time.Sleep(100 * time.Millisecond)

@@ -9,6 +9,7 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -17,7 +18,7 @@ func teamOps(t *testing.T, pkts []sentPacket) []string {
 	t.Helper()
 	var out []string
 	for _, p := range pkts {
-		if p.id != CbPlayUpdateTeams {
+		if p.id != packetid.CbPlayUpdateTeams {
 			continue
 		}
 		buf := bytes.NewBuffer(p.body)
@@ -97,7 +98,7 @@ func TestNameTags(t *testing.T) {
 func tagPrefixes(t *testing.T, pkts []sentPacket, into map[string]string) {
 	t.Helper()
 	for _, p := range pkts {
-		if p.id != CbPlayUpdateTeams {
+		if p.id != packetid.CbPlayUpdateTeams {
 			continue
 		}
 		team, mode, prefix := teamPrefixOf(t, p.body)

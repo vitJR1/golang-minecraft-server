@@ -6,6 +6,7 @@ import (
 
 	"minecraft-server/game"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 )
 
 // menuClickPacket builds a Click Container on the menu window with the
@@ -34,10 +35,10 @@ func TestPluginMenuClickModifiers(t *testing.T) {
 		func(click game.MenuClick) { got = append(got, click) })
 	drain(c)
 
-	play(t, c, SbPlayClickContainer, menuClickPacket(3, 0, 0)) // plain left click
-	play(t, c, SbPlayClickContainer, menuClickPacket(3, 0, 1)) // shift-click
-	play(t, c, SbPlayClickContainer, menuClickPacket(3, 1, 0)) // right click
-	play(t, c, SbPlayClickContainer, menuClickPacket(4, 0, 1)) // empty slot: ignored
+	play(t, c, packetid.SbPlayClickContainer, menuClickPacket(3, 0, 0)) // plain left click
+	play(t, c, packetid.SbPlayClickContainer, menuClickPacket(3, 0, 1)) // shift-click
+	play(t, c, packetid.SbPlayClickContainer, menuClickPacket(3, 1, 0)) // right click
+	play(t, c, packetid.SbPlayClickContainer, menuClickPacket(4, 0, 1)) // empty slot: ignored
 
 	want := []game.MenuClick{
 		{Slot: 3},

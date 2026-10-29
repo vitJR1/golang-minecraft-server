@@ -7,6 +7,7 @@ import (
 	"minecraft-server/anticheat"
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -28,9 +29,9 @@ func TestChatWithFormattingCodesDropped(t *testing.T) {
 	}
 	c := offlineConn(inst, "Forger", player.Survival, 0, 64, 0)
 
-	play(t, c, SbPlayChatMessage, chatPacket("hello"))
-	play(t, c, SbPlayChatMessage, chatPacket("§4[Admin]§r you are banned"))
-	play(t, c, SbPlayChatMessage, chatPacket("hi\n<Server> fake line"))
+	play(t, c, packetid.SbPlayChatMessage, chatPacket("hello"))
+	play(t, c, packetid.SbPlayChatMessage, chatPacket("§4[Admin]§r you are banned"))
+	play(t, c, packetid.SbPlayChatMessage, chatPacket("hi\n<Server> fake line"))
 	if len(got) != 1 || got[0] != "hello" {
 		t.Fatalf("delivered %q, want only the plain message", got)
 	}
@@ -44,7 +45,7 @@ func TestCommandWithControlCharactersNotRun(t *testing.T) {
 	c := offlineConn(s.Hub, "Injector", player.Survival, 0, 64, 0)
 	s.Ops.Add("Injector") // /tp would work if run
 	c.player.MoveTo(0, 64, 0, true)
-	play(t, c, SbPlayChatCommand, protocol.WriteString("tp 100 64 100\x00"))
+	play(t, c, packetid.SbPlayChatCommand, protocol.WriteString("tp 100 64 100\x00"))
 	if x := c.player.Snapshot().X; x != 0 {
 		t.Fatalf("command with a NUL ran: x=%v", x)
 	}
@@ -56,7 +57,7 @@ func TestCommandWithControlCharactersNotRun(t *testing.T) {
 func TestChatSpamKicked(t *testing.T) {
 	_, cli, conn := loginOne(t, "Spammer")
 	for i := 0; i < int(anticheat.ChatBurst)+5 && !conn.isClosed(); i++ {
-		cli.tryWrite(SbPlayChatMessage, chatPacket("buy gold"))
+		cli.tryWrite(packetid.SbPlayChatMessage, chatPacket("buy gold"))
 	}
 	waitFor(t, 2*time.Second, conn.isClosed, "spammer to be kicked")
 }
@@ -64,7 +65,7 @@ func TestChatSpamKicked(t *testing.T) {
 func TestChatBurstWithinBudgetAllowed(t *testing.T) {
 	_, cli, conn := loginOne(t, "Talker")
 	for i := 0; i < int(anticheat.ChatBurst)-1; i++ {
-		cli.write(t, SbPlayChatMessage, chatPacket("gg"))
+		cli.write(t, packetid.SbPlayChatMessage, chatPacket("gg"))
 	}
 	barrier(t, cli, conn)
 	if conn.isClosed() {
@@ -80,7 +81,7 @@ func TestOpsExemptFromChatSpam(t *testing.T) {
 	cli.startDiscardDrain()
 	conn := findConn(t, s, "Admin")
 	for i := 0; i < 3*int(anticheat.ChatBurst); i++ {
-		cli.write(t, SbPlayChatMessage, chatPacket("announcement"))
+		cli.write(t, packetid.SbPlayChatMessage, chatPacket("announcement"))
 	}
 	barrier(t, cli, conn)
 	if conn.isClosed() {

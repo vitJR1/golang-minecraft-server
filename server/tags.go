@@ -4,6 +4,7 @@ import (
 	"bytes"
 
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -92,7 +93,7 @@ var serverTags = []taggedRegistry{
 
 // sendUpdateTags sends Update Tags with serverTags.
 func (c *ClientConnection) sendUpdateTags() error {
-	return c.safeWrite(CbPlayUpdateTags, updateTagsPayload(serverTags))
+	return c.safeWrite(packetid.CbPlayUpdateTags, updateTagsPayload(serverTags))
 }
 
 // updateTagsPayload encodes: VarInt registries; per registry: Identifier,

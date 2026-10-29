@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"minecraft-server/player"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 )
 
@@ -142,7 +143,7 @@ func (c *ClientConnection) handleAttack(victim *ClientConnection) {
 
 	// Red flash + recoil for everyone, including the victim's own client.
 	hurtYaw := yawTo(vSnap.X, vSnap.Z, aSnap.X, aSnap.Z)
-	c.instance.Players.Broadcast(CbPlayHurtAnimation, hurtAnimationPayload(vSnap.EntityID, hurtYaw), -1)
+	c.instance.Players.Broadcast(packetid.CbPlayHurtAnimation, hurtAnimationPayload(vSnap.EntityID, hurtYaw), -1)
 
 	// Hurt sound at the victim, audible to everyone nearby.
 	c.instance.playSound("minecraft:entity.player.hurt", soundCategoryPlayer, vSnap.X, vSnap.Y, vSnap.Z, 1, 1)
@@ -177,7 +178,7 @@ func (c *ClientConnection) applyKnockback(cfg CombatConfig, aSnap, vSnap player.
 	}
 	strength += 0.5 * float32(c.heldEnchant(EnchantKnockback)) // knockback stick
 	vx, vz := knockbackHoriz(aSnap.X, aSnap.Z, vSnap.X, vSnap.Z, strength)
-	c.instance.Players.Broadcast(CbPlayEntityVelocity,
+	c.instance.Players.Broadcast(packetid.CbPlayEntityVelocity,
 		entityVelocityPayload(vSnap.EntityID, vx, float64(cfg.VerticalKnockback), vz), -1)
 	victim.giveVelocity(vx, float64(cfg.VerticalKnockback), vz)
 }
@@ -224,7 +225,7 @@ func (c *ClientConnection) die(killer *ClientConnection) {
 		killerEID = killer.player.EntityID
 		msg = fmt.Sprintf("%s was slain by %s", c.player.Name, killer.player.Name)
 	}
-	_ = c.safeWrite(CbPlayCombatDeath, combatDeathPayload(c.player.EntityID, killerEID, msg))
+	_ = c.safeWrite(packetid.CbPlayCombatDeath, combatDeathPayload(c.player.EntityID, killerEID, msg))
 	_ = c.sendSetHealth(0)
 	c.instance.BroadcastChat("", msg)
 

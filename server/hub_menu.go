@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"minecraft-server/game"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/templates"
 	"minecraft-server/world"
 	"strings"
@@ -246,7 +247,7 @@ func giveHotbarItem(c *ClientConnection, slot int16, itemID int32, name string) 
 	protocol.WriteVarInt32ToBuffer(&buf, 0) // state id
 	buf.Write(protocol.WriteShort(slot))
 	writeStack(&buf, st)
-	if err := c.safeWrite(CbPlaySetContainerSlot, buf.Bytes()); err != nil {
+	if err := c.safeWrite(packetid.CbPlaySetContainerSlot, buf.Bytes()); err != nil {
 		slog.Warn("give hotbar item failed",
 			"player", c.playerName, "item", name, "err", err)
 	}
@@ -444,7 +445,7 @@ func (c *ClientConnection) sendOpenScreen(title string, rows int) error {
 	protocol.WriteVarInt32ToBuffer(&buf, int32(menuWindowID))
 	protocol.WriteVarInt32ToBuffer(&buf, int32(rows-1))
 	buf.Write(protocol.WriteString(string(titleJSON)))
-	return c.safeWrite(CbPlayOpenScreen, buf.Bytes())
+	return c.safeWrite(packetid.CbPlayOpenScreen, buf.Bytes())
 }
 
 // Chest window slot layout for a generic_9x`rows` chest:
@@ -480,5 +481,5 @@ func (c *ClientConnection) sendChestContents(rows int, entries map[int16]menuEnt
 	c.writeInventoryMirror(&buf)
 	buf.Write(protocol.WriteEmptySlot()) // carried item (cursor)
 
-	return c.safeWrite(CbPlaySetContainerContent, buf.Bytes())
+	return c.safeWrite(packetid.CbPlaySetContainerContent, buf.Bytes())
 }

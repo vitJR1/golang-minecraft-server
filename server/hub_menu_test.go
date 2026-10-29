@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"testing"
 	"time"
 )
@@ -37,15 +38,15 @@ func TestUseItemOpensMainMenu(t *testing.T) {
 	var p bytes.Buffer
 	protocol.WriteVarInt32ToBuffer(&p, 0)
 	protocol.WriteVarInt32ToBuffer(&p, 0)
-	cli.write(t, SbPlayUseItem, p.Bytes())
+	cli.write(t, packetid.SbPlayUseItem, p.Bytes())
 
 	// Expect Open Screen, then Set Container Content.
-	if id, _ := cli.read(t); id != CbPlayOpenScreen {
-		t.Fatalf("expected OpenScreen 0x%02X, got 0x%02X", CbPlayOpenScreen, id)
+	if id, _ := cli.read(t); id != packetid.CbPlayOpenScreen {
+		t.Fatalf("expected OpenScreen 0x%02X, got 0x%02X", packetid.CbPlayOpenScreen, id)
 	}
-	if id, _ := cli.read(t); id != CbPlaySetContainerContent {
+	if id, _ := cli.read(t); id != packetid.CbPlaySetContainerContent {
 		t.Fatalf("expected SetContainerContent 0x%02X, got 0x%02X",
-			CbPlaySetContainerContent, id)
+			packetid.CbPlaySetContainerContent, id)
 	}
 
 	// Server-side: menu should be tracked as "main" with 3 entries.
@@ -86,7 +87,7 @@ func TestClickGameTeleportsToLobby(t *testing.T) {
 	protocol.WriteVarInt32ToBuffer(&p, 0)
 	protocol.WriteVarInt32ToBuffer(&p, 0)
 	p.Write(protocol.WriteEmptySlot())
-	cli.write(t, SbPlayClickContainer, p.Bytes())
+	cli.write(t, packetid.SbPlayClickContainer, p.Bytes())
 
 	waitFor(t, 2*time.Second, func() bool {
 		_, inst, ok := s.FindPlayer("Clicker")
@@ -112,6 +113,6 @@ func TestCloseContainerClearsMenu(t *testing.T) {
 		t.Fatal("precondition: menu should be open")
 	}
 
-	cli.write(t, SbPlayCloseContainer, []byte{menuWindowID})
+	cli.write(t, packetid.SbPlayCloseContainer, []byte{menuWindowID})
 	waitFor(t, time.Second, func() bool { return conn.menu.Load() == nil }, "menu to clear on close")
 }

@@ -7,6 +7,7 @@ import (
 
 	"minecraft-server/anticheat"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 )
 
 // flagged reports whether check has a non-zero violation level on conn.
@@ -48,14 +49,14 @@ func TestMovementIgnoredUntilTeleportConfirmed(t *testing.T) {
 	// forged confirm after it is handled strictly later (packets are
 	// sequential), so once it's flagged the move has been processed too.
 	writeSetPos(t, cli, 2.5, 67, 0.5)
-	cli.write(t, SbPlayTeleportConfirm, protocol.WriteVarInt32(9999))
+	cli.write(t, packetid.SbPlayTeleportConfirm, protocol.WriteVarInt32(9999))
 	waitFlagged(t, conn, "badpackets.teleport")
 	if x := conn.player.Snapshot().X; x != 0.5 {
 		t.Fatalf("move applied while a teleport was pending: x=%v", x)
 	}
 
 	// The real confirm opens the gate.
-	cli.write(t, SbPlayTeleportConfirm, protocol.WriteVarInt32(id))
+	cli.write(t, packetid.SbPlayTeleportConfirm, protocol.WriteVarInt32(id))
 	writeSetPos(t, cli, 1.5, 67, 0.5)
 	waitFor(t, time.Second, func() bool {
 		return conn.player.Snapshot().X == 1.5
@@ -82,7 +83,7 @@ func TestPongConfirmsTransaction(t *testing.T) {
 
 func TestForgedPongFlagged(t *testing.T) {
 	_, cli, conn := loginOne(t, "Forger")
-	cli.write(t, SbPlayPong, protocol.WriteInt(424242))
+	cli.write(t, packetid.SbPlayPong, protocol.WriteInt(424242))
 	waitFlagged(t, conn, "badpackets.transaction")
 }
 
@@ -108,10 +109,10 @@ func TestTickTransactionsAndHistory(t *testing.T) {
 
 func TestHeldSlotOutOfRangeIgnored(t *testing.T) {
 	_, cli, conn := loginOne(t, "Slotter")
-	cli.write(t, SbPlaySetHeldItem, protocol.WriteShort(4))
+	cli.write(t, packetid.SbPlaySetHeldItem, protocol.WriteShort(4))
 	waitFor(t, time.Second, func() bool { return conn.heldSlot.Load() == 4 }, "legit held slot")
 
-	cli.write(t, SbPlaySetHeldItem, protocol.WriteShort(-5))
+	cli.write(t, packetid.SbPlaySetHeldItem, protocol.WriteShort(-5))
 	waitFlagged(t, conn, "badpackets.helditem")
 	if got := conn.heldSlot.Load(); got != 4 {
 		t.Fatalf("held slot = %d, want 4 kept", got)
@@ -124,7 +125,7 @@ func TestPitchOutOfRangeDropped(t *testing.T) {
 	p.Write(protocol.WriteFloat(10))  // yaw
 	p.Write(protocol.WriteFloat(180)) // pitch
 	p.WriteByte(1)
-	cli.write(t, SbPlaySetRot, p.Bytes())
+	cli.write(t, packetid.SbPlaySetRot, p.Bytes())
 	waitFlagged(t, conn, "badpackets.pitch")
 	if s := conn.player.Snapshot(); s.Pitch != 0 || s.Yaw != 0 {
 		t.Fatalf("bad rotation applied: yaw=%v pitch=%v", s.Yaw, s.Pitch)
@@ -133,7 +134,7 @@ func TestPitchOutOfRangeDropped(t *testing.T) {
 
 func TestForgedKeepAliveFlagged(t *testing.T) {
 	_, cli, conn := loginOne(t, "Echo")
-	cli.write(t, SbPlayKeepAlive, protocol.WriteLong(123))
+	cli.write(t, packetid.SbPlayKeepAlive, protocol.WriteLong(123))
 	waitFlagged(t, conn, "badpackets.keepalive")
 }
 
@@ -146,10 +147,10 @@ func TestPlayerCommandSneakAndForeignEntity(t *testing.T) {
 		protocol.WriteVarInt32ToBuffer(&b, 0)
 		return b.Bytes()
 	}
-	cli.write(t, SbPlayPlayerCommand, cmd(conn.player.EntityID, 0))
+	cli.write(t, packetid.SbPlayPlayerCommand, cmd(conn.player.EntityID, 0))
 	waitFor(t, time.Second, conn.ac.Sneaking.Load, "sneak input recorded")
 
-	cli.write(t, SbPlayPlayerCommand, cmd(conn.player.EntityID+100, 1))
+	cli.write(t, packetid.SbPlayPlayerCommand, cmd(conn.player.EntityID+100, 1))
 	waitFlagged(t, conn, "badpackets.command")
 	if !conn.ac.Sneaking.Load() {
 		t.Fatal("a command for another entity changed our sneak state")
@@ -164,7 +165,7 @@ func TestPacketFloodKicks(t *testing.T) {
 	p.WriteByte(1)
 	// Far more than the burst, faster than the refill rate can cover.
 	for i := 0; i < 5*int(anticheat.PacketBurst) && !conn.isClosed(); i++ {
-		cli.tryWrite(SbPlaySetRot, p.Bytes())
+		cli.tryWrite(packetid.SbPlaySetRot, p.Bytes())
 	}
 	waitFor(t, time.Second, conn.isClosed, "flooding client to be kicked")
 }

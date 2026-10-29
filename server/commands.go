@@ -8,6 +8,7 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/templates"
 	"minecraft-server/world"
 	"path/filepath"
@@ -905,7 +906,7 @@ func (c *ClientConnection) sendGameModeChange(mode player.Gamemode) error {
 	var payload []byte
 	payload = append(payload, 3) // event id: Change Game Mode
 	payload = append(payload, protocol.WriteFloat(float32(mode))...)
-	err := c.safeWrite(CbPlayGameEvent, payload)
+	err := c.safeWrite(packetid.CbPlayGameEvent, payload)
 	c.dropFlight() // the client resets its abilities to the new gamemode's
 	return err
 }

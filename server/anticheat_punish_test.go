@@ -10,6 +10,7 @@ import (
 	"minecraft-server/anticheat"
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 )
 
 // anticheat_punish_test.go: detections walk the punishment ladder.
@@ -41,7 +42,7 @@ func cheat(cli *testClient, n int) {
 	p.Write(protocol.WriteFloat(180))
 	p.WriteByte(1)
 	for i := 0; i < n; i++ {
-		cli.tryWrite(SbPlaySetRot, p.Bytes())
+		cli.tryWrite(packetid.SbPlaySetRot, p.Bytes())
 	}
 }
 
@@ -145,7 +146,7 @@ func TestMaxStatusBansAndNotifiesAdmins(t *testing.T) {
 	for {
 		select {
 		case id := <-adminMsgs:
-			if id == CbPlaySystemChat {
+			if id == packetid.CbPlaySystemChat {
 				return // the admin got a notice
 			}
 		case <-deadline:

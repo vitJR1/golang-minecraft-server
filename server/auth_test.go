@@ -5,6 +5,7 @@ import (
 	"minecraft-server/cfg"
 	"minecraft-server/db"
 	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/store"
 	"path/filepath"
 	"testing"
@@ -175,7 +176,7 @@ func TestRegisterMovesPlayerToHub(t *testing.T) {
 	cli.startDiscardDrain()
 
 	conn := findConn(t, s, "alice")
-	cli.write(t, SbPlayChatCommand, protocol.WriteString("register hunter2 hunter2"))
+	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("register hunter2 hunter2"))
 
 	waitFor(t, 2*time.Second, func() bool { return conn.authed.Load() },
 		"alice to be authed")
@@ -198,7 +199,7 @@ func TestRegisterMismatchedPasswordsRejected(t *testing.T) {
 	cli.startDiscardDrain()
 	conn := findConn(t, s, "bob")
 
-	cli.write(t, SbPlayChatCommand, protocol.WriteString("register foo bar"))
+	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("register foo bar"))
 	time.Sleep(100 * time.Millisecond)
 	if conn.authed.Load() {
 		t.Error("mismatched passwords must not authenticate")
@@ -217,7 +218,7 @@ func TestLoginAfterPriorRegister(t *testing.T) {
 	c1 := pipeClientOn(t, s)
 	completeOfflineLogin(t, c1, "carol")
 	c1.startDiscardDrain()
-	c1.write(t, SbPlayChatCommand, protocol.WriteString("register mypass mypass"))
+	c1.write(t, packetid.SbPlayChatCommand, protocol.WriteString("register mypass mypass"))
 	waitFor(t, 2*time.Second, func() bool { return authStore.has("carol") },
 		"carol registered")
 
@@ -232,7 +233,7 @@ func TestLoginAfterPriorRegister(t *testing.T) {
 	c2.startDiscardDrain()
 	conn2 := findConn(t, s, "carol")
 
-	c2.write(t, SbPlayChatCommand, protocol.WriteString("login mypass"))
+	c2.write(t, packetid.SbPlayChatCommand, protocol.WriteString("login mypass"))
 	waitFor(t, 2*time.Second, func() bool { return conn2.authed.Load() },
 		"carol re-login")
 	waitFor(t, 2*time.Second, func() bool {
@@ -250,7 +251,7 @@ func TestGatedCommandRejected(t *testing.T) {
 	cli.startDiscardDrain()
 	conn := findConn(t, s, "wally")
 
-	cli.write(t, SbPlayChatCommand, protocol.WriteString("play ffa"))
+	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("play ffa"))
 	time.Sleep(100 * time.Millisecond)
 	if conn.authed.Load() {
 		t.Error("wally should still be unauthed")
@@ -291,7 +292,7 @@ func TestAuthTimeoutCancelledOnSuccess(t *testing.T) {
 	cli.startDiscardDrain()
 	conn := findConn(t, s, "fast")
 
-	cli.write(t, SbPlayChatCommand, protocol.WriteString("register racepass racepass"))
+	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("register racepass racepass"))
 	waitFor(t, 2*time.Second, func() bool { return conn.authed.Load() },
 		"fast to register before timeout")
 
@@ -325,10 +326,10 @@ func TestIPBannedAfterMaxAttempts(t *testing.T) {
 	cli.startDiscardDrain()
 
 	// 1st wrong password.
-	cli.write(t, SbPlayChatCommand, protocol.WriteString("login wrong1"))
+	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("login wrong1"))
 	time.Sleep(100 * time.Millisecond)
 	// 2nd wrong password → trips the ban.
-	cli.write(t, SbPlayChatCommand, protocol.WriteString("login wrong2"))
+	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("login wrong2"))
 	waitFor(t, 2*time.Second, func() bool {
 		_, _, ok := s.FindPlayer("target")
 		return !ok
@@ -361,9 +362,9 @@ func TestSuccessfulLoginClearsFailCounter(t *testing.T) {
 	cli.startDiscardDrain()
 	conn := findConn(t, s, "jane")
 
-	cli.write(t, SbPlayChatCommand, protocol.WriteString("login wrong"))
+	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("login wrong"))
 	time.Sleep(100 * time.Millisecond)
-	cli.write(t, SbPlayChatCommand, protocol.WriteString("login correct"))
+	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("login correct"))
 	waitFor(t, 2*time.Second, func() bool { return conn.authed.Load() },
 		"jane to log in")
 
