@@ -1,4 +1,7 @@
-package server
+// Package registry holds the 1.20.1 registry data the client gets from the
+// server: the registry codec (Login (Play)), biome ids and the Update Tags
+// payload.
+package registry
 
 import (
 	_ "embed"
@@ -99,7 +102,7 @@ func BiomeID(name string) (int32, bool) {
 
 // biomeIDOrDefault resolves name to its registry index, falling back to the
 // default biome (and then 0) when name is empty or unknown.
-func biomeIDOrDefault(name string) int32 {
+func BiomeIDOrDefault(name string) int32 {
 	if name == "" {
 		name = DefaultBiome
 	}

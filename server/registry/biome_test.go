@@ -1,4 +1,4 @@
-package server
+package registry
 
 import "testing"
 
@@ -13,13 +13,13 @@ func TestBiomeID(t *testing.T) {
 
 func TestBiomeIDOrDefault(t *testing.T) {
 	plains, _ := BiomeID(DefaultBiome)
-	if got := biomeIDOrDefault(""); got != plains {
+	if got := BiomeIDOrDefault(""); got != plains {
 		t.Errorf("empty → %d, want default %d", got, plains)
 	}
-	if got := biomeIDOrDefault("minecraft:nope"); got != plains {
+	if got := BiomeIDOrDefault("minecraft:nope"); got != plains {
 		t.Errorf("unknown → %d, want default %d", got, plains)
 	}
-	if got := biomeIDOrDefault("minecraft:the_void"); got == plains {
+	if got := BiomeIDOrDefault("minecraft:the_void"); got == plains {
 		t.Error("known non-default biome should resolve to its own id")
 	}
 }

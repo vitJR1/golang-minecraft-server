@@ -1,4 +1,4 @@
-package server
+package registry
 
 import (
 	"bytes"
@@ -9,7 +9,7 @@ import (
 )
 
 func TestUpdateTagsPayload(t *testing.T) {
-	buf := bytes.NewBuffer(updateTagsPayload(serverTags))
+	buf := bytes.NewBuffer(UpdateTagsPayload(ServerTags))
 	n, _ := protocol.ReadVarInt(buf)
 	if n != 3 {
 		t.Fatalf("registries: %d, want 3 (fluid, block, item)", n)

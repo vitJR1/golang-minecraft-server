@@ -35,7 +35,7 @@ const airStateID int32 = 0
 //
 // Biomes are emitted as a single-valued container (biomeID) per section — one
 // biome for the whole column, which covers uniform maps. biomeID is the biome's
-// registry index (see server.BiomeID), e.g. 39 = minecraft:plains.
+// registry index (see registry.BiomeID), e.g. 39 = minecraft:plains.
 func BuildChunkData(sections [][]int32, biomeID int32) []byte {
 	data := make([]byte, 0, SectionCount*64)
 	for i := 0; i < SectionCount; i++ {

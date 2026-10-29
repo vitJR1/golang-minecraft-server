@@ -6,6 +6,7 @@ import (
 	"minecraft-server/chunk"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/registry"
 	"minecraft-server/world"
 )
 
@@ -30,7 +31,7 @@ func (c *ClientConnection) sendLoginPlay() error {
 	buf.Write(protocol.WriteString("minecraft:overworld"))
 
 	// Registry codec (NBT, already-encoded bytes — no length prefix)
-	buf.Write(RegistryCodec())
+	buf.Write(registry.RegistryCodec())
 
 	// Current dimension type + name
 	buf.Write(protocol.WriteString("minecraft:overworld"))
@@ -276,9 +277,9 @@ func (c *ClientConnection) sendWorldChunks() error {
 
 	// Biome painted across the whole column, taken from the instance world
 	// (set from the schematic), falling back to plains.
-	biomeID := biomeIDOrDefault("")
+	biomeID := registry.BiomeIDOrDefault("")
 	if bp, ok := c.instance.World.(world.BiomeProvider); ok {
-		biomeID = biomeIDOrDefault(bp.Biome())
+		biomeID = registry.BiomeIDOrDefault(bp.Biome())
 	}
 
 	empty := chunk.BuildEmptyChunkData(biomeID)
