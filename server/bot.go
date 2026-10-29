@@ -82,15 +82,16 @@ type botSkill struct {
 	chaseCap  int     // most blocks it builds with to reach an enemy
 	aimNoise  float64 // bow aim error, degrees
 	farm      float64 // chance to stay at the forge for gear it can't afford yet
+	hop       bool    // bunny-hops down straight stretches (sprint-jumps)
 }
 
 var botSkills = map[Difficulty]botSkill{
 	DifficultyEasy: {reaction: 12, cps: 4, hitChance: 0.55, aggro: 8, placeGap: 8,
 		chaseCap: 8, aimNoise: 4, farm: 0.3},
 	DifficultyNormal: {reaction: 7, cps: 7, hitChance: 0.75, aggro: 12, placeGap: 5, retreat: true,
-		maxLeap: 2, chaseCap: 24, aimNoise: 2, farm: 0.5},
+		maxLeap: 2, chaseCap: 24, aimNoise: 2, farm: 0.5, hop: true},
 	DifficultyHard: {reaction: 3, cps: 10, hitChance: 0.9, aggro: 16, placeGap: 3, retreat: true, crits: true,
-		maxLeap: 3, chaseCap: 48, aimNoise: 0.8, farm: 0.7},
+		maxLeap: 3, chaseCap: 48, aimNoise: 0.8, farm: 0.7, hop: true},
 }
 
 // botStyle is a bot's own taste, rolled when it joins: two bots of one
@@ -100,6 +101,7 @@ type botStyle struct {
 	prefersTNT bool    // blasts hard bed defences rather than buying a tool
 	armorFirst bool    // armour before a better sword
 	leapCost   float64 // how much it dislikes leaps (path cost)
+	greedy     bool    // raids any diamond / emerald pile, not just big ones
 }
 
 func rollStyle(rng *rand.Rand) botStyle {
@@ -108,6 +110,7 @@ func rollStyle(rng *rand.Rand) botStyle {
 		prefersTNT: rng.Float64() < 0.5,
 		armorFirst: rng.Float64() < 0.5,
 		leapCost:   rng.Float64() * 3,
+		greedy:     rng.Float64() < 0.6,
 	}
 }
 
@@ -151,6 +154,25 @@ func (b *bot) takePush() (anticheat.Vec, bool) {
 	v := *b.pending
 	b.pending = nil
 	return v, true
+}
+
+// Reaction time added to a bot's swings: a human's 30–100 ms.
+const (
+	botReactMinMs = 30
+	botReactMaxMs = 100
+)
+
+// reactTicks is a reaction of botReactMinMs..botReactMaxMs in ticks (50 ms
+// each), rounded up or down at random so the delay averages out to the
+// milliseconds drawn.
+func (b *bot) reactTicks() uint64 {
+	ms := botReactMinMs + b.rng.Intn(botReactMaxMs-botReactMinMs+1)
+	t := float64(ms) / 50
+	n := uint64(t)
+	if b.rng.Float64() < t-float64(n) {
+		n++
+	}
+	return n
 }
 
 // isBot reports whether c is a bot.

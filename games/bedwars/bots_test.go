@@ -153,3 +153,46 @@ func TestBotWaresAndGear(t *testing.T) {
 		t.Fatal("bought the same armour twice")
 	}
 }
+
+// TestBotPickupsAndUpgrades: the plan lists the diamond / emerald
+// generators and the team upgrades; BotBuy buys an upgrade with diamonds.
+func TestBotPickupsAndUpgrades(t *testing.T) {
+	g, inst, ctx := harness(t)
+	bot := join(g, inst, ctx, "BOT_Rex", 7)
+	if err := g.BotJoin(ctx, bot, "red"); err != nil {
+		t.Fatal(err)
+	}
+	plan := g.BotPlan(ctx, bot)
+	kinds := map[string]int{}
+	for _, p := range plan.Pickups {
+		kinds[p.Item]++
+	}
+	if kinds["minecraft:diamond"] == 0 && kinds["minecraft:emerald"] == 0 {
+		t.Fatalf("no diamond / emerald pickups: %+v", plan.Pickups)
+	}
+	var sharp game.BotWare
+	for _, w := range plan.Wares {
+		if w.Key == botUpgradePrefix+"sharpened" {
+			sharp = w
+		}
+	}
+	if sharp.Kind != game.WareUpgrade || sharp.Currency != "minecraft:diamond" || sharp.Price != 4 {
+		t.Fatalf("sharpened swords ware: %+v", sharp)
+	}
+	if g.BotBuy(ctx, bot, sharp.Key) {
+		t.Fatal("bought an upgrade without diamonds")
+	}
+	bot.GiveStack(game.ItemStack{Item: "minecraft:diamond", Count: 4})
+	if !g.BotBuy(ctx, bot, sharp.Key) {
+		t.Fatal("couldn't buy Sharpened Swords with 4 diamonds")
+	}
+	red, _ := g.teamByName("red")
+	if !red.sharpened {
+		t.Fatal("the team didn't get Sharpened Swords")
+	}
+	for _, w := range g.BotPlan(ctx, bot).Wares {
+		if w.Key == sharp.Key {
+			t.Fatal("a maxed upgrade is still on offer")
+		}
+	}
+}

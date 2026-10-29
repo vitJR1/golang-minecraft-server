@@ -12,9 +12,10 @@ import (
 // teamBrain, that decides every botTeamEvery ticks who does what:
 //
 //   - roles, by entity id among the team's living bots: the first is the
-//     lead attacker; then defenders — one when there are two or more bots
+//     pusher (bot_pusher.go) while any enemy bed stands, a warrior after; then defenders — one when there are two or more bots
 //     and the bed stands, two while an enemy is at the bed and there are
-//     three or more; then, in a team of three or more, an archer if a bot
+//     three or more — who wrap the bed in two layers of blocks and then go
+//     and fight with the team; then, in a team of three or more, an archer if a bot
 //     is still free; the rest attack;
 //   - one bed for every attacker to go for (the lead's nearest), so they
 //     push together instead of spreading over the map;
@@ -26,9 +27,10 @@ import (
 type botRole int
 
 const (
-	roleAttacker botRole = iota
+	roleAttacker botRole = iota // the warrior: fights, raids, goes for beds
 	roleDefender
 	roleArcher
+	rolePusher // the beds at any cost (bot_pusher.go)
 )
 
 func (r botRole) String() string {
@@ -37,6 +39,8 @@ func (r botRole) String() string {
 		return "defender"
 	case roleArcher:
 		return "archer"
+	case rolePusher:
+		return "pusher"
 	}
 	return "attacker"
 }
@@ -45,6 +49,8 @@ const (
 	botTeamEvery   = 10   // ticks between team decisions
 	botBaseRadius  = 16.0 // an enemy this close to the bed is an intruder
 	botArcherRange = 7.0  // an archer shoots enemies farther than this
+	botArcherSight = 70.0 // an archer with a bow engages enemies it sees this far off
+	botArcherRise  = 24.0 // … this far above or below it
 )
 
 // teamBrain is the shared decision-making of one team's bots.
@@ -138,6 +144,9 @@ func (tb *teamBrain) decide(now uint64, inst *Instance, team string) {
 		role := roleAttacker
 		switch {
 		case i == 0:
+			if len(lead.brain.plan.Targets) > 0 {
+				role = rolePusher // a warrior once no enemy bed is left
+			}
 		case i <= defenders:
 			role = roleDefender
 		case i <= defenders+archers:
@@ -191,19 +200,19 @@ func (b *bot) teamIntruder() *ClientConnection {
 	return tb.intruder
 }
 
-// bedCover lists the cells round the bed blocks still to fill: on top and
-// at the sides (not the bed's own other half), lowest first.
-func bedCover(at blockAt, bed []world.Position) []world.Position {
-	isBed := map[world.Position]bool{}
-	for _, p := range bed {
-		isBed[p] = true
+// shellAround lists the cells wrapping the given ones — at the sides and on
+// top, not underneath — in order, sides first.
+func shellAround(inner []world.Position) []world.Position {
+	in := map[world.Position]bool{}
+	for _, p := range inner {
+		in[p] = true
 	}
 	var out []world.Position
 	seen := map[world.Position]bool{}
 	for _, d := range [5][3]int{{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}, {0, 1, 0}} {
-		for _, p := range bed {
+		for _, p := range inner {
 			c := p.Add(d[0], d[1], d[2])
-			if isBed[c] || seen[c] || !world.Replaceable(at(c)) {
+			if in[c] || seen[c] {
 				continue
 			}
 			seen[c] = true
@@ -213,8 +222,34 @@ func bedCover(at blockAt, bed []world.Position) []world.Position {
 	return out
 }
 
-// defend covers the team's bed with blocks and then minds the station. The
-// bool is false when there's nothing to defend.
+// openCells keeps the cells a block can still go into.
+func openCells(at blockAt, cells []world.Position) []world.Position {
+	var out []world.Position
+	for _, c := range cells {
+		if world.Replaceable(at(c)) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// bedCover lists the cells round the bed blocks still to fill: on top and
+// at the sides (not the bed's own other half).
+func bedCover(at blockAt, bed []world.Position) []world.Position {
+	return openCells(at, shellAround(bed))
+}
+
+// bedOuterCover is the second layer: the shell round the bed and its first
+// layer, still to fill.
+func bedOuterCover(at blockAt, bed []world.Position) []world.Position {
+	return openCells(at, shellAround(append(append([]world.Position{}, bed...), shellAround(bed)...)))
+}
+
+// defend covers the team's bed with two layers of blocks. The bool is
+// false when there's nothing (more) to do here — no bed, or both layers
+// built: the defender then joins the team's attack (the team brain calls it
+// back for an intruder). Out of blocks with the cover unfinished, it goes to
+// the station to earn more.
 func (b *bot) defend(now uint64, blocks int) (physInput, bool) {
 	c, br := b.c, &b.brain
 	plan := br.plan
@@ -222,12 +257,28 @@ func (b *bot) defend(now uint64, blocks int) (physInput, bool) {
 		return physInput{}, false
 	}
 	at := c.instance.World.GetBlock
-	cover := bedCover(at, plan.Defend)
-	if len(cover) == 0 || blocks == 0 {
+	// Cells it couldn't get to or fill lately are left out.
+	usable := func(cells []world.Position) []world.Position {
+		var out []world.Position
+		for _, p := range cells {
+			if now >= br.coverFail[p] {
+				out = append(out, p)
+			}
+		}
+		return out
+	}
+	cover := usable(bedCover(at, plan.Defend))
+	if len(cover) == 0 {
+		cover = usable(bedOuterCover(at, plan.Defend))
+	}
+	if len(cover) == 0 {
+		return physInput{}, false // fortified (as far as it can)
+	}
+	if blocks == 0 {
 		if plan.HasStation {
 			return b.goTo(now, "station", plan.Station, atStation(plan.Station), blocks), true
 		}
-		return physInput{}, true
+		return physInput{}, false
 	}
 	// Place what's in reach; walk up to the rest.
 	for _, p := range cover {
@@ -235,7 +286,9 @@ func (b *bot) defend(now uint64, blocks int) (physInput, bool) {
 			b.lookAt(blockCentre(p))
 			if now >= br.nextPlace {
 				br.nextPlace = now + b.skill.placeGap
-				c.botPlace(p, plan.BlockItem)
+				if !c.botPlace(p, plan.BlockItem) {
+					b.skipCover(now, p)
+				}
 			}
 			return physInput{}, true
 		}
@@ -252,5 +305,20 @@ func (b *bot) defend(now uint64, blocks int) (physInput, bool) {
 		eye := anticheat.Vec{X: float64(cell.X) + 0.5, Y: float64(cell.Y) + anticheat.EyeHeight, Z: float64(cell.Z) + 0.5}
 		return anticheat.Dist(eye, blockCentre(aim)) <= botDigReach-0.5
 	}
-	return b.goTo(now, fmt.Sprintf("defend:%v", aim), aim, goal, 0), true
+	in, status := b.goToFar(now, fmt.Sprintf("defend:%v", aim), aim, goal, 0)
+	if status == farFailed {
+		b.skipCover(now, aim) // nowhere to stand for it
+	}
+	return in, true
+}
+
+// botCoverRetry is how long a cover cell that couldn't be filled is skipped.
+const botCoverRetry = 600
+
+// skipCover leaves cover cell p out for a while.
+func (b *bot) skipCover(now uint64, p world.Position) {
+	if b.brain.coverFail == nil {
+		b.brain.coverFail = map[world.Position]uint64{}
+	}
+	b.brain.coverFail[p] = now + botCoverRetry
 }

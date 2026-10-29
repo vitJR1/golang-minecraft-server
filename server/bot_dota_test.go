@@ -55,9 +55,9 @@ func TestBotOnDotaMap(t *testing.T) {
 		if os.Getenv("BOTTRACE") != "" && tick%100 == 0 {
 			br := &b.bot.brain
 			p := b.bot.phys.Pos
-			t.Logf("t=%d pos=(%.1f,%.1f,%.1f) key=%q idx=%d/%d shop=%v save=%v hard=%v dig=%v wool=%d iron=%d gold=%d ware=%v flee=%v",
+			t.Logf("t=%d pos=(%.1f,%.1f,%.1f) key=%q idx=%d/%d shop=%v save=%v hard=%v dig=%v wool=%d iron=%d gold=%d dia=%d em=%d tnt=%d role=%v ware=%v flee=%v",
 				tick, p.X, p.Y, p.Z, br.routeKey, br.routeIdx, len(br.route), br.shopping, inst.Tick() < br.farmUntil, br.hardCover, br.dig,
-				b.countItemName(br.plan.BlockItem), b.countItemName("minecraft:iron_ingot"), b.countItemName("minecraft:gold_ingot"),
+				b.countItemName(br.plan.BlockItem), b.countItemName("minecraft:iron_ingot"), b.countItemName("minecraft:gold_ingot"), b.countItemName("minecraft:diamond"), b.countItemName("minecraft:emerald"), b.countItemName("minecraft:tnt"), br.role,
 				b.bot.wantWare(b.countItemName(br.plan.BlockItem)), inst.Tick() < br.fleeUntil)
 		}
 		targets := len(b.bot.brain.plan.Targets)

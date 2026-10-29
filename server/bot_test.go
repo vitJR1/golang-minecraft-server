@@ -4,6 +4,7 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"time"
 
 	"minecraft-server/game"
 	"minecraft-server/player"
@@ -43,7 +44,9 @@ func (f *fakeGuide) BotBuy(_ *game.Ctx, p game.PlayerHandle, key string) bool {
 		}
 		p.TakeItem(w.Currency, w.Price)
 		p.GiveStack(game.ItemStack{Item: "minecraft:" + key, Count: 1})
-		f.plan.Wares[i].Owned = true
+		if w.Kind != game.WareTNT && w.Kind != game.WareArrows { // consumables stay on offer
+			f.plan.Wares[i].Owned = true
+		}
 		f.wares = append(f.wares, key)
 		return true
 	}
@@ -87,13 +90,28 @@ func addTestBot(t *testing.T, inst *Instance, guide *fakeGuide, diff Difficulty,
 }
 
 // runTicks advances the instance's bots (and projectiles, TNT) n ticks,
-// draining the given players' queues as it goes.
+// draining the given players' queues as it goes. A route search a bot runs
+// off the tick is waited for (a live server gives it 50 ms a tick; this loop
+// runs ticks back to back), so results don't depend on the machine's load.
 func runTicks(inst *Instance, n int, players ...*ClientConnection) {
 	for i := 0; i < n; i++ {
 		tick := inst.tickCount.Add(1)
+		inst.Players.Range(func(c *ClientConnection) {
+			if !c.isBot() {
+				return
+			}
+			for deadline := time.Now().Add(10 * time.Second); ; {
+				far := c.bot.brain.far
+				if far == nil || len(far) > 0 || time.Now().After(deadline) {
+					break
+				}
+				time.Sleep(100 * time.Microsecond)
+			}
+		})
 		inst.botTick(tick)
 		inst.projectileTick(tick)
 		inst.tntTick(tick)
+		inst.itemTick(tick)
 		for _, p := range players {
 			drain(p)
 		}
@@ -405,7 +423,7 @@ func TestBotBlastsHardCover(t *testing.T) {
 	}
 }
 
-// TestBotTeamRoles: of three bots on one team, the first attacks, the
+// TestBotTeamRoles: of three bots on one team, the first is the pusher, the
 // second covers the team's bed with wool, the third is the archer.
 func TestBotTeamRoles(t *testing.T) {
 	inst, target := botWorld()
@@ -425,16 +443,17 @@ func TestBotTeamRoles(t *testing.T) {
 		b.inv.set(hotbarStart+1, woolStack(t, 32))
 		bots = append(bots, b)
 	}
-	runTicks(inst, 1200)
+	runTicks(inst, 20) // roles are handed out before anyone has gone anywhere
 	roles := []botRole{bots[0].bot.brain.role, bots[1].bot.brain.role, bots[2].bot.brain.role}
-	if roles[0] != roleAttacker || roles[1] != roleDefender || roles[2] != roleArcher {
-		t.Fatalf("roles %v, want attacker, defender, archer", roles)
+	if roles[0] != rolePusher || roles[1] != roleDefender || roles[2] != roleArcher {
+		t.Fatalf("roles %v, want pusher, defender, archer", roles)
 	}
+	runTicks(inst, 1200)
 	if left := bedCover(inst.World.GetBlock, own); len(left) != 0 {
 		t.Fatalf("bed cover still open at %v", left)
 	}
 	if got := inst.World.GetBlock(target); got != world.Air {
-		t.Fatalf("the attacker didn't break the enemy bed (%s)", got.Name)
+		t.Fatalf("the pusher didn't break the enemy bed (%s)", got.Name)
 	}
 }
 
@@ -463,7 +482,7 @@ func TestBotTeamBrain(t *testing.T) {
 		}
 		return out
 	}
-	if r := roles(); r[0] != roleAttacker || r[1] != roleDefender || r[2] != roleArcher || r[3] != roleAttacker {
+	if r := roles(); r[0] != rolePusher || r[1] != roleDefender || r[2] != roleArcher || r[3] != roleAttacker {
 		t.Fatalf("calm roles %v", r)
 	}
 	// Bots 1 and 4 attack: both put the team's focus first.
@@ -513,5 +532,332 @@ func TestBotSuggestions(t *testing.T) {
 		if strings.Join(got, ",") != strings.Join(want, ",") {
 			t.Errorf("%q → %v, want %v", text, got, want)
 		}
+	}
+}
+
+// TestBotRaidsEmeraldsAndShops: emeralds piled at a generator down the
+// strip, and the bot wants a diamond sword (4 emeralds) — it goes for the
+// pile, picks it up and goes back to the shop to buy the sword.
+func TestBotRaidsEmeraldsAndShops(t *testing.T) {
+	inst := gapWorld(0)
+	gen := world.Position{X: 10, Y: 64, Z: 0}
+	guide := &fakeGuide{plan: game.BotPlan{
+		BlockItem: "minecraft:white_wool", BuyKey: "wool",
+		Currency: "minecraft:iron_ingot", Price: 4, Pack: 16,
+		Home: world.Position{X: 0, Y: 64, Z: 0},
+		Shop: world.Position{X: -2, Y: 64, Z: 1}, HasShop: true,
+		Wares: []game.BotWare{
+			{Key: "diamond_sword", Kind: game.WareSword, Tier: 3, Currency: "minecraft:emerald", Price: 4},
+		},
+		Pickups: []game.BotPickup{{Pos: gen, Item: "minecraft:emerald"}},
+	}}
+	b := addTestBot(t, inst, guide, DifficultyNormal, 0.5, 0.5)
+	b.inv.set(hotbarStart+1, woolStack(t, 64)) // no reason to shop for blocks
+	inst.DropItem(10.5, 64, 0.5, "minecraft:emerald", 4)
+
+	got := false
+	for i := 0; i < 800 && !got; i++ {
+		runTicks(inst, 1)
+		got = b.countItemName("minecraft:emerald") == 4
+	}
+	if !got {
+		t.Fatalf("never picked the emeralds up; bot at %+v", b.player.Snapshot())
+	}
+	runTicks(inst, 800)
+	if len(guide.wares) != 1 || guide.wares[0] != "diamond_sword" {
+		t.Fatalf("bought %v, want the diamond sword (bot at %+v, %d emeralds)", guide.wares, b.player.Snapshot(), b.countItemName("minecraft:emerald"))
+	}
+}
+
+// TestBotIgnoresUselessPiles: nothing it wants costs emeralds — it leaves
+// the pile alone.
+func TestBotIgnoresUselessPiles(t *testing.T) {
+	inst := gapWorld(0)
+	gen := world.Position{X: 12, Y: 64, Z: 0}
+	guide := &fakeGuide{plan: game.BotPlan{
+		Home:    world.Position{X: 0, Y: 64, Z: 0},
+		Station: world.Position{X: -2, Y: 64, Z: 0}, HasStation: true,
+		Pickups: []game.BotPickup{{Pos: gen, Item: "minecraft:emerald"}},
+	}}
+	b := addTestBot(t, inst, guide, DifficultyNormal, 0.5, 0.5)
+	inst.DropItem(12.5, 64, 0.5, "minecraft:emerald", 4)
+	runTicks(inst, 300)
+	if b.countItemName("minecraft:emerald") != 0 {
+		t.Fatal("raided a pile it has no use for")
+	}
+}
+
+// TestBotFightsOnAtEnemyBase: a normal bot low on health falls back at
+// home, but at an enemy bed it fights on.
+func TestBotFightsOnAtEnemyBase(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		x       float64 // where bot and enemy meet
+		retreat bool
+	}{{"home", 0.5, true}, {"enemy base", 15.5, false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			inst, target := botWorld()
+			guide := &fakeGuide{plan: game.BotPlan{
+				Home:    world.Position{X: 0, Y: 64, Z: -2},
+				Targets: []world.Position{target},
+			}}
+			b := addTestBot(t, inst, guide, DifficultyNormal, tc.x, -1.5)
+			b.player.SetHealth(4)
+			enemy := offlineConn(inst, "Enemy", player.Survival, tc.x, 64, 0.5)
+			runTicks(inst, 60, enemy)
+			if retreated := b.bot.brain.retreatUntil > 0; retreated != tc.retreat {
+				t.Fatalf("retreated=%v, want %v", retreated, tc.retreat)
+			}
+			if !tc.retreat && enemy.player.Health() >= player.MaxHealth {
+				t.Fatal("didn't fight on")
+			}
+		})
+	}
+}
+
+// TestBotBreaksTheBedBeforeShopping: at an enemy bed with emeralds for a
+// diamond sword, the bot breaks the bed instead of running home to buy.
+func TestBotBreaksTheBedBeforeShopping(t *testing.T) {
+	inst, target := botWorld()
+	guide := &fakeGuide{plan: game.BotPlan{
+		BlockItem: "minecraft:white_wool", BuyKey: "wool",
+		Currency: "minecraft:iron_ingot", Price: 4, Pack: 16,
+		Home: world.Position{X: 0, Y: 64, Z: 0},
+		Shop: world.Position{X: -2, Y: 64, Z: 1}, HasShop: true,
+		Wares: []game.BotWare{
+			{Key: "diamond_sword", Kind: game.WareSword, Tier: 3, Currency: "minecraft:emerald", Price: 4},
+		},
+		Pickups: []game.BotPickup{{Pos: world.Position{X: 2, Y: 64, Z: 2}, Item: "minecraft:emerald"}},
+		Targets: []world.Position{target},
+	}}
+	b := addTestBot(t, inst, guide, DifficultyHard, 14.5, 0.5)
+	b.inv.set(hotbarStart+1, woolStack(t, 32))
+	b.inv.set(hotbarStart+2, itemOf(t, "minecraft:emerald", 8))
+	runTicks(inst, 200)
+	if got := inst.World.GetBlock(target); got != world.Air {
+		t.Fatalf("bed still standing (%s); bot at %+v", got.Name, b.player.Snapshot())
+	}
+	if len(guide.wares) != 0 {
+		t.Fatalf("went shopping first: %v", guide.wares)
+	}
+}
+
+// TestArcherShootsFarEnemies: the team's archer engages an enemy it sees 60
+// blocks off across the void — far beyond melee aggro — and hits.
+func TestArcherShootsFarEnemies(t *testing.T) {
+	inst := bareInstance(New(), world.NewMemoryWorld())
+	for x := -3; x <= 3; x++ {
+		for z := -3; z <= 3; z++ {
+			inst.World.SetBlock(world.Position{X: x, Y: 63, Z: z}, world.Stone)
+			inst.World.SetBlock(world.Position{X: x + 60, Y: 63, Z: z}, world.Stone)
+		}
+	}
+	inst.Combat = DefaultCombatConfig()
+	inst.SetPvP(true)
+	guide := &fakeGuide{plan: game.BotPlan{Team: "red"}}
+	var bots []*ClientConnection
+	for i := 0; i < 3; i++ {
+		bots = append(bots, addTestBot(t, inst, guide, DifficultyHard, float64(i)-1.5, -2.5))
+	}
+	runTicks(inst, 20) // the team brain hands out roles
+	var archer *ClientConnection
+	for _, b := range bots {
+		if b.bot.brain.role == roleArcher {
+			archer = b
+		}
+	}
+	if archer == nil {
+		t.Fatal("no archer among three bots")
+	}
+	archer.inv.set(hotbarStart+3, itemOf(t, "minecraft:bow", 1))
+	archer.inv.set(mainInvStart, itemOf(t, "minecraft:arrow", 32))
+	enemy := offlineConn(inst, "Enemy", player.Survival, 60.5, 64, 0.5)
+	runTicks(inst, 600, enemy)
+	if archer.countItemName("minecraft:arrow") == 32 {
+		t.Fatal("the archer never shot")
+	}
+	if enemy.player.Health() >= player.MaxHealth {
+		t.Fatalf("no arrow hit from 60 blocks (%d arrows left)", archer.countItemName("minecraft:arrow"))
+	}
+}
+
+// TestBotHopsFaster: down a long straight floor a bunny-hopping bot gets
+// there sooner than one that just sprints.
+func TestBotHopsFaster(t *testing.T) {
+	run := func(hop bool) int {
+		inst := bareInstance(New(), world.NewMemoryWorld())
+		for x := -3; x <= 50; x++ {
+			for z := -1; z <= 1; z++ {
+				inst.World.SetBlock(world.Position{X: x, Y: 63, Z: z}, world.Stone)
+			}
+		}
+		station := world.Position{X: 45, Y: 64, Z: 0}
+		guide := &fakeGuide{plan: game.BotPlan{Station: station, HasStation: true}}
+		b := addTestBot(t, inst, guide, DifficultyHard, 0.5, 0.5)
+		b.bot.skill.hop = hop
+		for tick := 1; tick <= 600; tick++ {
+			runTicks(inst, 1)
+			if atStation(station)(b.feetCellNow()) && b.bot.phys.OnGround {
+				return tick
+			}
+		}
+		t.Fatalf("hop=%v: never got there; at %+v", hop, b.bot.phys.Pos)
+		return 0
+	}
+	walk, hop := run(false), run(true)
+	if float64(hop) > 0.92*float64(walk) {
+		t.Fatalf("hopping took %d ticks, sprinting %d: not faster", hop, walk)
+	}
+	t.Logf("45 blocks: sprint %d ticks, hop %d ticks", walk, hop)
+}
+
+// TestDefenderFortifiesThenFights: the defender wraps the bed in two layers
+// and then leaves the base for the fight instead of idling at the forge.
+func TestDefenderFortifiesThenFights(t *testing.T) {
+	inst, target := botWorld()
+	bed, _ := world.BlockByName("minecraft:red_bed")
+	own := []world.Position{{X: -2, Y: 64, Z: 0}, {X: -1, Y: 64, Z: 0}}
+	for _, p := range own {
+		inst.World.SetBlock(p, bed)
+	}
+	guide := &fakeGuide{plan: game.BotPlan{
+		Team: "red", Defend: own,
+		BlockItem: "minecraft:white_wool",
+		Station:   world.Position{X: 2, Y: 64, Z: 2}, HasStation: true,
+		Targets: []world.Position{target},
+	}}
+	var bots []*ClientConnection
+	for i := 0; i < 2; i++ {
+		b := addTestBot(t, inst, guide, DifficultyHard, 1.5, float64(i)+1.5)
+		b.inv.set(hotbarStart+1, woolStack(t, 64))
+		bots = append(bots, b)
+	}
+	runTicks(inst, 20)
+	def := bots[1]
+	if def.bot.brain.role != roleDefender {
+		t.Fatalf("second bot is a %v", def.bot.brain.role)
+	}
+	left := false
+	for i := 0; i < 1500 && !left; i++ {
+		runTicks(inst, 1)
+		left = def.bot.phys.Pos.X > 8 // out over the void toward the enemy
+	}
+	at := inst.World.GetBlock
+	if n, m := len(bedCover(at, own)), len(bedOuterCover(at, own)); n != 0 || m != 0 {
+		t.Fatalf("cover still open: %d inner, %d outer %v", n, m, bedOuterCover(at, own))
+	}
+	if !left {
+		t.Fatalf("the defender stayed home; at %+v", def.bot.phys.Pos)
+	}
+}
+
+// TestBotKeepsItsRouteDownSteps: walking down one-block steps, the bot's
+// feet sit a cell above the next step while it's on the edge — that's not
+// "knocked off the route" (it used to drop the route there and dither).
+func TestBotKeepsItsRouteDownSteps(t *testing.T) {
+	inst := bareInstance(New(), world.NewMemoryWorld())
+	for x := -3; x <= 14; x++ {
+		floor := 66 - max(0, min(3, (x-2)/3)) // 66, …, then a step down every 3 blocks to 63
+		for z := -1; z <= 1; z++ {
+			for y := 60; y <= floor; y++ {
+				inst.World.SetBlock(world.Position{X: x, Y: y, Z: z}, world.Stone)
+			}
+		}
+	}
+	station := world.Position{X: 13, Y: 64, Z: 0}
+	guide := &fakeGuide{plan: game.BotPlan{Station: station, HasStation: true}}
+	b := addTestBot(t, inst, guide, DifficultyEasy, 0.5, 0.5) // easy: no hopping
+	b.player.MoveTo(0.5, 67, 0.5, true)
+	searches := 0
+	var lastAt uint64
+	for i := 0; i < 300; i++ {
+		runTicks(inst, 1)
+		if br := &b.bot.brain; br.route != nil && br.routeAt != lastAt {
+			searches++
+			lastAt = br.routeAt
+		}
+		if atStation(station)(b.feetCellNow()) {
+			if searches > 1 {
+				t.Fatalf("searched the route %d times on the way down", searches)
+			}
+			return
+		}
+	}
+	t.Fatalf("never got down; at %+v", b.bot.phys.Pos)
+}
+
+// TestPusherTowersAndDropsTNT: the target is covered on top and at the
+// sides; the team's pusher bridges over, towers up beside it, drops a TNT
+// on top of the cover and then gets the target.
+func TestPusherTowersAndDropsTNT(t *testing.T) {
+	inst, target := botWorld()
+	inst.SetTNTAutoPrime(true)
+	wool, _ := world.BlockByName("minecraft:white_wool")
+	for _, d := range [][3]int{{-1, 0, 0}, {1, 0, 0}, {0, 0, -1}, {0, 0, 1}, {0, 1, 0}} {
+		inst.World.SetBlock(target.Add(d[0], d[1], d[2]), wool)
+	}
+	guide := &fakeGuide{plan: game.BotPlan{
+		Team:      "red",
+		BlockItem: "minecraft:white_wool",
+		Home:      world.Position{X: 0, Y: 64, Z: 0},
+		Targets:   []world.Position{target},
+	}}
+	b := addTestBot(t, inst, guide, DifficultyHard, 0.5, 0.5)
+	b.inv.set(hotbarStart+1, woolStack(t, 64))
+	b.inv.set(hotbarStart+4, itemOf(t, "minecraft:tnt", 2))
+	runTicks(inst, 20)
+	if b.bot.brain.role != rolePusher {
+		t.Fatalf("a lone bot with beds to break is a %v", b.bot.brain.role)
+	}
+	var dropped *primedTNT
+	maxFeet := 0.0
+	for i := 0; i < 1500 && dropped == nil; i++ {
+		runTicks(inst, 1)
+		if b.bot.phys.Pos.X > 12 {
+			maxFeet = math.Max(maxFeet, b.bot.phys.Pos.Y)
+		}
+		inst.tntMu.Lock()
+		if len(inst.tnts) > 0 {
+			dropped = inst.tnts[0]
+		}
+		inst.tntMu.Unlock()
+	}
+	if dropped == nil {
+		t.Fatalf("no TNT dropped; bot at %+v", b.bot.phys.Pos)
+	}
+	if dropped.y < float64(target.Y)+2 || math.Abs(dropped.x-(float64(target.X)+0.5)) > 0.6 {
+		t.Fatalf("TNT at (%.1f, %.1f, %.1f), want on top of the cover over %v", dropped.x, dropped.y, dropped.z, target)
+	}
+	if maxFeet < float64(target.Y)+2 {
+		t.Fatalf("didn't tower up (feet reached %.2f)", maxFeet)
+	}
+	runTicks(inst, 600)
+	if got := inst.World.GetBlock(target); got != world.Air {
+		t.Fatalf("target still standing (%s); bot at %+v", got.Name, b.bot.phys.Pos)
+	}
+}
+
+// TestPusherBuysTNTFirst: with gold for two TNT, the pusher buys TNT before
+// anything else.
+func TestPusherBuysTNTFirst(t *testing.T) {
+	inst, target := botWorld()
+	guide := &fakeGuide{plan: game.BotPlan{
+		Team:      "red",
+		BlockItem: "minecraft:white_wool", BuyKey: "wool",
+		Currency: "minecraft:iron_ingot", Price: 4, Pack: 16,
+		Home: world.Position{X: 0, Y: 64, Z: 0},
+		Shop: world.Position{X: -2, Y: 64, Z: 1}, HasShop: true,
+		Wares: []game.BotWare{
+			{Key: "tnt", Kind: game.WareTNT, Currency: "minecraft:gold_ingot", Price: 4},
+			{Key: "iron_sword", Kind: game.WareSword, Tier: 2, Currency: "minecraft:gold_ingot", Price: 7},
+		},
+		Targets: []world.Position{target},
+	}}
+	b := addTestBot(t, inst, guide, DifficultyNormal, 0.5, 0.5)
+	b.inv.set(hotbarStart+1, woolStack(t, 64))
+	b.inv.set(hotbarStart+2, itemOf(t, "minecraft:gold_ingot", 8))
+	runTicks(inst, 200)
+	if len(guide.wares) == 0 || guide.wares[0] != "tnt" {
+		t.Fatalf("bought %v, want TNT first", guide.wares)
 	}
 }

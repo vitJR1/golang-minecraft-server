@@ -57,6 +57,11 @@ const (
 	// lowBlock is the tallest block that can share the feet cell (slabs,
 	// beds, carpets — the auto-step climbs onto them).
 	lowBlock = 0.6
+	// pathMaxStep / pathMaxJump are the most a move may climb, in blocks of
+	// real height (the floor under the feet, slabs included): the 0.6
+	// auto-step walking, a jump (apex 1.25) with a little margin.
+	pathMaxStep = 0.6
+	pathMaxJump = 1.2
 )
 
 // cellClear reports whether a body may occupy the cell: no collision, or a
@@ -71,6 +76,18 @@ func cellClear(at blockAt, p world.Position) bool {
 	return !ok || (lo == 0 && hi <= lowBlock)
 }
 
+// standY is the height the feet rest at in cell p: its floor, raised by a
+// low block (slab, bed, carpet) in the cell itself.
+func standY(at blockAt, p world.Position) float64 {
+	if lo, hi, ok := world.CollisionHeight(at(p)); ok && lo == 0 && hi <= lowBlock {
+		return float64(p.Y) + hi
+	}
+	return float64(p.Y)
+}
+
+// rise is how far a move from c to t climbs.
+func rise(at blockAt, c, t world.Position) float64 { return standY(at, t) - standY(at, c) }
+
 // headClear: the head cell must be entirely free.
 func headClear(at blockAt, p world.Position) bool {
 	_, _, ok := world.CollisionHeight(at(p))
@@ -82,13 +99,22 @@ func groundUnder(at blockAt, p world.Position) bool {
 	if lo, hi, ok := world.CollisionHeight(at(p)); ok && lo == 0 && hi > 0 {
 		return true // standing on a slab / bed in the feet cell
 	}
+	// Below, only a block reaching the top of its cell: on a bottom slab
+	// the feet are in the slab's cell, not this one.
 	_, hi, ok := world.CollisionHeight(at(p.Add(0, -1, 0)))
-	return ok && hi >= 0.5
+	return ok && hi > 0.99
 }
 
 // standable reports whether a player can stand with its feet in p.
 func standable(at blockAt, p world.Position) bool {
-	return cellClear(at, p) && headClear(at, p.Add(0, 1, 0)) && groundUnder(at, p)
+	if !cellClear(at, p) || !headClear(at, p.Add(0, 1, 0)) || !groundUnder(at, p) {
+		return false
+	}
+	// Raised by a slab, the head (1.8 tall) reaches into the cell above.
+	if standY(at, p)-float64(p.Y) > 0.2 && !headClear(at, p.Add(0, 2, 0)) {
+		return false
+	}
+	return true
 }
 
 // bridgeable reports whether a block can be placed under t to stand there,
@@ -140,6 +166,7 @@ func (h *nodeHeap) Pop() interface{} {
 // when there's no way within the budget. It only reads blocks, so it may run
 // off the tick goroutine.
 func findPath(at blockAt, start world.Position, aim world.Position, goal func(world.Position) bool, opts routeOpts) []routeStep {
+	at = memoBlocks(at)
 	h := func(p world.Position) float64 {
 		dx, dy, dz := float64(p.X-aim.X), float64(p.Y-aim.Y), float64(p.Z-aim.Z)
 		return math.Sqrt(dx*dx + dy*dy + dz*dz)
@@ -182,15 +209,15 @@ func findPath(at blockAt, start world.Position, aim world.Position, goal func(wo
 		for _, d := range cardinals {
 			t := c.Add(d[0], 0, d[1])
 			switch {
-			case standable(at, t):
+			case standable(at, t) && rise(at, c, t) <= pathMaxStep:
 				push(n, t, pathCostWalk, nil, false)
 			case supported && bridgeable(at, c, t, true):
 				push(n, t, pathCostBridge, []world.Position{t.Add(0, -1, 0)}, false)
 			}
 			up := t.Add(0, 1, 0)
 			if headClear(at, c.Add(0, 2, 0)) {
-				if standable(at, up) {
-					// Jump up one block.
+				if standable(at, up) && rise(at, c, up) <= pathMaxJump {
+					// Jump up one block (or step up from a slab).
 					push(n, up, pathCostJump, nil, false)
 				} else if step, ok := stairStep(at, c, t, supported); ok {
 					push(n, up, pathCostStair+float64(len(step)-1)*pathCostBridge, step, false)
@@ -215,7 +242,7 @@ func findPath(at blockAt, start world.Position, aim world.Position, goal func(wo
 				if !leapClear(at, c, d, k) {
 					break
 				}
-				if standable(at, land) && standable(at, c.Add(-d[0], 0, -d[1])) { // a run-up behind
+				if standable(at, land) && rise(at, c, land) <= 0 && standable(at, c.Add(-d[0], 0, -d[1])) { // a run-up behind
 					push(n, land, pathCostLeap+float64(k)+opts.leapCost, nil, true)
 					break
 				}
@@ -224,13 +251,29 @@ func findPath(at blockAt, start world.Position, aim world.Position, goal func(wo
 		for _, d := range diagonals {
 			t := c.Add(d[0], 0, d[1])
 			a, b := c.Add(d[0], 0, 0), c.Add(0, 0, d[1])
-			if standable(at, t) && cellClear(at, a) && headClear(at, a.Add(0, 1, 0)) &&
+			if standable(at, t) && rise(at, c, t) <= pathMaxStep && cellClear(at, a) && headClear(at, a.Add(0, 1, 0)) &&
 				cellClear(at, b) && headClear(at, b.Add(0, 1, 0)) {
 				push(n, t, pathCostDiag, nil, false)
 			}
 		}
 	}
 	return nil
+}
+
+// memoBlocks wraps a block reader with a cache for one search: the search
+// asks about the same few cells over and over (every neighbour test reads
+// three to five of them), and each world read takes the world's lock —
+// which a far search on another goroutine contends for too.
+func memoBlocks(at blockAt) blockAt {
+	seen := make(map[world.Position]world.Block, 4096)
+	return func(p world.Position) world.Block {
+		if b, ok := seen[p]; ok {
+			return b
+		}
+		b := at(p)
+		seen[p] = b
+		return b
+	}
 }
 
 // stairStep checks a stair step from c toward t (one cell over, same level):

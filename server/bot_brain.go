@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"math"
+	"math/rand"
 	"strings"
 
 	"minecraft-server/anticheat"
@@ -23,7 +24,9 @@ import (
 //     armour, a bow, a tool or TNT for a hard bed defence): walk to the
 //     shop, buy (bot_tactics.go).
 //  4. Short and broke — or saving up for gear: stand at the resource
-//     station and collect.
+//     station and collect. Diamonds or emeralds piled at a generator, and
+//     something it wants paid in them: go and take them (then 3. sends it
+//     home to spend them).
 //  5. Otherwise go for the first target (an enemy bed) — bridging across
 //     the void with the blocks it carries — and dig it out, cover first;
 //     cover that takes long to dig is blasted with TNT, if it has some.
@@ -58,6 +61,10 @@ type brainState struct {
 	target    *ClientConnection
 	targetAt  uint64
 	nextSwing uint64
+	// inReach: the target was within reach last tick; lastHealth the bot's
+	// health then (a drop is a hit taken).
+	inReach    bool
+	lastHealth float32
 
 	retreatUntil uint64
 
@@ -98,11 +105,18 @@ type brainState struct {
 	closeAt uint64
 	failKey string
 	failAt  uint64
+	// chaseGoal is the cell the chase route was searched for.
+	chaseGoal world.Position
 
 	// Bow: the tick the draw started (0: not drawing), the next shot.
 	drawAt           uint64
 	nextShot         uint64
 	aimYaw, aimPitch float32 // this shot's aim error
+	// leadOf / leadAt / leadPos: the shot target's last seen position, for
+	// its velocity (targetVelocity).
+	leadOf  *ClientConnection
+	leadAt  uint64
+	leadPos anticheat.Vec
 
 	badWare map[string]uint64 // wares that failed to buy, until
 
@@ -116,11 +130,28 @@ type brainState struct {
 	fleeFrom  world.Position
 	fleeUntil uint64
 
+	// pickup is the diamond / emerald spot it's raiding, while raiding
+	// (bot_tactics.go).
+	pickup   world.Position
+	raiding  bool
+	nextRaid uint64
+
 	// Saving up at the station for gear it can't afford yet.
 	farmUntil    uint64
 	farmDecideAt uint64
 
 	role botRole // its part in the team (bot_team.go)
+	// coverFail: bed-cover cells it couldn't fill, skipped until a tick.
+	coverFail map[world.Position]uint64
+
+	// Pusher (bot_pusher.go): the next TNT drop, the tower it's building
+	// (base level, the cell to fill under it, mid-jump), and how long it
+	// waits at the forge for TNT.
+	nextPush   uint64
+	towerBase  int
+	towerCell  world.Position
+	towering   bool
+	pushSaveAt uint64
 
 	yaw, pitch float32
 }
@@ -131,13 +162,23 @@ type digJob struct {
 	doneAt uint64
 }
 
-// botTick runs every bot in the instance (registered by NewInstance).
+// botTick runs every bot in the instance (registered by NewInstance), in a
+// fresh random order each tick: the player list is a small Go map, whose
+// "random" order puts the first-added player first nearly every time, and
+// the bot acting first in a tick lands its hit first. With swings on a
+// fixed rhythm that decided fights between equal bots (≈ 3 to 1); the
+// reaction jitter (reactTicks) evens it out, the shuffle keeps it so.
 func (i *Instance) botTick(tick uint64) {
+	var bots []*ClientConnection
 	i.Players.Range(func(c *ClientConnection) {
 		if c.isBot() && c.bot.ready.Load() {
-			c.bot.tick(tick)
+			bots = append(bots, c)
 		}
 	})
+	rand.Shuffle(len(bots), func(a, b int) { bots[a], bots[b] = bots[b], bots[a] })
+	for _, c := range bots {
+		c.bot.tick(tick)
+	}
 }
 
 // tick is one game tick of the bot: think, move, tell everyone.
@@ -211,8 +252,13 @@ func (b *bot) think(now uint64) physInput {
 	if now < br.fleeUntil {
 		return b.flee(now)
 	}
+	if now < br.retreatUntil && b.onEnemyBase() {
+		br.retreatUntil = 0 // at their bed: no turning back
+	}
 	retreating := now < br.retreatUntil
-	if t := br.target; t != nil && (!retreating || b.reach(t) < botChaseClose) {
+	// A pusher only fights what's in its way.
+	pushing := br.role == rolePusher && br.target != nil && b.reach(br.target) > botPusherEngage
+	if t := br.target; t != nil && !pushing && (!retreating || b.reach(t) < botChaseClose) {
 		return b.fight(now, t)
 	}
 	b.stopDraw()
@@ -223,6 +269,22 @@ func (b *bot) think(now uint64) physInput {
 }
 
 // --- combat -----------------------------------------------------------------
+
+// botEnemyBase is how close to an enemy bed counts as being in their base.
+const botEnemyBase = 16.0
+
+// onEnemyBase reports whether the bot is at an enemy bed that still stands:
+// there it finishes the job — fights to the end, no retreat, no trips home
+// to shop or to a generator — until the bed is broken.
+func (b *bot) onEnemyBase() bool {
+	feet := b.c.feet()
+	for _, t := range b.brain.plan.Targets {
+		if anticheat.Dist(feet, blockCentre(t)) <= botEnemyBase {
+			return true
+		}
+	}
+	return false
+}
 
 // targetValid: still in the game, alive, not spectating, still an enemy.
 func (b *bot) targetValid(t *ClientConnection) bool {
@@ -236,23 +298,34 @@ func (b *bot) targetValid(t *ClientConnection) bool {
 	return b.c.instance.botGuide.BotEnemy(b.c.instance.pluginCtx(), playerBridge{conn: b.c}, playerBridge{conn: t})
 }
 
-// pickTarget engages the nearest enemy within aggro range.
+// pickTarget engages the nearest enemy within aggro range — for an archer
+// with a bow and arrows, any enemy it can see within botArcherSight.
 func (b *bot) pickTarget(now uint64) {
 	c, br := b.c, &b.brain
 	me := c.feet()
 	var best *ClientConnection
-	bestD := b.skill.aggro
+	sight, rise := b.skill.aggro, 4.0
+	archer := b.canShoot() && br.role == roleArcher
+	if archer {
+		sight, rise = botArcherSight, botArcherRise
+	}
+	bestD := sight
 	for _, o := range c.instance.Players.snapshot() {
 		if o == c || now < br.ignore[o.player.EntityID] || !b.targetValid(o) {
 			continue
 		}
 		os := o.player.Snapshot()
-		if math.Abs(os.Y-me.Y) > 4 {
+		if math.Abs(os.Y-me.Y) > rise {
 			continue
 		}
-		if d := anticheat.Dist(me, anticheat.Vec{X: os.X, Y: os.Y, Z: os.Z}); d <= bestD {
-			best, bestD = o, d
+		d := anticheat.Dist(me, anticheat.Vec{X: os.X, Y: os.Y, Z: os.Z})
+		if d > bestD {
+			continue
 		}
+		if d > b.skill.aggro && !b.sees(o) {
+			continue // far off and hidden: not worth an arrow
+		}
+		best, bestD = o, d
 	}
 	// A defender goes for whoever is at the team's bed, from any distance.
 	if in := b.teamIntruder(); in != nil {
@@ -276,7 +349,7 @@ func (b *bot) fight(now uint64, t *ClientConnection) physInput {
 	ts := t.player.Snapshot()
 	b.lookAt(anticheat.Vec{X: ts.X, Y: ts.Y + 1.2, Z: ts.Z})
 
-	if b.skill.retreat && c.player.Health() <= botRetreatHP {
+	if b.skill.retreat && c.player.Health() <= botRetreatHP && !b.onEnemyBase() && br.role != rolePusher {
 		br.retreatUntil = now + botRetreatTicks
 		br.target = nil
 		return physInput{}
@@ -288,12 +361,28 @@ func (b *bot) fight(now uint64, t *ClientConnection) physInput {
 		if in, ok := b.shoot(now, t); ok {
 			return in
 		}
+		if d > b.skill.aggro {
+			// Seen from afar but no shot now (hidden, out of arrows): don't
+			// chase them across the map.
+			return b.unreachable(now, t)
+		}
 	}
 	if d <= botAttackReach+1 {
 		b.holdBestWeapon() // the sword, not the wool it bridged with
 	}
-	if d <= botAttackReach && now >= br.targetAt+b.skill.reaction && now >= br.nextSwing {
-		br.nextSwing = now + uint64(20/b.skill.cps) + uint64(b.rng.Intn(2))
+	// Human reaction (reactTicks) when the enemy comes into reach and after
+	// taking a hit, on top of the clicking rhythm.
+	inReach := d <= botAttackReach
+	if inReach && !br.inReach {
+		br.nextSwing = max(br.nextSwing, now+b.reactTicks())
+	}
+	br.inReach = inReach
+	if hp := c.player.Health(); hp < br.lastHealth {
+		br.nextSwing = max(br.nextSwing, now+b.reactTicks())
+	}
+	br.lastHealth = c.player.Health()
+	if inReach && now >= br.targetAt+b.skill.reaction && now >= br.nextSwing {
+		br.nextSwing = now + uint64(20/b.skill.cps) + b.reactTicks()
 		c.broadcastEntityAnimation(0)
 		if b.rng.Float64() < b.skill.hitChance && c.instance.allowAttack(c, t) {
 			c.handleAttack(t)
@@ -307,7 +396,7 @@ func (b *bot) fight(now uint64, t *ClientConnection) physInput {
 		return in
 	}
 	goal := world.Position{X: floorF(ts.X), Y: floorF(ts.Y + 0.01), Z: floorF(ts.Z)}
-	key := fmt.Sprintf("chase:%d:%v", t.player.EntityID, goal)
+	key := fmt.Sprintf("chase:%d", t.player.EntityID)
 	blocks := min(c.countItemName(br.plan.BlockItem), b.skill.chaseCap)
 	in, ok := b.chase(now, key, goal, within(goal, 1.8, 1), blocks)
 	if !ok {
@@ -321,6 +410,7 @@ func (b *bot) fight(now uint64, t *ClientConnection) physInput {
 }
 
 const (
+	botChaseDrift = 2   // the enemy this far (blocks, |dx|+|dz|) from the route's goal: search again
 	botChaseRetry = 20  // ticks before a chase with no route is searched again
 	botStandOff   = 30  // goal reached, enemy out of reach this long: unreachable
 	botIgnoreFor  = 100 // an unreachable enemy is left alone this long
@@ -342,8 +432,13 @@ func (b *bot) chase(now uint64, key string, aim world.Position, goal func(world.
 	if br.failKey == key && now < br.failAt+botChaseRetry {
 		return physInput{}, false
 	}
-	stale := br.routeKey != key || br.route == nil || now >= br.routeAt+botRouteEvery || now >= br.progressAt+botStuckTicks
+	// The enemy moves all the time: the route is searched again only when
+	// it has got away from where the route ends (each search is a few ms on
+	// the tick).
+	moved := abs(aim.X-br.chaseGoal.X)+abs(aim.Z-br.chaseGoal.Z) > botChaseDrift || aim.Y != br.chaseGoal.Y
+	stale := br.routeKey != key || br.route == nil || moved || now >= br.routeAt+botRouteEvery || now >= br.progressAt+botStuckTicks
 	if stale && b.phys.OnGround {
+		br.chaseGoal = aim
 		br.route = findRoute(c.instance.World.GetBlock, here, aim, goal, b.opts(blocks, pathNearNodes))
 		br.routeIdx, br.routeKey, br.routeAt, br.routeStart, br.progressAt, br.farRoute = 0, key, now, here, now, false
 		if br.route == nil {
@@ -396,6 +491,17 @@ func (b *bot) pursue(now uint64) physInput {
 	if br.route != nil && strings.HasPrefix(br.routeKey, "target:") && b.bridgesLeft() <= blocks {
 		want = 0
 	}
+	// At an enemy bed: no going back for blocks, gear or resources — dig.
+	if b.onEnemyBase() {
+		want, br.shopping = 0, false
+	}
+	// On a raid the target's route doesn't count: the bare minimum will do.
+	if br.raiding {
+		want = min(want, botMinBlocks)
+		if br.route != nil && b.bridgesLeft() <= blocks {
+			want = 0
+		}
+	}
 
 	// Short of blocks and able to pay, or gear it wants within its means:
 	// go shopping, and buy while the money lasts — gear first, then blocks.
@@ -408,6 +514,7 @@ func (b *bot) pursue(now uint64) physInput {
 		br.shopping = false
 	}
 	if br.shopping {
+		b.endRaid(now) // off to spend it: the raid is over
 		if within(plan.Shop, 2.5, 2)(c.feetCellNow()) {
 			if now >= br.nextBuy {
 				br.nextBuy = now + botBuyGap
@@ -425,6 +532,9 @@ func (b *bot) pursue(now uint64) physInput {
 		if in, ok := b.defend(now, blocks); ok {
 			return in
 		}
+		// The bed is wrapped up: off to fight with the team, over the
+		// bridges already there — no waiting at the forge for blocks.
+		want = 0
 	}
 	if blocks < want {
 		if plan.HasStation {
@@ -432,12 +542,24 @@ func (b *bot) pursue(now uint64) physInput {
 		}
 		return physInput{}
 	}
+	// Diamonds / emeralds lying at a generator: go and take them (not
+	// from an enemy base — the bed first — and never a pusher).
+	if !b.onEnemyBase() && br.role != rolePusher {
+		if in, ok := b.collect(now, blocks); ok {
+			return in
+		}
+	}
 
 	for _, t := range b.teamTargets() {
 		if until, ok := br.failed[t]; ok && now < until {
 			continue
 		}
 		centre := blockCentre(t)
+		if br.role == rolePusher && (br.towering || anticheat.Dist(c.eye(), centre) <= botDigReach+1) {
+			if in, ok := b.pushTNT(now, t); ok {
+				return in
+			}
+		}
 		if anticheat.Dist(c.eye(), centre) <= botDigReach {
 			return b.breakTarget(now, t)
 		}
@@ -723,8 +845,21 @@ func (b *bot) follow(now uint64) physInput {
 		prev = br.route[br.routeIdx-1].Cell
 	}
 	here := c.feetCellNow()
+	// A hop (or a push) can carry the bot past steps: landed on a later one
+	// of the route, it carries on from there.
+	if b.phys.OnGround && here != step.Cell && here != prev {
+		for k := br.routeIdx + 1; k < len(br.route) && k <= br.routeIdx+botHopSkip; k++ {
+			if br.route[k].Cell == here {
+				br.routeIdx, br.progressAt = k+1, now
+				return b.follow(now)
+			}
+		}
+	}
 	runUp := prev.Add(-sign(step.Cell.X-prev.X), 0, -sign(step.Cell.Z-prev.Z))
-	if here != prev && here != step.Cell && !(step.Leap && onLeapLine(prev, runUp, step.Cell, here)) && b.phys.OnGround {
+	// Stepping off a ledge onto a lower step, the feet are still a cell or
+	// more above it (on the ledge's edge): that's on the way, not off it.
+	dropping := here.X == step.Cell.X && here.Z == step.Cell.Z && here.Y > step.Cell.Y && here.Y <= prev.Y
+	if here != prev && here != step.Cell && !dropping && !(step.Leap && onLeapLine(prev, runUp, step.Cell, here)) && b.phys.OnGround {
 		b.dropRoute() // knocked off the route: pick it up again or plan anew
 		return physInput{}
 	}
@@ -758,8 +893,61 @@ func (b *bot) follow(now uint64) physInput {
 	if step.Cell.Y > here.Y && b.phys.OnGround && horiz(b.phys.Pos, target) < 1.5 {
 		in.Jump = true
 	}
+	// Bunny hop: sprinting down a straight, flat stretch, jump on every
+	// landing — each sprint-jump adds a 0.2 push, faster than running. In
+	// the air it steers for the end of the stretch and counts the cells it
+	// flies over (aiming at the next cell's centre it would turn back once
+	// past it).
+	if in.Sprint && b.skill.hop && b.straightAhead(botHopAhead) {
+		end := br.route[br.routeIdx+botHopAhead-1].Cell
+		in = b.toward(cellCentre(end), true)
+		if b.phys.OnGround {
+			in.Jump = true
+		}
+		if here.X == step.Cell.X && here.Z == step.Cell.Z {
+			br.routeIdx++
+			br.progressAt = now
+		}
+		return in
+	}
 	b.arrive(now, step)
 	return in
+}
+
+const (
+	botHopAhead = 4 // straight flat steps ahead needed for a hop
+	botHopSkip  = 5 // how many steps ahead a landing may pick the route up
+)
+
+// straightAhead reports whether the next n steps of the route run in one
+// straight line on the bot's level, with nothing to build or leap, and room
+// overhead for a jump all the way.
+func (b *bot) straightAhead(n int) bool {
+	br := &b.brain
+	if br.routeIdx+n > len(br.route) {
+		return false
+	}
+	at := b.c.instance.World.GetBlock
+	// From the route's own previous cell, not the bot's (mid-hop it's a
+	// cell or two up).
+	prev := br.routeStart
+	if br.routeIdx > 0 {
+		prev = br.route[br.routeIdx-1].Cell
+	}
+	first := br.route[br.routeIdx].Cell
+	dx, dz := first.X-prev.X, first.Z-prev.Z
+	if dx*dx+dz*dz != 1 { // diagonals and climbs: no
+		return false
+	}
+	for k := br.routeIdx; k < br.routeIdx+n; k++ {
+		s := br.route[k]
+		if len(s.Place) > 0 || s.Leap || s.Cell.Y != prev.Y ||
+			s.Cell.X-prev.X != dx || s.Cell.Z-prev.Z != dz || !headClear(at, s.Cell.Add(0, 2, 0)) {
+			return false
+		}
+		prev = s.Cell
+	}
+	return true
 }
 
 // arrive moves on to the next step once the bot stands at this one's centre.

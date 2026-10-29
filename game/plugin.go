@@ -347,8 +347,17 @@ type BotPlan struct {
 	// Targets are blocks to destroy, nearest first (enemy beds).
 	Targets []world.Position
 	// Wares is what the shop sells that a bot may want (gear, tools,
-	// explosives), with what p already owns marked.
+	// explosives, team upgrades), with what p already owns marked.
 	Wares []BotWare
+	// Pickups are resource spots worth a trip (BedWars' diamond and emerald
+	// generators): where the drops pile up and what they are.
+	Pickups []BotPickup
+}
+
+// BotPickup is a spot where a valuable resource drops.
+type BotPickup struct {
+	Pos  world.Position // the block the drops appear at (stand next to it)
+	Item string         // the resource's item id
 }
 
 // BotTeams is optionally implemented by a BotGuide: the team names /bot add
@@ -367,6 +376,7 @@ const (
 	WareBow     = "bow"
 	WareArrows  = "arrows"
 	WareTNT     = "tnt"
+	WareUpgrade = "upgrade" // a team upgrade (all members gain it)
 )
 
 // BotWare is one shop entry offered to bots.

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"math"
 	"testing"
 
 	"minecraft-server/world"
@@ -227,5 +228,95 @@ func TestPathLeapsAGap(t *testing.T) {
 	opts.maxLeap = 1
 	if p := findPath(w.at, at(0, 64, 0), at(7, 64, 0), goal, opts); p != nil {
 		t.Fatalf("leapt a 2-gap with maxLeap 1: %v", p)
+	}
+}
+
+// TestPathSlabHeights: a bottom slab on a block is 1.5 up — beyond a jump —
+// while a slab on the floor is a half step, and from it a full block is
+// another half step.
+func TestPathSlabHeights(t *testing.T) {
+	slab, ok := world.BlockByName("minecraft:oak_slab") // bottom by default
+	if !ok {
+		t.Skip("oak_slab not registered")
+	}
+	// A block with a slab on it, the only way on: no path.
+	w := testWorld{}
+	w.floor(63, -2, 2, -1, 1)
+	w.floor(64, 3, 6, -1, 1)
+	w.floor(65, 3, 6, -1, 1) // slabs on the blocks
+	for x := 3; x <= 6; x++ {
+		for z := -1; z <= 1; z++ {
+			w[at(x, 65, z)] = slab
+		}
+	}
+	if p := findPath(w.at, at(0, 64, 0), at(5, 65, 0), reach(at(5, 65, 0)), blocks(0)); p != nil {
+		t.Fatalf("jumped 1.5 blocks onto a slab on a block: %v", p)
+	}
+
+	// Floor → slab → block: two half steps.
+	w2 := testWorld{}
+	w2.floor(63, -2, 8, -1, 1)
+	for z := -1; z <= 1; z++ {
+		w2[at(3, 64, z)] = slab
+		for x := 4; x <= 8; x++ {
+			w2[at(x, 64, z)] = world.Stone
+		}
+	}
+	path := findPath(w2.at, at(0, 64, 0), at(6, 65, 0), reach(at(6, 65, 0)), blocks(0))
+	if path == nil {
+		t.Fatal("no way up the slab step")
+	}
+	onSlab := false
+	for _, s := range path {
+		if s.Cell == at(3, 64, 0) {
+			onSlab = true
+		}
+	}
+	if !onSlab {
+		t.Fatalf("path skipped the slab: %v", path)
+	}
+}
+
+// TestBotClimbsASlabStep: the bot walks the floor → slab → block steps
+// for real (physics).
+func TestBotClimbsASlabStep(t *testing.T) {
+	slab, ok := world.BlockByName("minecraft:oak_slab")
+	if !ok {
+		t.Skip("oak_slab not registered")
+	}
+	w := testWorld{}
+	w.floor(63, -2, 10, -1, 1)
+	for z := -1; z <= 1; z++ {
+		w[at(3, 64, z)] = slab
+		for x := 4; x <= 10; x++ {
+			w[at(x, 64, z)] = world.Stone
+		}
+	}
+	path := findPath(w.at, at(0, 64, 0), at(8, 65, 0), reach(at(8, 65, 0)), blocks(0))
+	if path == nil {
+		t.Fatal("no path")
+	}
+	var s physState
+	s.Pos.X, s.Pos.Y, s.Pos.Z = 0.5, 64, 0.5
+	idx := 0
+	for tick := 0; tick < 200 && idx < len(path); tick++ {
+		cell := path[idx].Cell
+		dx, dz := float64(cell.X)+0.5-s.Pos.X, float64(cell.Z)+0.5-s.Pos.Z
+		d := math.Hypot(dx, dz)
+		in := physInput{}
+		if d > 1e-6 {
+			in.DirX, in.DirZ = dx/d, dz/d
+		}
+		here := feetCell(s.Pos.X, s.Pos.Y, s.Pos.Z)
+		if cell.Y > here.Y && s.OnGround && d < 1.5 {
+			in.Jump = true
+		}
+		s.step(w.at, in)
+		if d < 0.3 && math.Abs(s.Pos.Y-standY(w.at, cell)) < 0.1 {
+			idx++
+		}
+	}
+	if idx < len(path) {
+		t.Fatalf("stuck at step %d/%d, pos %+v", idx, len(path), s.Pos)
 	}
 }

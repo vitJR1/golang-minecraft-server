@@ -103,8 +103,9 @@ func (g *bedWars) BotEnemy(_ *game.Ctx, p, other game.PlayerHandle) bool {
 
 // BotPlan: idle while waiting, dead or spectating; otherwise the team (and
 // its bed to defend while it stands), the team's iron forge to collect at,
-// its item shop to buy wool at, and the enemy beds still standing, nearest
-// first.
+// its item shop to buy wool at, the enemy beds still standing, nearest
+// first, the gear and team upgrades on sale, and the diamond / emerald
+// generators to raid.
 func (g *bedWars) BotPlan(_ *game.Ctx, p game.PlayerHandle) game.BotPlan {
 	pose := p.Pose()
 	if pose.Dead || pose.Gamemode == player.Spectator {
@@ -163,7 +164,32 @@ func (g *bedWars) BotPlan(_ *game.Ctx, p game.PlayerHandle) game.BotPlan {
 		plan.Targets = append(plan.Targets, b.pos)
 	}
 	plan.Wares = g.botWaresLocked(p, g.kitOfLocked(p.EntityID()))
+	plan.Wares = append(plan.Wares, g.botUpgradesLocked(g.teams[id])...)
+	for _, gen := range g.gens {
+		if gen.TeamID == neutral && (gen.Resource == Diamond || gen.Resource == Emerald) {
+			plan.Pickups = append(plan.Pickups, game.BotPickup{Pos: gen.Pos, Item: gen.Resource.item()})
+		}
+	}
 	return plan
+}
+
+// botUpgradePrefix starts the BotBuy key of a team upgrade.
+const botUpgradePrefix = "upgrade:"
+
+// botUpgradesLocked lists the team upgrades a bot may buy with diamonds —
+// the next tier of each, the most useful first. Caller holds g.mu.
+func (g *bedWars) botUpgradesLocked(ts *teamState) []game.BotWare {
+	var out []game.BotWare
+	for _, slot := range []int{slotSharpened, slotArmor, slotForge, slotHealPool, slotMiner} {
+		def := upgradeDefs[slot]
+		tier := def.tierOf(ts)
+		if tier >= len(def.Prices) {
+			continue
+		}
+		out = append(out, game.BotWare{Key: botUpgradePrefix + def.Key, Kind: game.WareUpgrade, Tier: tier + 1,
+			Currency: Diamond.item(), Price: def.Prices[tier]})
+	}
+	return out
 }
 
 // botWaresLocked lists the gear a bot may buy: swords and armour by tier,
@@ -213,7 +239,17 @@ func (g *bedWars) botWaresLocked(p game.PlayerHandle, k *kit) []game.BotWare {
 
 // BotBuy buys the goods with this key as a click in the shop would; true
 // when the bot paid for them (wool, a sword, an armour tier, a tool tier…).
-func (g *bedWars) BotBuy(_ *game.Ctx, p game.PlayerHandle, key string) bool {
+func (g *bedWars) BotBuy(ctx *game.Ctx, p game.PlayerHandle, key string) bool {
+	if up, ok := strings.CutPrefix(key, botUpgradePrefix); ok {
+		for slot, def := range upgradeDefs {
+			if def.Key == up {
+				before := p.CountItem(Diamond.item())
+				g.buyUpgrade(ctx, p, slot)
+				return p.CountItem(Diamond.item()) < before
+			}
+		}
+		return false
+	}
 	it, ok := findShopItem(key)
 	if !ok {
 		return false
