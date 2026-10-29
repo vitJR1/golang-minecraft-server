@@ -72,7 +72,9 @@ var fullExact = map[string]bool{
 // FullCube reports whether b's collision box fills its whole cell. The
 // exact whitelist wins (sea_lantern, crafting_table are full despite their
 // names); then any partial marker rules a block out; then the suffixes.
-func FullCube(b Block) bool {
+func FullCube(b Block) bool { return shapeOf(b).full }
+
+func fullCube(b Block) bool {
 	if partialExact[b.Name] || !strings.HasPrefix(b.Name, "minecraft:") {
 		return false
 	}
@@ -116,7 +118,9 @@ var passableExact = map[string]bool{
 
 // Collidable reports whether b has any collision box: air, fluids,
 // replaceable vegetation and the passable lists don't.
-func Collidable(b Block) bool {
+func Collidable(b Block) bool { return shapeOf(b).collidable }
+
+func collidable(b Block) bool {
 	if b == Air || Replaceable(b) {
 		return false
 	}
@@ -139,10 +143,15 @@ func Collidable(b Block) bool {
 // — exact for the blocks maps are built from, a fair wall for the rest.
 // Used by the server-side physics of bots (server/bot_physics.go).
 func CollisionHeight(b Block) (lo, hi float64, ok bool) {
-	if !Collidable(b) {
+	sh := shapeOf(b)
+	return sh.lo, sh.hi, sh.hasBox
+}
+
+func collisionHeight(b Block) (lo, hi float64, ok bool) {
+	if !collidable(b) {
 		return 0, 0, false
 	}
-	if FullCube(b) {
+	if fullCube(b) {
 		return 0, 1, true
 	}
 	n := strings.TrimPrefix(b.Name, "minecraft:")
