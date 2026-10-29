@@ -115,12 +115,16 @@ func TestHologramTimerCountsDown(t *testing.T) {
 		t.Errorf("timer 5 ticks before fire: %q, want 1s", got)
 	}
 
-	// Let the unattended forge fill up: the timer shows Full instead.
-	for n := uint64(1); n <= uint64(dg.maxStack()); n++ {
+	// Let the unattended forge fill up: the timer shows Full instead. (Tick
+	// on until it is — the generator tiers speed it up along the way.)
+	for n := uint64(2); n <= uint64(4*dg.maxStack()) && timer.current() != "§cFull"; n++ {
 		g.OnTick(ctx, n*dg.IntervalTicks)
 	}
 	if got := timer.current(); got != "§cFull" {
 		t.Errorf("timer with a full pile: %q, want §cFull", got)
+	}
+	if n := inst.DroppedItemsNear(float64(dg.Pos.X)+0.5, float64(dg.Pos.Y), float64(dg.Pos.Z)+0.5, 1.5, Diamond.item()); n != dg.maxStack() {
+		t.Errorf("full pile holds %d diamonds, want the cap %d", n, dg.maxStack())
 	}
 }
 

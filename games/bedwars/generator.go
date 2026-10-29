@@ -59,15 +59,15 @@ type Generator struct {
 }
 
 // defaultGenMaxStack is the uncollected-pile cap per resource when the
-// config doesn't set one: cheap resources pile high, rare ones barely.
+// config doesn't set one.
 func defaultGenMaxStack(r Resource) int {
 	switch r {
 	case Gold:
 		return 16
 	case Diamond:
-		return 8
+		return 32
 	case Emerald:
-		return 4
+		return 16
 	default:
 		return 48
 	}
