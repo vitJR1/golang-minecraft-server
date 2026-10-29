@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"minecraft-server/anticheat"
+	"minecraft-server/server/botnav"
 	"minecraft-server/world"
 )
 
@@ -259,7 +260,7 @@ func shellAround(inner []world.Position) []world.Position {
 }
 
 // openCells keeps the cells a block can still go into.
-func openCells(at blockAt, cells []world.Position) []world.Position {
+func openCells(at botnav.BlockAt, cells []world.Position) []world.Position {
 	var out []world.Position
 	for _, c := range cells {
 		if world.Replaceable(at(c)) {
@@ -271,13 +272,13 @@ func openCells(at blockAt, cells []world.Position) []world.Position {
 
 // bedCover lists the cells round the bed blocks still to fill: on top and
 // at the sides (not the bed's own other half).
-func bedCover(at blockAt, bed []world.Position) []world.Position {
+func bedCover(at botnav.BlockAt, bed []world.Position) []world.Position {
 	return openCells(at, shellAround(bed))
 }
 
 // bedOuterCover is the second layer: the shell round the bed and its first
 // layer, still to fill.
-func bedOuterCover(at blockAt, bed []world.Position) []world.Position {
+func bedOuterCover(at botnav.BlockAt, bed []world.Position) []world.Position {
 	return openCells(at, shellAround(append(append([]world.Position{}, bed...), shellAround(bed)...)))
 }
 
@@ -286,11 +287,11 @@ func bedOuterCover(at blockAt, bed []world.Position) []world.Position {
 // built: the defender then joins the team's attack (the team brain calls it
 // back for an intruder). Out of blocks with the cover unfinished, it goes to
 // the station to earn more.
-func (b *bot) defend(now uint64, blocks int) (physInput, bool) {
+func (b *bot) defend(now uint64, blocks int) (botnav.Input, bool) {
 	c, br := b.c, &b.brain
 	plan := br.plan
 	if len(plan.Defend) == 0 {
-		return physInput{}, false
+		return botnav.Input{}, false
 	}
 	at := c.instance.World.GetBlock
 	// Cells it couldn't get to or fill lately are left out.
@@ -308,13 +309,13 @@ func (b *bot) defend(now uint64, blocks int) (physInput, bool) {
 		cover = usable(bedOuterCover(at, plan.Defend))
 	}
 	if len(cover) == 0 {
-		return physInput{}, false // fortified (as far as it can)
+		return botnav.Input{}, false // fortified (as far as it can)
 	}
 	if blocks == 0 {
 		if plan.HasStation {
 			return b.goTo(now, "station", plan.Station, atStation(plan.Station), blocks), true
 		}
-		return physInput{}, false
+		return botnav.Input{}, false
 	}
 	// Place what's in reach; walk up to the rest.
 	for _, p := range cover {
@@ -326,7 +327,7 @@ func (b *bot) defend(now uint64, blocks int) (physInput, bool) {
 					b.skipCover(now, p)
 				}
 			}
-			return physInput{}, true
+			return botnav.Input{}, true
 		}
 	}
 	aim := cover[0]

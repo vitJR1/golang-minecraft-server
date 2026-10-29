@@ -1,24 +1,23 @@
-package server
-
-import (
-	"math"
-	"strings"
-
-	"minecraft-server/anticheat"
-	"minecraft-server/world"
-)
-
-// bot_physics.go moves bots the way a vanilla 1.20.1 client moves its
+// Package botnav moves bots the way a vanilla 1.20.1 client moves its
 // player — a bot has no client, so the server runs its physics: walking
 // acceleration and block friction, sprint, jump, gravity and drag, pushes
 // from knockback / explosions, and collision with the blocks around it
 // (resolved Y, then X, then Z, with the 0.6-block auto-step).
 //
-// The functions here only read blocks through a blockAt func, so they run
-// against a test world as well as an instance.
+// The functions here only read blocks through a BlockAt func, so they run
+// against a test world as well as an instance. path.go is the pathfinding
+// (A* over feet cells) on top of the same block reads.
+package botnav
 
-// blockAt returns the block at a position.
-type blockAt func(world.Position) world.Block
+import (
+	"math"
+
+	"minecraft-server/anticheat"
+	"minecraft-server/world"
+)
+
+// BlockAt returns the block at a position.
+type BlockAt func(world.Position) world.Block
 
 // Vanilla movement constants (LivingEntity.travel, Player).
 const (
@@ -34,7 +33,7 @@ const (
 	botStepHeight  = 0.6    // auto-step over slabs, stairs, carpets
 	botEpsilon     = 1e-7   // collision slack
 	botMaxFall     = -3.92  // terminal fall speed (blocks/tick)
-	botVoidY       = -128.0 // below this the bot stops simulating a fall
+	VoidY          = -128.0 // below this the bot stops simulating a fall
 	defaultSlip    = 0.6    // most blocks' slipperiness
 	botStandWidth  = 0.6    // anticheat.PlayerWidth, repeated for clarity
 	botStandHeight = 1.8    // anticheat.PlayerHeight
@@ -42,8 +41,8 @@ const (
 	botHalfWidth   = botStandWidth / 2
 )
 
-// physState is a bot's position and motion.
-type physState struct {
+// Body is a bot's position and motion.
+type Body struct {
 	Pos       anticheat.Vec // feet
 	Vel       anticheat.Vec // blocks/tick
 	OnGround  bool
@@ -54,9 +53,9 @@ type physState struct {
 	jumpDelay int // ticks before another jump (vanilla's 10-tick hold delay)
 }
 
-// physInput is what the bot "presses" this tick: a horizontal direction to
+// Input is what the bot "presses" this tick: a horizontal direction to
 // walk in (unit, or zero to stand), sprint and jump.
-type physInput struct {
+type Input struct {
 	DirX, DirZ float64
 	Sprint     bool
 	Jump       bool
@@ -85,7 +84,7 @@ func botBox(feet anticheat.Vec, sneaking bool) anticheat.Box {
 }
 
 // collisionBoxes lists the collision boxes of the blocks overlapping region.
-func collisionBoxes(at blockAt, region anticheat.Box) []anticheat.Box {
+func collisionBoxes(at BlockAt, region anticheat.Box) []anticheat.Box {
 	var out []anticheat.Box
 	for x := floorF(region.Min.X); x <= floorF(region.Max.X); x++ {
 		for y := floorF(region.Min.Y) - 1; y <= floorF(region.Max.Y); y++ { // -1: fences reach up 1.5
@@ -159,7 +158,7 @@ func shift(b anticheat.Box, axis int, d float64) anticheat.Box {
 // collide resolves the move (dx, dy, dz) of box against the blocks: Y
 // first, then the larger horizontal axis, then the other. It returns the
 // allowed move.
-func collide(at blockAt, box anticheat.Box, dx, dy, dz float64) (float64, float64, float64) {
+func collide(at BlockAt, box anticheat.Box, dx, dy, dz float64) (float64, float64, float64) {
 	region := anticheat.Box{
 		Min: anticheat.Vec{X: math.Min(box.Min.X, box.Min.X+dx), Y: math.Min(box.Min.Y, box.Min.Y+dy), Z: math.Min(box.Min.Z, box.Min.Z+dz)},
 		Max: anticheat.Vec{X: math.Max(box.Max.X, box.Max.X+dx), Y: math.Max(box.Max.Y, box.Max.Y+dy), Z: math.Max(box.Max.Z, box.Max.Z+dz)},
@@ -179,10 +178,10 @@ func collide(at blockAt, box anticheat.Box, dx, dy, dz float64) (float64, float6
 	return dx, dy, dz
 }
 
-// move applies one tick's motion with collision and the auto-step, and
+// Move applies one tick's motion with collision and the auto-step, and
 // updates OnGround / Collided. Velocity components stopped by a block are
 // zeroed, like vanilla.
-func (s *physState) move(at blockAt) {
+func (s *Body) Move(at BlockAt) {
 	box := botBox(s.Pos, s.Sneaking)
 	dx, dy, dz := collide(at, box, s.Vel.X, s.Vel.Y, s.Vel.Z)
 	horizBlocked := math.Abs(dx-s.Vel.X) > botEpsilon || math.Abs(dz-s.Vel.Z) > botEpsilon
@@ -217,8 +216,8 @@ func (s *physState) move(at blockAt) {
 	s.Pos = anticheat.Vec{X: s.Pos.X + dx, Y: s.Pos.Y + dy, Z: s.Pos.Z + dz}
 }
 
-// step runs one tick of vanilla player physics with input in.
-func (s *physState) step(at blockAt, in physInput) {
+// Tick runs one tick of vanilla player physics with input in.
+func (s *Body) Tick(at BlockAt, in Input) {
 	if s.jumpDelay > 0 {
 		s.jumpDelay--
 	}
@@ -254,7 +253,7 @@ func (s *physState) step(at blockAt, in physInput) {
 	s.Vel.X += in.DirX * accel
 	s.Vel.Z += in.DirZ * accel
 
-	s.move(at)
+	s.Move(at)
 
 	// Gravity, drag and friction for the next tick.
 	friction := botAirFriction
@@ -266,14 +265,14 @@ func (s *physState) step(at blockAt, in physInput) {
 	s.Vel.Z *= friction
 }
 
-// push applies a velocity the server gave the player: knockback replaces
+// Push applies a velocity the server gave the player: knockback replaces
 // the motion, as Set Entity Velocity does on a client.
-func (s *physState) push(vx, vy, vz float64) {
+func (s *Body) Push(vx, vy, vz float64) {
 	s.Vel = anticheat.Vec{X: vx, Y: vy, Z: vz}
 	if vy > 0 {
 		s.OnGround = false
 	}
 }
 
-// isWool reports whether an item id is any colour of wool.
-func isWool(item string) bool { return strings.HasSuffix(item, "_wool") }
+// floorF is math.Floor as an int.
+func floorF(v float64) int { return int(math.Floor(v)) }

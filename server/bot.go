@@ -14,6 +14,7 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/server/botnav"
 )
 
 // bot.go: server-side players driven by an AI instead of a client (/bot).
@@ -122,7 +123,7 @@ type bot struct {
 	style botStyle
 	rng   *rand.Rand
 
-	phys physState
+	phys botnav.Body
 
 	// pushes from other goroutines (knockback dealt on an attacker's read
 	// loop, explosions) wait here for the bot's tick.

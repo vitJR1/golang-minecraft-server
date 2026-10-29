@@ -7,6 +7,7 @@ import (
 	"minecraft-server/anticheat"
 	"minecraft-server/game"
 	"minecraft-server/player"
+	"minecraft-server/server/botnav"
 	"minecraft-server/world"
 )
 
@@ -33,11 +34,11 @@ const (
 
 // shoot draws the bow at t and looses when drawn, aiming the arc. False when
 // it can't (no bow or arrows, out of range, no line of sight).
-func (b *bot) shoot(now uint64, t *ClientConnection) (physInput, bool) {
+func (b *bot) shoot(now uint64, t *ClientConnection) (botnav.Input, bool) {
 	c, br := b.c, &b.brain
 	if c.countItemName(itemBow) == 0 || c.countItemName(itemArrow) == 0 {
 		b.stopDraw()
-		return physInput{}, false
+		return botnav.Input{}, false
 	}
 	ts := t.player.Snapshot()
 	aim := anticheat.Vec{X: ts.X, Y: ts.Y + 1.0, Z: ts.Z}
@@ -49,7 +50,7 @@ func (b *bot) shoot(now uint64, t *ClientConnection) (physInput, bool) {
 	}
 	if anticheat.Dist(from, aim) > reach || !b.sees(t) {
 		b.stopDraw()
-		return physInput{}, false
+		return botnav.Input{}, false
 	}
 	// Lead a moving target: where it will be when the arrow gets there
 	// (its velocity from the last ticks × the flight time), aimed twice.
@@ -63,7 +64,7 @@ func (b *bot) shoot(now uint64, t *ClientConnection) (physInput, bool) {
 	}
 	if !ok {
 		b.stopDraw()
-		return physInput{}, false
+		return botnav.Input{}, false
 	}
 	// A teammate in the line of fire would catch the arrow: hold the shot
 	// and step aside to clear the line.
@@ -73,11 +74,11 @@ func (b *bot) shoot(now uint64, t *ClientConnection) (physInput, bool) {
 	if br.drawAt == 0 {
 		if now >= br.nextShot {
 			if !c.botHold(func(st itemStack) bool { n, _ := world.ItemName(st.ID); return n == itemBow }) {
-				return physInput{}, false
+				return botnav.Input{}, false
 			}
 			c.startDraw()
 			if c.using.Load() == nil {
-				return physInput{}, false
+				return botnav.Input{}, false
 			}
 			br.drawAt = now
 			br.aimYaw = float32(b.rng.NormFloat64() * b.skill.aimNoise)
@@ -91,7 +92,7 @@ func (b *bot) shoot(now uint64, t *ClientConnection) (physInput, bool) {
 		br.drawAt = 0
 		br.nextShot = now + 10 + uint64(b.rng.Intn(20))
 	}
-	return physInput{}, true
+	return botnav.Input{}, true
 }
 
 // friendInLine returns a player who isn't an enemy standing (inflated like
@@ -117,23 +118,23 @@ func (b *bot) friendInLine(from, to anticheat.Vec) *ClientConnection {
 }
 
 // sidestep walks sideways off the line to aim, away from friend f.
-func (b *bot) sidestep(f *ClientConnection, aim anticheat.Vec) physInput {
+func (b *bot) sidestep(f *ClientConnection, aim anticheat.Vec) botnav.Input {
 	p := b.phys.Pos
 	dx, dz := aim.X-p.X, aim.Z-p.Z
 	d := math.Hypot(dx, dz)
 	if d < 1e-6 {
-		return physInput{}
+		return botnav.Input{}
 	}
 	sx, sz := -dz/d, dx/d // perpendicular to the line
 	fs := f.player.Snapshot()
 	if (fs.X-p.X)*sx+(fs.Z-p.Z)*sz > 0 {
 		sx, sz = -sx, -sz // the side away from the friend
 	}
-	in := physInput{DirX: sx, DirZ: sz}
-	if !standable(b.c.instance.World.GetBlock, feetCell(p.X+sx, p.Y, p.Z+sz)) {
+	in := botnav.Input{DirX: sx, DirZ: sz}
+	if !botnav.Standable(b.c.instance.World.GetBlock, botnav.FeetCell(p.X+sx, p.Y, p.Z+sz)) {
 		in.DirX, in.DirZ = -sx, -sz // a ledge there: the other way
-		if !standable(b.c.instance.World.GetBlock, feetCell(p.X-sx, p.Y, p.Z-sz)) {
-			return physInput{} // nowhere to go: wait for them to move
+		if !botnav.Standable(b.c.instance.World.GetBlock, botnav.FeetCell(p.X-sx, p.Y, p.Z-sz)) {
+			return botnav.Input{} // nowhere to go: wait for them to move
 		}
 	}
 	return in
@@ -453,7 +454,7 @@ func tntBreaks(blk world.Block) bool {
 }
 
 // flee walks away from the TNT it lit, homeward.
-func (b *bot) flee(now uint64) physInput {
+func (b *bot) flee(now uint64) botnav.Input {
 	from := b.brain.fleeFrom
 	away := func(p world.Position) bool {
 		dx, dy, dz := float64(p.X-from.X), float64(p.Y-from.Y), float64(p.Z-from.Z)
@@ -511,11 +512,11 @@ func pilePos(p world.Position) anticheat.Vec {
 // pile up. Greedy bots go for any pile, the others for a big one. Once the
 // bot can afford something, the shop (wantWare) sends it home. Between
 // raids it rests (endRaid), so it still goes for the beds.
-func (b *bot) collect(now uint64, blocks int) (physInput, bool) {
+func (b *bot) collect(now uint64, blocks int) (botnav.Input, bool) {
 	c, br := b.c, &b.brain
 	plan := br.plan
 	if br.role == roleDefender || len(plan.Pickups) == 0 || (!br.raiding && now < br.nextRaid) {
-		return physInput{}, false
+		return botnav.Input{}, false
 	}
 	need := 2
 	if b.style.greedy {
@@ -545,7 +546,7 @@ func (b *bot) collect(now uint64, blocks int) (physInput, bool) {
 	}
 	if best == nil {
 		b.endRaid(now)
-		return physInput{}, false
+		return botnav.Input{}, false
 	}
 	br.pickup, br.raiding = best.Pos, true
 	goal := atStation(best.Pos)
@@ -558,7 +559,7 @@ func (b *bot) collect(now uint64, blocks int) (physInput, bool) {
 	if status == farFailed {
 		b.giveUp(now, best.Pos)
 		b.endRaid(now)
-		return physInput{}, false
+		return botnav.Input{}, false
 	}
 	return in, true
 }

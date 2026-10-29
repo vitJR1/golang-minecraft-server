@@ -1,4 +1,4 @@
-package server
+package botnav
 
 import (
 	"math"
@@ -15,9 +15,9 @@ func reach(p world.Position) func(world.Position) bool {
 }
 
 // blocks is a near search that may place n blocks and never leaps.
-func blocks(n int) routeOpts { return routeOpts{maxBlocks: n, budget: pathNearNodes} }
+func blocks(n int) Opts { return Opts{MaxBlocks: n, Budget: NearNodes} }
 
-func bridgesIn(path []routeStep) int {
+func bridgesIn(path []Step) int {
 	n := 0
 	for _, s := range path {
 		n += len(s.Place)
@@ -139,7 +139,7 @@ func TestRouteUsesAnExistingBridge(t *testing.T) {
 	if bridgesIn(greedy) == 0 {
 		t.Skip("the plain search already walks the old bridge here")
 	}
-	path := findRoute(w.at, at(0, 64, 2), at(10, 64, 2), goal, blocks(64))
+	path := FindRoute(w.at, at(0, 64, 2), at(10, 64, 2), goal, blocks(64))
 	if path == nil || bridgesIn(path) != 0 {
 		t.Fatalf("built %d new bridge blocks next to an existing bridge", bridgesIn(path))
 	}
@@ -147,23 +147,23 @@ func TestRouteUsesAnExistingBridge(t *testing.T) {
 	w2 := testWorld{}
 	w2.floor(63, -3, 2, -3, 3)
 	w2.floor(63, 8, 12, -3, 3)
-	if p := findRoute(w2.at, at(0, 64, 2), at(10, 64, 2), goal, blocks(64)); bridgesIn(p) == 0 {
+	if p := FindRoute(w2.at, at(0, 64, 2), at(10, 64, 2), goal, blocks(64)); bridgesIn(p) == 0 {
 		t.Fatal("no bridge where none exists")
 	}
 }
 
 func TestResumeAt(t *testing.T) {
-	route := []routeStep{{Cell: at(1, 64, 0)}, {Cell: at(2, 64, 0)}, {Cell: at(3, 64, 0), Place: []world.Position{at(3, 63, 0)}}, {Cell: at(4, 64, 0), Place: []world.Position{at(4, 63, 0)}}}
-	if i := resumeAt(route, at(2, 64, 0)); i != 2 {
+	route := []Step{{Cell: at(1, 64, 0)}, {Cell: at(2, 64, 0)}, {Cell: at(3, 64, 0), Place: []world.Position{at(3, 63, 0)}}, {Cell: at(4, 64, 0), Place: []world.Position{at(4, 63, 0)}}}
+	if i := ResumeAt(route, at(2, 64, 0)); i != 2 {
 		t.Errorf("standing on step 1: resume at %d, want 2", i)
 	}
-	if i := resumeAt(route, at(3, 64, 1)); i != 2 {
+	if i := ResumeAt(route, at(3, 64, 1)); i != 2 {
 		t.Errorf("knocked beside step 2: resume at %d, want 2 (walk back onto it)", i)
 	}
-	if i := resumeAt(route, at(3, 60, 0)); i != -1 {
+	if i := ResumeAt(route, at(3, 60, 0)); i != -1 {
 		t.Errorf("fell below the route: resume at %d, want -1", i)
 	}
-	if i := resumeAt(route, at(9, 64, 9)); i != -1 {
+	if i := ResumeAt(route, at(9, 64, 9)); i != -1 {
 		t.Errorf("far away: resume at %d, want -1", i)
 	}
 }
@@ -214,7 +214,7 @@ func TestPathLeapsAGap(t *testing.T) {
 		t.Fatalf("crossed without leaping or blocks: %v", p)
 	}
 	opts := blocks(0)
-	opts.maxLeap = 2
+	opts.MaxLeap = 2
 	path := findPath(w.at, at(0, 64, 0), at(7, 64, 0), goal, opts)
 	leaps := 0
 	for _, s := range path {
@@ -225,7 +225,7 @@ func TestPathLeapsAGap(t *testing.T) {
 	if path == nil || leaps != 1 || bridgesIn(path) != 0 {
 		t.Fatalf("want one leap and no blocks: %v", path)
 	}
-	opts.maxLeap = 1
+	opts.MaxLeap = 1
 	if p := findPath(w.at, at(0, 64, 0), at(7, 64, 0), goal, opts); p != nil {
 		t.Fatalf("leapt a 2-gap with maxLeap 1: %v", p)
 	}
@@ -296,22 +296,22 @@ func TestBotClimbsASlabStep(t *testing.T) {
 	if path == nil {
 		t.Fatal("no path")
 	}
-	var s physState
+	var s Body
 	s.Pos.X, s.Pos.Y, s.Pos.Z = 0.5, 64, 0.5
 	idx := 0
 	for tick := 0; tick < 200 && idx < len(path); tick++ {
 		cell := path[idx].Cell
 		dx, dz := float64(cell.X)+0.5-s.Pos.X, float64(cell.Z)+0.5-s.Pos.Z
 		d := math.Hypot(dx, dz)
-		in := physInput{}
+		in := Input{}
 		if d > 1e-6 {
 			in.DirX, in.DirZ = dx/d, dz/d
 		}
-		here := feetCell(s.Pos.X, s.Pos.Y, s.Pos.Z)
+		here := FeetCell(s.Pos.X, s.Pos.Y, s.Pos.Z)
 		if cell.Y > here.Y && s.OnGround && d < 1.5 {
 			in.Jump = true
 		}
-		s.step(w.at, in)
+		s.Tick(w.at, in)
 		if d < 0.3 && math.Abs(s.Pos.Y-standY(w.at, cell)) < 0.1 {
 			idx++
 		}

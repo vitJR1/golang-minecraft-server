@@ -1,6 +1,7 @@
 package server
 
 import (
+	"minecraft-server/server/botnav"
 	"minecraft-server/world"
 )
 
@@ -62,11 +63,11 @@ func (b *bot) watchFall(now uint64) {
 // reinforce widens the way around a fall spot the bot is passing: from where
 // it stands, a block beside the walkway under each side cell of here and of
 // the next step. True while it's placing.
-func (b *bot) reinforce(now uint64, here, next world.Position) (physInput, bool) {
+func (b *bot) reinforce(now uint64, here, next world.Position) (botnav.Input, bool) {
 	c, br := b.c, &b.brain
 	spots := b.fallSpots()
 	if len(spots) == 0 || !b.phys.OnGround || c.countItemName(br.plan.BlockItem) == 0 {
-		return physInput{}, false
+		return botnav.Input{}, false
 	}
 	var spot world.Position
 	found := false
@@ -77,7 +78,7 @@ func (b *bot) reinforce(now uint64, here, next world.Position) (physInput, bool)
 		}
 	}
 	if !found {
-		return physInput{}, false
+		return botnav.Input{}, false
 	}
 	at := c.instance.World.GetBlock
 	dx, dz := sign(next.X-here.X), sign(next.Z-here.Z)
@@ -108,8 +109,8 @@ func (b *bot) reinforce(now uint64, here, next world.Position) (physInput, bool)
 				continue
 			}
 		}
-		return physInput{}, true
+		return botnav.Input{}, true
 	}
 	delete(spots, spot) // widened: done here
-	return physInput{}, false
+	return botnav.Input{}, false
 }
