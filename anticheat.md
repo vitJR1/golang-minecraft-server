@@ -43,7 +43,7 @@ nuker, fly); **P2** — эвристики и полировка.
   шаг: инвариант «суммы предметов по id не растут» (`itemTotals` до/после) —
   при росте откат и ресинк. Это закрывает генерацию предметов почти без кода.
   Также проверять State ID (сейчас читается и выбрасывается, `handler_play.go:492`).
-- **Сделано:** сразу полная симуляция (`server/click.go`, порт vanilla
+- **Сделано:** сразу полная симуляция (`server/inventory/click.go`, порт vanilla
   `doClick` 1.20.1: все режимы 0–6, drag между пакетами, shift-click по
   `quickMoveStack` для инвентаря и сундука, слоты брони, F/цифры). Ответ
   клиента только сравнивается, при расхождении — ресинк окна. Сундук
@@ -53,7 +53,7 @@ nuker, fly); **P2** — эвристики и полировка.
   (результат не выдаётся), сетка возвращается в инвентарь при закрытии.
 
 ### 3. ~~Чары и NBT предметов берутся от клиента~~ — исправлено
-`readSlot` (`server/chest.go:416`) парсит `Enchantments`/`Damage` из NBT
+`inventory.ReadSlot` (`server/inventory/stack.go`) парсит `Enchantments`/`Damage` из NBT
 клиента, а `heldEnchant` использует их в бою (`server/combat.go` Sharpness,
 Knockback, Protection в `armor.go`, Efficiency в копании).
 
@@ -93,7 +93,7 @@ Knockback, Protection в `armor.go`, Efficiency в копании).
   размера. Это защита, а не античит, но чинить первой.
 - **Сделано:** `nbt/unmarshal.go` — длины проверяются против остатка входа
   до `make`, глубина ≤ `MaxDepth` (512), сетевой NBT (`SkipTag`,
-  `UnmarshalNetwork` в `readSlot`) декодируется под квотой `NetworkQuota`
+  `UnmarshalNetwork` в `inventory.ReadSlot`) декодируется под квотой `NetworkQuota`
   (2 MiB, учёт по мотивам vanilla `NbtAccounter`). Файлы (`Unmarshal`,
   схематики) — без квоты. Тесты: `nbt/limits_test.go`.
 

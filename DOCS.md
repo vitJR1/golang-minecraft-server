@@ -252,7 +252,7 @@ command» / «You don't have permission».
 ## Когда нужны новые packets
 
 1. Найти ID в wiki.vg для **protocol 763 (1.20.1)** — версия зашита в коде.
-2. Добавить константу в `server/packet_ids.go` под секцию Sb/Cb + state.
+2. Добавить константу в `protocol/packetid/packetid.go` под секцию Sb/Cb + state.
 3. Для **Sb**: добавить `case` в `handler_play.go` (или другом state'е).
 4. Для **Cb**: написать `sendXxx`-функцию в `play_send.go` (или
    `visibility.go` для broadcasts).
@@ -260,4 +260,4 @@ command» / «You don't have permission».
    от netty, значит ID или формат пакета неверный.
 
 ID-таблица в wiki.vg разбита по версиям — для 1.20.1 это `oldid=18375`
-(закреплено в комментарии в `packet_ids.go`).
+(закреплено в комментарии в `protocol/packetid/packetid.go`).

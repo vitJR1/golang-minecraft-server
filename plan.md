@@ -85,7 +85,7 @@ matchmaker без `go MovePlayer`, корректный `EndGame`.
 **Зачем:** фундамент для FFA-real, BedWars, SkyWars. Сейчас бой — фикция.
 
 - `player.Player`: `health float32` (0..20), опц. `food`, под тем же `mu`.
-- Клиентские пакеты (см. `packet_ids.go` / wiki.vg 763):
+- Клиентские пакеты (см. `protocol/packetid` / wiki.vg 763):
   - **Set Health (Cb)** — HP/еда/saturation.
   - **Damage Event** или Entity Animation (hurt) — визуальный удар по жертве.
   - **Set Entity Velocity (Cb)** — knockback (вектор из yaw атакующего +
