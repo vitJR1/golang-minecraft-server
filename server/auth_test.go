@@ -2,16 +2,14 @@ package server
 
 import (
 	"context"
-	"minecraft-server/cfg"
-	"minecraft-server/db"
-	"minecraft-server/protocol"
-	"minecraft-server/protocol/packetid"
-	"minecraft-server/store"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
+	"minecraft-server/cfg"
+	"minecraft-server/protocol"
+	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/auth"
 )
 
 // withAuth installs a fresh auth plugin against the given Server, then
@@ -44,95 +42,34 @@ func withAuthAttempts(t *testing.T, max int, banDur time.Duration) {
 	})
 }
 
-// --- Unit tests for the credential store ------------------------------------
-
-// TestBcryptRoundTrip: bcryptHash output verifies and rejects a different
-// password.
-func TestBcryptRoundTrip(t *testing.T) {
-	hash, err := bcryptHash("secret")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bcrypt.CompareHashAndPassword([]byte(hash), []byte("secret")) != nil {
-		t.Error("hash should accept the registered password")
-	}
-	if bcrypt.CompareHashAndPassword([]byte(hash), []byte("different")) == nil {
-		t.Error("hash should reject a different password")
-	}
-}
+// --- Plugin wiring ----------------------------------------------------------
 
 func TestPluginHasIsCaseInsensitive(t *testing.T) {
 	withAuth(t, New()) // no DB → in-memory credential store
-	if err := authStore.creds.set(context.Background(), protocol.OfflineUUID("Alice"), "Alice", "h"); err != nil {
+	if err := authStore.svc.Creds.Set(context.Background(), protocol.OfflineUUID("Alice"), "Alice", "h"); err != nil {
 		t.Fatal(err)
 	}
 	for _, n := range []string{"alice", "ALICE", "Alice"} {
-		if !authStore.has(n) {
+		if !authStore.svc.Registered(n) {
 			t.Errorf("has(%q) should be true", n)
 		}
 	}
-	if authStore.has("bob") {
+	if authStore.svc.Registered("bob") {
 		t.Error("has(bob) should be false")
 	}
 }
 
-// TestDBCredStore verifies the production path: register/login credentials
-// land in (and read back from) the players.password_hash column. Skipped when
-// no database is reachable.
-func TestDBCredStore(t *testing.T) {
-	ctx := context.Background()
-	d, err := db.Connect(ctx, db.ConfigFromEnv())
-	if err != nil {
-		t.Skipf("postgres unavailable: %v", err)
-	}
-	t.Cleanup(d.Close)
-	if err := store.Migrate(db.ConfigFromEnv().DSN()); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	st := store.New(d.Pool)
-	cs := dbCredStore{players: st.Players}
-
-	name := "DBAuthUser"
-	uuid := protocol.OfflineUUID(name)
-	if _, err := d.Pool.Exec(ctx, `DELETE FROM players WHERE uuid = $1::uuid`, uuid); err != nil {
-		t.Fatal(err)
-	}
-
-	// No credential before register.
-	if _, ok, err := cs.hash(ctx, uuid, name); err != nil || ok {
-		t.Fatalf("fresh lookup: ok=%v err=%v", ok, err)
-	}
-	// Register stores the hash...
-	hash, _ := bcryptHash("pw")
-	if err := cs.set(ctx, uuid, name, hash); err != nil {
-		t.Fatal(err)
-	}
-	// ...login reads it back...
-	got, ok, err := cs.hash(ctx, uuid, name)
-	if err != nil || !ok || got != hash {
-		t.Fatalf("round trip: got=%q ok=%v err=%v", got, ok, err)
-	}
-	// ...and it really lives in the players table.
-	p, err := st.Players.GetByUUID(ctx, uuid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if h, ok, _ := st.Players.PasswordHash(ctx, p.ID); !ok || h != hash {
-		t.Errorf("password_hash not persisted on players row: ok=%v", ok)
-	}
-}
-
-// TestCredStoreRoundTrip: a hash written via set reads back via hash through
+// TestCredStoreRoundTrip: a hash written via Set reads back via Hash through
 // the plugin's credential store (the in-memory backend used without a DB).
 func TestCredStoreRoundTrip(t *testing.T) {
 	withAuth(t, New())
-	hash, _ := bcryptHash("diskpass")
+	hash, _ := auth.HashPassword("diskpass")
 	ctx := context.Background()
 	uuid := protocol.OfflineUUID("dan")
-	if err := authStore.creds.set(ctx, uuid, "dan", hash); err != nil {
+	if err := authStore.svc.Creds.Set(ctx, uuid, "dan", hash); err != nil {
 		t.Fatal(err)
 	}
-	got, ok, err := authStore.creds.hash(ctx, uuid, "dan")
+	got, ok, err := authStore.svc.Creds.Hash(ctx, uuid, "dan")
 	if err != nil || !ok || got != hash {
 		t.Fatalf("round trip failed: got=%q ok=%v err=%v", got, ok, err)
 	}
@@ -186,7 +123,7 @@ func TestRegisterMovesPlayerToHub(t *testing.T) {
 	}, "alice to land in hub")
 
 	// Credential should be persisted in the store.
-	if !authStore.has("alice") {
+	if !authStore.svc.Registered("alice") {
 		t.Error("alice missing from credential store after register")
 	}
 }
@@ -219,7 +156,7 @@ func TestLoginAfterPriorRegister(t *testing.T) {
 	completeOfflineLogin(t, c1, "carol")
 	c1.startDiscardDrain()
 	c1.write(t, packetid.SbPlayChatCommand, protocol.WriteString("register mypass mypass"))
-	waitFor(t, 2*time.Second, func() bool { return authStore.has("carol") },
+	waitFor(t, 2*time.Second, func() bool { return authStore.svc.Registered("carol") },
 		"carol registered")
 
 	_ = c1.conn.Close()
@@ -313,11 +250,11 @@ func TestIPBannedAfterMaxAttempts(t *testing.T) {
 	withAuth(t, s)
 
 	// Seed a registered account so /login attempts can be made.
-	hash, err := bcryptHash("correctpass")
+	hash, err := auth.HashPassword("correctpass")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := authStore.creds.set(context.Background(), protocol.OfflineUUID("target"), "target", hash); err != nil {
+	if err := authStore.svc.Creds.Set(context.Background(), protocol.OfflineUUID("target"), "target", hash); err != nil {
 		t.Fatal(err)
 	}
 
@@ -349,11 +286,11 @@ func TestSuccessfulLoginClearsFailCounter(t *testing.T) {
 	s := New()
 	withAuth(t, s)
 
-	hash, err := bcryptHash("correct")
+	hash, err := auth.HashPassword("correct")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := authStore.creds.set(context.Background(), protocol.OfflineUUID("jane"), "jane", hash); err != nil {
+	if err := authStore.svc.Creds.Set(context.Background(), protocol.OfflineUUID("jane"), "jane", hash); err != nil {
 		t.Fatal(err)
 	}
 
@@ -369,9 +306,7 @@ func TestSuccessfulLoginClearsFailCounter(t *testing.T) {
 		"jane to log in")
 
 	// Fail counter should be cleared.
-	authStore.ipMu.Lock()
-	count := authStore.ipFails[clientIP(cli.conn.RemoteAddr())]
-	authStore.ipMu.Unlock()
+	count := authStore.svc.IPs.Fails(clientIP(cli.conn.RemoteAddr()))
 	if count != 0 {
 		t.Errorf("fail counter not cleared after success: got %d", count)
 	}

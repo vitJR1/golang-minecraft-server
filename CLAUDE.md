@@ -84,6 +84,13 @@ server/inventory/
                simulation (View/Drag/Claim). No connection knowledge.
 server/botnav/ Bot physics (vanilla player movement over a BlockAt) and
                A* pathfinding (walk/bridge/stair/leap steps).
+server/auth/    Offline-mode auth logic: bcrypt (HashPassword), Credentials
+               (DBCredentials over store.PlayerRepo / MemCredentials),
+               IPGuard (wrong-password counter + IP bans in
+               <auth>.ipbans.json, name→last IP), Service (Register /
+               Verify / Registered). The connection side — auth instance,
+               /register /login /banip /unbanip, timeout kick, XP-bar
+               countdown — stays in server/auth.go.
 server/enderchest/
                Ender chest persistence: Store interface, FileStore,
                Encode/Decode of the 27 slots.
@@ -110,7 +117,7 @@ dependency** — accounts and auth password hashes live there; a failed connect
 or migration aborts startup — and bans go to the `bans` table via
 `store.BanStore` (a leftover `banlist.json` is imported once by
 `importBanlist` and renamed `*.imported`). Under `memory` nothing connects: `Server.Store`/`DB` stay
-nil, auth falls back to `memCredStore` (passwords lost on restart), match
+nil, auth falls back to `auth.MemCredentials` (passwords lost on restart), match
 history/ratings aren't recorded, bans use `ban.FileStore` on
 `BANLIST_FILE` (default `banlist.json`; `off` = RAM only) and ender chests
 use `enderchest.FileStore` on `ENDERCHEST_FILE` (`enderchests.json`). Redis is

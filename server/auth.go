@@ -2,29 +2,18 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"minecraft-server/cfg"
-	"minecraft-server/protocol"
-	"minecraft-server/server/moderation"
-	"minecraft-server/store"
-	"minecraft-server/world"
 	"net"
-	"os"
 	"strings"
-	"sync"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
+	"minecraft-server/cfg"
+	"minecraft-server/server/auth"
+	"minecraft-server/server/moderation"
+	"minecraft-server/world"
 )
-
-// bcryptCost mirrors the vanilla server's bcrypt cost — 10 yields
-// ~100ms per hash on a modern laptop, comfortable for a register/login
-// gate that fires at most once per connection. Bump to 12 if you ever
-// care about offline brute-force resistance more than register latency.
-const bcryptCost = 10
 
 // Auth plugin: AuthMe-style first-time registration + per-connection
 // login for offline-mode servers. Online mode already verifies player
@@ -48,98 +37,22 @@ const bcryptCost = 10
 //	   chunks).
 //
 // Storage: password hashes (bcrypt) live in Postgres — the players table's
-// password_hash column, via the store package (see credStore / dbCredStore).
-// When no database is configured the plugin falls back to an in-memory store
-// (non-persistent; also what the tests use). IP bans are still a JSON sidecar
-// file (bansPath) — they're operational state, not user data.
+// password_hash column (auth.DBCredentials). When no database is configured
+// the plugin falls back to an in-memory store (auth.MemCredentials,
+// non-persistent; also what the tests use). IP bans are a JSON sidecar file
+// (auth.IPGuard, <path>.ipbans.json) — they're operational state, not user
+// data. This file is the connection side; the logic is in server/auth.
 
 // authStore is the single live plugin instance. nil = auth disabled
 // (default). Set by EnableAuth.
 var authStore *authPlugin
 
 type authPlugin struct {
-	path     string
-	bansPath string // sibling of path: derived as <path>.ipbans.json
-	srv      *Server
-
-	// creds is where password hashes are read/written: Postgres in
-	// production, in-memory otherwise.
-	creds credStore
-
-	// IP failure tracking. ipFails counts consecutive wrong-password
-	// attempts since the last success; cleared on successful login. ipBans
-	// holds the un-ban time per IP — read at every new connection's
-	// login handler, written when ipFails crosses cfg.AuthMaxAttempts.
-	//
-	// ipBans is persisted to bansPath; ipFails is in-memory only (fail
-	// counts naturally reset on restart, which is the right behaviour —
-	// a flaky network shouldn't accumulate ban credit across hours).
-	ipMu    sync.Mutex
-	ipFails map[string]int
-	ipBans  map[string]time.Time
-
-	// lastSeenIP maps lower-cased player name → IP address from the
-	// most recent successful login. Lets /banip and /unbanip take a
-	// nickname, not just an IP. Not persisted — server restart loses
-	// this map; admins falls back to passing the literal IP if needed.
-	lastSeenIP map[string]string
-}
-
-// credStore is where /register and /login persist bcrypt password hashes.
-// uuid is the stable per-player key (the offline-mode UUID, which is also the
-// players.uuid column); name is carried so the DB impl can populate / refresh
-// the players.username column. The production impl writes to the players
-// table; the in-memory impl backs tests and the no-database fallback.
-type credStore interface {
-	// hash returns the player's stored bcrypt hash and whether one exists.
-	hash(ctx context.Context, uuid, name string) (string, bool, error)
-	// set stores hash for the player, creating the player record if needed.
-	set(ctx context.Context, uuid, name, hash string) error
-}
-
-// dbCredStore keeps credentials in the players table (password_hash column).
-type dbCredStore struct{ players *store.PlayerRepo }
-
-func (d dbCredStore) hash(ctx context.Context, uuid, _ string) (string, bool, error) {
-	p, err := d.players.GetByUUID(ctx, uuid)
-	if errors.Is(err, store.ErrNotFound) {
-		return "", false, nil
-	}
-	if err != nil {
-		return "", false, err
-	}
-	return d.players.PasswordHash(ctx, p.ID)
-}
-
-func (d dbCredStore) set(ctx context.Context, uuid, name, hash string) error {
-	p, err := d.players.Upsert(ctx, uuid, name)
-	if err != nil {
-		return err
-	}
-	return d.players.SetPassword(ctx, p.ID, hash)
-}
-
-// memCredStore is the non-persistent fallback used when no database is
-// configured (and by the unit tests). Keyed by lower-cased name.
-type memCredStore struct {
-	mu sync.RWMutex
-	m  map[string]string
-}
-
-func newMemCredStore() *memCredStore { return &memCredStore{m: map[string]string{}} }
-
-func (s *memCredStore) hash(_ context.Context, _, name string) (string, bool, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	h, ok := s.m[strings.ToLower(name)]
-	return h, ok, nil
-}
-
-func (s *memCredStore) set(_ context.Context, _, name, hash string) error {
-	s.mu.Lock()
-	s.m[strings.ToLower(name)] = hash
-	s.mu.Unlock()
-	return nil
+	path string
+	srv  *Server
+	// svc holds the credentials (Postgres in production, in-memory
+	// otherwise) and the per-IP fail counter / bans.
+	svc *auth.Service
 }
 
 // EnableAuth installs the offline-mode auth gate: creates the dedicated
@@ -150,12 +63,9 @@ func (s *memCredStore) set(_ context.Context, _, name, hash string) error {
 // player will be prompted to /register.
 func EnableAuth(s *Server, path string) {
 	p := &authPlugin{
-		path:       path,
-		bansPath:   path + ".ipbans.json",
-		srv:        s,
-		ipFails:    map[string]int{},
-		ipBans:     map[string]time.Time{},
-		lastSeenIP: map[string]string{},
+		path: path,
+		srv:  s,
+		svc:  &auth.Service{IPs: auth.NewIPGuard(path + ".ipbans.json")},
 	}
 
 	// Credentials live in Postgres when the store is up; otherwise fall back
@@ -163,14 +73,14 @@ func EnableAuth(s *Server, path string) {
 	// without a database, and in tests).
 	credBackend := "postgres"
 	if s.Store != nil {
-		p.creds = dbCredStore{players: s.Store.Players}
+		p.svc.Creds = auth.DBCredentials{Players: s.Store.Players}
 	} else {
-		p.creds = newMemCredStore()
+		p.svc.Creds = auth.NewMemCredentials()
 		credBackend = "memory"
 	}
 
-	if err := p.loadBans(); err != nil {
-		slog.Warn("auth: failed to load IP bans", "path", p.bansPath, "err", err)
+	if err := p.svc.IPs.Load(); err != nil {
+		slog.Warn("auth: failed to load IP bans", "path", p.svc.IPs.Path(), "err", err)
 	}
 	authStore = p
 
@@ -254,9 +164,11 @@ func promptAuth(c *ClientConnection) {
 	if authStore == nil {
 		return
 	}
-	authStore.rememberIP(c)
+	if c.conn != nil {
+		authStore.svc.IPs.Remember(c.playerName, clientIP(c.conn.RemoteAddr()))
+	}
 	c.authed.Store(false)
-	if authStore.has(c.playerName) {
+	if authStore.svc.Registered(c.playerName) {
 		_ = c.sendSystemMessage("Welcome back. Please /login <password>")
 	} else {
 		_ = c.sendSystemMessage("First visit — please /register <password> <password>")
@@ -342,59 +254,7 @@ func pushCountdownClear(c *ClientConnection) {
 // currently banned for failed auth attempts, otherwise (zero, true).
 // Used by handler_login at the start of the login flow.
 func (p *authPlugin) CheckIPAllowed(addr net.Addr) (time.Time, bool) {
-	ip := clientIP(addr)
-	if ip == "" {
-		return time.Time{}, true
-	}
-	p.ipMu.Lock()
-	defer p.ipMu.Unlock()
-	until, banned := p.ipBans[ip]
-	if !banned {
-		return time.Time{}, true
-	}
-	if time.Now().After(until) {
-		delete(p.ipBans, ip)
-		delete(p.ipFails, ip)
-		return time.Time{}, true
-	}
-	return until, false
-}
-
-// recordFail bumps the per-IP wrong-password counter and, if it crosses
-// cfg.AuthMaxAttempts, installs an IP ban for cfg.AuthBanDuration.
-// Returns true if the ban just engaged on this call. When that happens,
-// the updated ban list is also flushed to disk (best-effort — a save
-// failure is logged but doesn't prevent the in-memory ban).
-func (p *authPlugin) recordFail(addr net.Addr) bool {
-	ip := clientIP(addr)
-	if ip == "" {
-		return false
-	}
-	p.ipMu.Lock()
-	p.ipFails[ip]++
-	banned := p.ipFails[ip] >= cfg.AuthMaxAttempts()
-	if banned {
-		p.ipBans[ip] = time.Now().Add(cfg.AuthBanDuration())
-	}
-	p.ipMu.Unlock()
-	if banned {
-		if err := p.saveBans(); err != nil {
-			slog.Warn("auth: ipbans save failed",
-				"path", p.bansPath, "err", err)
-		}
-	}
-	return banned
-}
-
-// clearFails wipes the IP's failure counter after a successful login.
-func (p *authPlugin) clearFails(addr net.Addr) {
-	ip := clientIP(addr)
-	if ip == "" {
-		return
-	}
-	p.ipMu.Lock()
-	delete(p.ipFails, ip)
-	p.ipMu.Unlock()
+	return p.svc.IPs.Allowed(clientIP(addr))
 }
 
 // clientIP extracts the IP portion of a net.Addr. Works for *net.TCPAddr
@@ -408,126 +268,6 @@ func clientIP(addr net.Addr) string {
 		return ""
 	}
 	return addr.String()
-}
-
-// has reports whether playerName has a stored password. Resolves the player's
-// offline-mode UUID from the name (auth is offline-mode only) to key the
-// lookup. A storage error is treated as "no account" — the player is asked to
-// register, and the real error surfaces (and is logged) on the actual attempt.
-func (p *authPlugin) has(name string) bool {
-	_, ok, err := p.creds.hash(context.Background(), protocol.OfflineUUID(name), name)
-	return err == nil && ok
-}
-
-// bcryptHash wraps bcrypt.GenerateFromPassword and returns the result as
-// a string ready for storage. Errors propagate so the caller can show a
-// meaningful message — generation only fails on bogus cost values, which
-// shouldn't happen with our hardcoded const.
-func bcryptHash(password string) (string, error) {
-	b, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
-}
-
-// loadBans hydrates ipBans from bansPath. Expired entries are dropped on
-// load so a server that's been off for hours doesn't keep stale bans.
-// Missing file is fine — fresh install starts with no bans.
-func (p *authPlugin) loadBans() error {
-	data, err := os.ReadFile(p.bansPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return fmt.Errorf("read %s: %w", p.bansPath, err)
-	}
-	var loaded map[string]time.Time
-	if err := json.Unmarshal(data, &loaded); err != nil {
-		return fmt.Errorf("parse %s: %w", p.bansPath, err)
-	}
-	now := time.Now()
-	live := make(map[string]time.Time, len(loaded))
-	for ip, until := range loaded {
-		if until.After(now) {
-			live[ip] = until
-		}
-	}
-	p.ipMu.Lock()
-	p.ipBans = live
-	p.ipMu.Unlock()
-	return nil
-}
-
-// saveBans atomically writes the current IP-ban map to disk. Called
-// after every newly-engaged ban from recordFail.
-func (p *authPlugin) saveBans() error {
-	p.ipMu.Lock()
-	// Snapshot under the lock so concurrent writes can't tear the map.
-	snap := make(map[string]time.Time, len(p.ipBans))
-	for ip, until := range p.ipBans {
-		snap[ip] = until
-	}
-	p.ipMu.Unlock()
-
-	data, err := json.MarshalIndent(snap, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
-	}
-	tmp := p.bansPath + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return fmt.Errorf("write temp: %w", err)
-	}
-	return os.Rename(tmp, p.bansPath)
-}
-
-// rememberIP records the player's IP under their lower-cased name so a
-// later /banip or /unbanip targeting that name can find the IP. Called
-// from promptAuth on every login.
-func (p *authPlugin) rememberIP(c *ClientConnection) {
-	if c == nil || c.conn == nil {
-		return
-	}
-	ip := clientIP(c.conn.RemoteAddr())
-	if ip == "" {
-		return
-	}
-	p.ipMu.Lock()
-	p.lastSeenIP[strings.ToLower(c.playerName)] = ip
-	p.ipMu.Unlock()
-}
-
-// resolveIPArg turns a /banip /unbanip argument into an IP. Try as a
-// player nickname first via lastSeenIP — that's the documented UX. If
-// the argument doesn't match any known name, fall back to treating it
-// as a literal IP (so admins can ban an address they pulled from logs
-// even if no player ever joined from it).
-func (p *authPlugin) resolveIPArg(arg string) string {
-	p.ipMu.Lock()
-	ip, ok := p.lastSeenIP[strings.ToLower(arg)]
-	p.ipMu.Unlock()
-	if ok {
-		return ip
-	}
-	return arg
-}
-
-// BanIP adds a manual IP ban with the given duration and re-saves the
-// bans file. duration ≤ 0 is treated as "use cfg.AuthBanDuration".
-// Returns the absolute time the ban lifts.
-func (p *authPlugin) BanIP(ip string, duration time.Duration) time.Time {
-	if duration <= 0 {
-		duration = cfg.AuthBanDuration()
-	}
-	until := time.Now().Add(duration)
-	p.ipMu.Lock()
-	p.ipBans[ip] = until
-	p.ipMu.Unlock()
-	if err := p.saveBans(); err != nil {
-		slog.Warn("auth: ipbans save after manual ban failed",
-			"path", p.bansPath, "err", err)
-	}
-	return until
 }
 
 // cmdAuthBanIP — /banip <name|ip> [duration]. Op-only. Resolves a
@@ -547,7 +287,7 @@ func cmdAuthBanIP(c *ClientConnection, args []string) {
 		_ = c.sendSystemMessage("Usage: /banip <player|ip> [duration]")
 		return
 	}
-	ip := authStore.resolveIPArg(arg)
+	ip := authStore.svc.IPs.Resolve(arg)
 	duration := cfg.AuthBanDuration()
 	if len(args) == 2 {
 		d, err := moderation.ParseShortDuration(args[1])
@@ -557,7 +297,10 @@ func cmdAuthBanIP(c *ClientConnection, args []string) {
 		}
 		duration = d
 	}
-	until := authStore.BanIP(ip, duration)
+	if duration <= 0 {
+		duration = cfg.AuthBanDuration()
+	}
+	until := authStore.svc.IPs.Ban(ip, duration)
 	label := arg
 	if ip != arg {
 		label = arg + " (" + ip + ")"
@@ -576,26 +319,6 @@ func cmdAuthBanIP(c *ClientConnection, args []string) {
 	}
 }
 
-// UnbanIP removes the auth-plugin IP ban + resets the fail counter for
-// that IP, then re-saves the bans file. Exposed for /unbanip and for
-// admin tooling. Returns true if the IP was banned (or had fails)
-// before this call, false if it was already clean.
-func (p *authPlugin) UnbanIP(ip string) bool {
-	p.ipMu.Lock()
-	_, wasBanned := p.ipBans[ip]
-	_, hadFails := p.ipFails[ip]
-	delete(p.ipBans, ip)
-	delete(p.ipFails, ip)
-	p.ipMu.Unlock()
-	if wasBanned {
-		if err := p.saveBans(); err != nil {
-			slog.Warn("auth: ipbans save after unban failed",
-				"path", p.bansPath, "err", err)
-		}
-	}
-	return wasBanned || hadFails
-}
-
 // cmdAuthUnbanIP — /unbanip <name|ip>. Op-only; clears the in-memory
 // state AND rewrites auth.json.ipbans.json. Player nickname resolves
 // to their last-seen IP if known; otherwise the arg is treated as a
@@ -610,12 +333,12 @@ func cmdAuthUnbanIP(c *ClientConnection, args []string) {
 		return
 	}
 	arg := strings.TrimSpace(args[0])
-	ip := authStore.resolveIPArg(arg)
+	ip := authStore.svc.IPs.Resolve(arg)
 	label := arg
 	if ip != arg {
 		label = arg + " (" + ip + ")"
 	}
-	if authStore.UnbanIP(ip) {
+	if authStore.svc.IPs.Unban(ip) {
 		_ = c.sendSystemMessage("Cleared auth ban + fail counter for " + label)
 		slog.Info("auth: unbanned IP", "arg", arg, "ip", ip, "by", c.playerName)
 	} else {
@@ -658,31 +381,22 @@ func cmdAuthRegister(c *ClientConnection, args []string) {
 		_ = c.sendSystemMessage("Passwords don't match — try again.")
 		return
 	}
-	if len(args[0]) < 4 {
-		_ = c.sendSystemMessage("Password too short (min 4 chars).")
-		return
-	}
-	uuid := protocol.OfflineUUID(c.playerName)
-	if authStore.has(c.playerName) {
-		_ = c.sendSystemMessage("Name already registered — use /login <password>.")
-		return
-	}
-
-	hash, err := bcryptHash(args[0])
-	if err != nil {
-		_ = c.sendSystemMessage("Internal error hashing password.")
-		slog.Error("auth: bcrypt failed", "err", err)
-		return
-	}
-	if err := authStore.creds.set(context.Background(), uuid, c.playerName, hash); err != nil {
-		slog.Error("auth: credential save failed", "player", c.playerName, "err", err)
-		_ = c.sendSystemMessage("Couldn't save credentials — try /register again.")
+	if err := authStore.svc.Register(context.Background(), c.playerName, args[0]); err != nil {
+		switch {
+		case errors.Is(err, auth.ErrTooShort):
+			_ = c.sendSystemMessage(fmt.Sprintf("Password too short (min %d chars).", auth.MinPasswordLen))
+		case errors.Is(err, auth.ErrRegistered):
+			_ = c.sendSystemMessage("Name already registered — use /login <password>.")
+		default:
+			slog.Error("auth: register failed", "player", c.playerName, "err", err)
+			_ = c.sendSystemMessage("Couldn't save credentials — try /register again.")
+		}
 		return
 	}
 
 	c.authed.Store(true)
 	pushCountdownClear(c)
-	authStore.clearFails(c.conn.RemoteAddr())
+	authStore.svc.IPs.ClearFails(clientIP(c.conn.RemoteAddr()))
 	_ = c.sendSystemMessage("Registered. Welcome aboard.")
 	slog.Info("auth: registered", "player", c.playerName)
 	teleportToHub(c)
@@ -705,21 +419,13 @@ func cmdAuthLogin(c *ClientConnection, args []string) {
 		return
 	}
 
-	uuid := protocol.OfflineUUID(c.playerName)
-	hash, ok, err := authStore.creds.hash(context.Background(), uuid, c.playerName)
-	if err != nil {
-		slog.Error("auth: credential lookup failed", "player", c.playerName, "err", err)
-		_ = c.sendSystemMessage("Auth storage unavailable — try again shortly.")
-		return
-	}
-	if !ok {
+	switch err := authStore.svc.Verify(context.Background(), c.playerName, args[0]); {
+	case errors.Is(err, auth.ErrNoAccount):
 		_ = c.sendSystemMessage("No account — use /register <password> <password>.")
 		return
-	}
-
-	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(args[0])) != nil {
+	case errors.Is(err, auth.ErrWrongPassword):
 		addr := c.conn.RemoteAddr()
-		banned := authStore.recordFail(addr)
+		banned := authStore.svc.IPs.RecordFail(clientIP(addr), cfg.AuthMaxAttempts(), cfg.AuthBanDuration())
 		if banned {
 			slog.Warn("auth: IP banned for repeated failures",
 				"player", c.playerName, "ip", clientIP(addr),
@@ -732,11 +438,15 @@ func cmdAuthLogin(c *ClientConnection, args []string) {
 		_ = c.sendSystemMessage("Wrong password.")
 		slog.Info("auth: bad password", "player", c.playerName)
 		return
+	case err != nil:
+		slog.Error("auth: credential lookup failed", "player", c.playerName, "err", err)
+		_ = c.sendSystemMessage("Auth storage unavailable — try again shortly.")
+		return
 	}
 
 	c.authed.Store(true)
 	pushCountdownClear(c)
-	authStore.clearFails(c.conn.RemoteAddr())
+	authStore.svc.IPs.ClearFails(clientIP(c.conn.RemoteAddr()))
 	_ = c.sendSystemMessage("Logged in. Welcome to the hub.")
 	slog.Info("auth: login ok", "player", c.playerName)
 	teleportToHub(c)
