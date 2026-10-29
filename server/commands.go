@@ -9,6 +9,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/moderation"
 	"minecraft-server/templates"
 	"minecraft-server/world"
 	"path/filepath"
@@ -780,7 +781,7 @@ func cmdBan(c *ClientConnection, args []string) {
 		return
 	}
 	target := args[0]
-	dur, err := ParseShortDuration(args[1])
+	dur, err := moderation.ParseShortDuration(args[1])
 	if err != nil {
 		_ = c.sendSystemMessage("Bad duration: " + err.Error())
 		return
@@ -859,7 +860,7 @@ func cmdMute(c *ClientConnection, args []string) {
 		return
 	}
 	target := args[0]
-	dur, err := ParseShortDuration(args[1])
+	dur, err := moderation.ParseShortDuration(args[1])
 	if err != nil {
 		_ = c.sendSystemMessage("Bad duration: " + err.Error())
 		return

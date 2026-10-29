@@ -15,6 +15,7 @@ import (
 	"minecraft-server/redisc"
 	"minecraft-server/schem"
 	"minecraft-server/server"
+	"minecraft-server/server/favicon"
 	"minecraft-server/store"
 	"minecraft-server/templates"
 	"net"
@@ -57,7 +58,7 @@ func main() {
 	srv.AnticheatEnforce = strings.EqualFold(getEnv("ANTICHEAT", "log"), "enforce")
 	slog.Info("anticheat", "enforce", srv.AnticheatEnforce)
 	srv.ChatModerator = bots.NewNosleeperBot(srv)
-	server.LoadFavicon(server.DefaultFaviconPath)
+	favicon.Load(favicon.DefaultPath)
 	connectStores(srv) // STORAGE=postgres|memory picks the backends
 	// Auth plugin install gated by cfg.AuthEnabled (defaulted from
 	// ONLINE_MODE in loadEnv, overridable via AUTH_ENABLED env).

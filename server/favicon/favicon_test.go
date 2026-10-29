@@ -1,4 +1,4 @@
-package server
+package favicon
 
 import (
 	"bytes"
@@ -36,9 +36,9 @@ func TestLoadFaviconEncodes(t *testing.T) {
 	if err := os.WriteFile(path, want, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	LoadFavicon(path)
+	Load(path)
 
-	got := currentFavicon()
+	got := Current()
 	if got == "" {
 		t.Fatal("favicon not loaded")
 	}
@@ -63,8 +63,8 @@ func TestLoadFaviconWrongSize(t *testing.T) {
 	if err := os.WriteFile(path, makePNG(t, 1024, 1024), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	LoadFavicon(path)
-	if got := currentFavicon(); got != "" {
+	Load(path)
+	if got := Current(); got != "" {
 		t.Errorf("oversized icon should be rejected, got %q", got[:30])
 	}
 }
@@ -72,8 +72,8 @@ func TestLoadFaviconWrongSize(t *testing.T) {
 func TestLoadFaviconMissing(t *testing.T) {
 	t.Cleanup(func() { favicon.Store(nil) })
 
-	LoadFavicon(filepath.Join(t.TempDir(), "does-not-exist.png"))
-	if got := currentFavicon(); got != "" {
+	Load(filepath.Join(t.TempDir(), "does-not-exist.png"))
+	if got := Current(); got != "" {
 		t.Errorf("missing file should leave favicon empty, got %q", got[:30])
 	}
 }
@@ -85,8 +85,8 @@ func TestLoadFaviconEmptyFile(t *testing.T) {
 	if err := os.WriteFile(path, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	LoadFavicon(path)
-	if got := currentFavicon(); got != "" {
+	Load(path)
+	if got := Current(); got != "" {
 		t.Errorf("empty file should leave favicon empty, got %q", got[:30])
 	}
 }

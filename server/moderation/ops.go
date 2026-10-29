@@ -1,4 +1,5 @@
-package server
+// Package moderation holds the in-memory operator and mute sets.
+package moderation
 
 import "sync"
 

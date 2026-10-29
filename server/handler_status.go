@@ -8,6 +8,7 @@ import (
 	"minecraft-server/cfg"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/favicon"
 	"strings"
 	"unicode/utf8"
 )
@@ -122,7 +123,7 @@ func (c *ClientConnection) handleStatus(packet *bytes.Buffer, packetID int) erro
 		// Favicon is optional — included only if LoadFavicon found a PNG
 		// at startup. The "data:image/png;base64,…" prefix is part of
 		// the wire format (vanilla expects exactly that scheme).
-		if icon := currentFavicon(); icon != "" {
+		if icon := favicon.Current(); icon != "" {
 			resp["favicon"] = icon
 		}
 		data, _ := json.Marshal(resp)

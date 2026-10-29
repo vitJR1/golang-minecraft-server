@@ -1,4 +1,6 @@
-package server
+// Package connlimit caps pre-login connections: total, per IP and new
+// connections per IP per window.
+package connlimit
 
 import (
 	"minecraft-server/cfg"
@@ -10,19 +12,19 @@ import (
 // many NEW connections per IP are admitted within one window.
 const connRateWindow = 10 * time.Second
 
-// connSweepInterval is how often acquire opportunistically prunes idle IP
+// connSweepInterval is how often Acquire opportunistically prunes idle IP
 // entries (no active connections, rate window expired) so the map doesn't
 // grow with every IP that ever pinged the server.
 const connSweepInterval = time.Minute
 
-// connLimiter enforces the pre-login connection caps: total connections,
+// Limiter enforces the pre-login connection caps: total connections,
 // concurrent connections per IP, and new-connection rate per IP. It sits in
 // front of everything (status pings included) — the point is bounding the
 // sockets and goroutines a flood can create, before any protocol work.
 //
 // Limits are read from cfg at check time (cfg values are set once at
 // startup; tests adjust them per-case). Zero disables the respective limit.
-type connLimiter struct {
+type Limiter struct {
 	mu        sync.Mutex
 	now       func() time.Time // injectable clock for tests
 	total     int
@@ -38,17 +40,17 @@ type ipConnState struct {
 	windowCount int
 }
 
-func newConnLimiter() *connLimiter {
-	return &connLimiter{
+func New() *Limiter {
+	return &Limiter{
 		now:   time.Now,
 		perIP: make(map[string]*ipConnState),
 	}
 }
 
-// acquire admits or rejects a new connection from ip. On admit it returns a
+// Acquire admits or rejects a new connection from ip. On admit it returns a
 // release func (call exactly once, when the connection is done) and "".
 // On reject it returns nil and a short reason for the log line.
-func (l *connLimiter) acquire(ip string) (release func(), reason string) {
+func (l *Limiter) Acquire(ip string) (release func(), reason string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -91,7 +93,7 @@ func (l *connLimiter) acquire(ip string) (release func(), reason string) {
 }
 
 // maybeSweep drops idle, window-expired IP entries. Called under l.mu.
-func (l *connLimiter) maybeSweep(now time.Time) {
+func (l *Limiter) maybeSweep(now time.Time) {
 	if now.Sub(l.lastSweep) < connSweepInterval {
 		return
 	}

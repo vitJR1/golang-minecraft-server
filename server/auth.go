@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"minecraft-server/cfg"
 	"minecraft-server/protocol"
+	"minecraft-server/server/moderation"
 	"minecraft-server/store"
 	"minecraft-server/world"
 	"net"
@@ -549,7 +550,7 @@ func cmdAuthBanIP(c *ClientConnection, args []string) {
 	ip := authStore.resolveIPArg(arg)
 	duration := cfg.AuthBanDuration()
 	if len(args) == 2 {
-		d, err := ParseShortDuration(args[1])
+		d, err := moderation.ParseShortDuration(args[1])
 		if err != nil {
 			_ = c.sendSystemMessage("Bad duration: " + err.Error())
 			return

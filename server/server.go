@@ -15,6 +15,8 @@ import (
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/redisc"
+	"minecraft-server/server/connlimit"
+	"minecraft-server/server/moderation"
 	"minecraft-server/store"
 	"minecraft-server/templates"
 	"minecraft-server/world"
@@ -62,8 +64,8 @@ type Server struct {
 	// EnableAuth. Players move to Hub via MovePlayer once /register or
 	// /login succeeds.
 	Auth       *Instance
-	Ops        *OpSet
-	Mutes      *MuteSet
+	Ops        *moderation.OpSet
+	Mutes      *moderation.MuteSet
 	Matchmaker *Matchmaker
 	// ChatModerator, when non-nil, gets a chance to inspect every chat
 	// line before it broadcasts. See chat_moderation.go for the contract.
@@ -138,7 +140,7 @@ type Server struct {
 
 	// connLimit gates every accepted socket (per-IP caps + global cap)
 	// before any protocol work happens. See conn_limit.go.
-	connLimit *connLimiter
+	connLimit *connlimit.Limiter
 
 	// janitorStop terminates the empty-instance sweep loop (janitor.go).
 	janitorStop     chan struct{}
@@ -161,15 +163,15 @@ func (s *Server) nextInstanceSerial() uint64 {
 // from cfg.InitialOps.
 func New() *Server {
 	s := &Server{
-		Ops:          NewOpSet(cfg.InitialOps),
-		Mutes:        NewMuteSet(),
+		Ops:          moderation.NewOpSet(cfg.InitialOps),
+		Mutes:        moderation.NewMuteSet(),
 		Bans:         ban.NewMemoryStore(),
 		AnticheatLog: anticheat.NewMemoryStore(),
 		instances:    make(map[string]*Instance),
 		templates:    make(map[string]*world.Template),
 		arenas:       make(map[string]string),
 		TemplateDir:  templates.Root,
-		connLimit:    newConnLimiter(),
+		connLimit:    connlimit.New(),
 		janitorStop:  make(chan struct{}),
 		startTime:    time.Now(),
 	}
@@ -509,7 +511,7 @@ func (s *Server) HandleConn(conn net.Conn) {
 	// Connection-flood gate: reject before allocating any per-connection
 	// state or goroutines. A rejected socket is closed silently — at this
 	// point we don't even know the protocol state to say goodbye in.
-	release, reason := s.connLimit.acquire(clientIP(conn.RemoteAddr()))
+	release, reason := s.connLimit.Acquire(clientIP(conn.RemoteAddr()))
 	if release == nil {
 		s.connsRejected.Add(1)
 		slog.Warn("connection rejected",
