@@ -647,7 +647,7 @@ func (b *bot) breakTarget(now uint64, t world.Position) physInput {
 			if b.blast(now, pos) {
 				return physInput{}
 			}
-			br.hardCover = info.Tool
+			br.hardCover, br.hardBlock = info.Tool, blk
 			if b.wantWare(c.countItemName(br.plan.BlockItem)) != nil {
 				return physInput{} // the shop, next tick
 			}

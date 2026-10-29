@@ -256,8 +256,8 @@ func (b *bot) wishList(now uint64) [][]game.BotWare {
 	if br.hardCover != world.NoTool {
 		tool := kind(wareKindFor(br.hardCover))
 		var tnt []game.BotWare
-		if c.countItemName(itemTNT) == 0 {
-			tnt = kind(game.WareTNT)
+		if c.countItemName(itemTNT) == 0 && (br.hardBlock == world.Air || tntBreaks(br.hardBlock)) {
+			tnt = kind(game.WareTNT) // not against obsidian: TNT doesn't scratch it
 		}
 		if b.style.prefersTNT {
 			add(tnt)
@@ -415,7 +415,7 @@ func (b *bot) saving(now uint64) bool {
 // the bot has none, the game doesn't light placed TNT, or there's no spot.
 func (b *bot) blast(now uint64, cover world.Position) bool {
 	c, br := b.c, &b.brain
-	if c.countItemName(itemTNT) == 0 || !c.instance.TNTAutoPrime() {
+	if c.countItemName(itemTNT) == 0 || !c.instance.TNTAutoPrime() || !tntBreaks(c.instance.World.GetBlock(cover)) {
 		return false
 	}
 	at := c.instance.World.GetBlock
@@ -441,6 +441,15 @@ func (b *bot) blast(now uint64, cover world.Position) bool {
 	br.dig, br.route = nil, nil
 	br.fleeFrom, br.fleeUntil = spot, now+botTNTFlee
 	return true
+}
+
+// tntBreaks reports whether a TNT going off right against blk can break it.
+// The blast (tnt.go) sends rays of up to power×1.3 that lose
+// (resistance+0.3)×0.3 per step through a block: a block resisting more
+// than that at the first step — obsidian (1200), not end stone (9) — is
+// immune however close the TNT lies.
+func tntBreaks(blk world.Block) bool {
+	return (world.BlastResistance(blk.Name)+0.3)*0.3 < tntPower*1.3
 }
 
 // flee walks away from the TNT it lit, homeward.

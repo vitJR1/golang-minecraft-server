@@ -33,7 +33,8 @@ func (b *bot) pushTNT(now uint64, bed world.Position) (physInput, bool) {
 	}
 	at := c.instance.World.GetBlock
 	spot, ok := dropSpot(at, bed)
-	if !ok {
+	if !ok || !tntBreaks(at(spot.Add(0, -1, 0))) {
+		// Open on top — or the cover is blast-proof (obsidian): no TNT.
 		br.towerBase = 0
 		return physInput{}, false
 	}

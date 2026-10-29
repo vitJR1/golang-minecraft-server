@@ -389,14 +389,15 @@ func TestBotBuysGear(t *testing.T) {
 	}
 }
 
-// TestBotBlastsHardCover: a bed under obsidian and the bot carries TNT — it
-// places a lit TNT against the cover and runs.
+// TestBotBlastsHardCover: a bed under end stone (slow by hand, but TNT gets
+// through it) and the bot carries TNT — it places a lit TNT against the
+// cover and runs.
 func TestBotBlastsHardCover(t *testing.T) {
 	inst, target := botWorld()
 	inst.SetTNTAutoPrime(true)
-	obsidian, _ := world.BlockByName("minecraft:obsidian")
+	endStone, _ := world.BlockByName("minecraft:end_stone")
 	for _, d := range [][3]int{{-1, 0, 0}, {1, 0, 0}, {0, 0, -1}, {0, 0, 1}, {0, 1, 0}} {
-		inst.World.SetBlock(target.Add(d[0], d[1], d[2]), obsidian)
+		inst.World.SetBlock(target.Add(d[0], d[1], d[2]), endStone)
 	}
 	guide := &fakeGuide{plan: game.BotPlan{
 		BlockItem: "minecraft:white_wool",
@@ -997,5 +998,50 @@ func TestBotBuysAPickaxeForObsidian(t *testing.T) {
 	}
 	if got := inst.World.GetBlock(target); got != world.Air {
 		t.Fatalf("target still standing (%s); bot at %+v", got.Name, b.bot.phys.Pos)
+	}
+}
+
+func TestTNTBreaks(t *testing.T) {
+	for name, want := range map[string]bool{
+		"minecraft:obsidian": false, "minecraft:end_stone": true,
+		"minecraft:white_wool": true, "minecraft:oak_planks": true,
+	} {
+		b, ok := world.BlockByName(name)
+		if !ok {
+			t.Fatalf("%s not registered", name)
+		}
+		if got := tntBreaks(b); got != want {
+			t.Errorf("tntBreaks(%s) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+// TestPusherKeepsTNTOffObsidian: a pusher with TNT at a bed under obsidian
+// (one wool side) doesn't waste TNT on it — it digs through the wool.
+func TestPusherKeepsTNTOffObsidian(t *testing.T) {
+	inst, target := botWorld()
+	inst.SetTNTAutoPrime(true)
+	obsidian, _ := world.BlockByName("minecraft:obsidian")
+	wool, _ := world.BlockByName("minecraft:white_wool")
+	for _, d := range [][3]int{{-1, 0, 0}, {1, 0, 0}, {0, 0, -1}, {0, 1, 0}} {
+		inst.World.SetBlock(target.Add(d[0], d[1], d[2]), obsidian)
+	}
+	inst.World.SetBlock(target.Add(0, 0, 1), wool)
+	guide := &fakeGuide{plan: game.BotPlan{
+		Team:      "red",
+		BlockItem: "minecraft:white_wool",
+		Targets:   []world.Position{target},
+	}}
+	b := addTestBot(t, inst, guide, DifficultyHard, 0.5, 0.5)
+	b.inv.set(hotbarStart+1, woolStack(t, 64))
+	b.inv.set(hotbarStart+4, itemOf(t, "minecraft:tnt", 2))
+	for i := 0; i < 2000 && inst.World.GetBlock(target) != world.Air; i++ {
+		runTicks(inst, 1)
+	}
+	if got := inst.World.GetBlock(target); got != world.Air {
+		t.Fatalf("target still standing (%s); bot at %+v", got.Name, b.bot.phys.Pos)
+	}
+	if n := b.countItemName("minecraft:tnt"); n != 2 {
+		t.Fatalf("%d TNT left, want both: obsidian isn't worth any", n)
 	}
 }
