@@ -15,6 +15,7 @@ import (
 	"minecraft-server/redisc"
 	"minecraft-server/schem"
 	"minecraft-server/server"
+	"minecraft-server/server/enderchest"
 	"minecraft-server/server/favicon"
 	"minecraft-server/store"
 	"minecraft-server/templates"
@@ -287,14 +288,14 @@ const defaultEnderChestPath = "enderchests.json"
 
 // fileEnderChestStore builds the STORAGE=memory ender chest backend. A
 // corrupt file is logged and falls back to RAM only rather than aborting.
-func fileEnderChestStore() server.EnderChestStore {
+func fileEnderChestStore() enderchest.Store {
 	path := getEnv("ENDERCHEST_FILE", defaultEnderChestPath)
 	switch strings.ToLower(path) {
 	case "off", "none":
 		slog.Info("ender chests: in-memory only (ENDERCHEST_FILE=" + path + ")")
 		return nil
 	}
-	fs, err := server.NewFileEnderChestStore(path)
+	fs, err := enderchest.NewFileStore(path)
 	if err != nil {
 		slog.Warn("ender chests: failed to load file, using in-memory only", "path", path, "err", err)
 		return nil

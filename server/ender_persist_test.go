@@ -6,65 +6,15 @@ import (
 	"path/filepath"
 	"testing"
 
+	"minecraft-server/server/enderchest"
 	"minecraft-server/server/inventory"
-	"minecraft-server/world"
 )
-
-func TestEnderSlotsCodecRoundTrip(t *testing.T) {
-	diamond, _ := world.ItemByName("minecraft:diamond")
-	pick, _ := world.ItemByName("minecraft:diamond_pickaxe")
-	var slots [inventory.ChestSlots]inventory.Stack
-	slots[0] = inventory.Stack{ID: diamond, Count: 3}
-	slots[26] = inventory.Stack{ID: pick, Count: 1, Damage: 12, Enchantments: map[string]int{"minecraft:efficiency": 2}, Name: "Digger"}
-
-	data, err := encodeEnderSlots(slots)
-	if err != nil {
-		t.Fatal(err)
-	}
-	back, err := decodeEnderSlots(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if back[0].ID != diamond || back[0].Count != 3 || back[0].Damage != 0 || back[0].Name != "" || len(back[0].Enchantments) != 0 {
-		t.Errorf("slot 0: %+v", back[0])
-	}
-	if back[26].ID != pick || back[26].Damage != 12 || back[26].Name != "Digger" || back[26].Enchantments["minecraft:efficiency"] != 2 {
-		t.Errorf("slot 26: %+v", back[26])
-	}
-	for i := 1; i < 26; i++ {
-		if !back[i].Empty() {
-			t.Errorf("slot %d should be empty: %+v", i, back[i])
-		}
-	}
-	// Unknown items and out-of-range slots are skipped, not fatal.
-	odd, err := decodeEnderSlots([]byte(`[{"slot":40,"item":"minecraft:diamond","count":1},{"slot":1,"item":"minecraft:nope","count":1}]`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i, st := range odd {
-		if !st.Empty() {
-			t.Errorf("slot %d unexpectedly set: %+v", i, st)
-		}
-	}
-	if _, err := decodeEnderSlots([]byte(`garbage`)); err == nil {
-		t.Error("corrupt data should error")
-	}
-	empty, err := decodeEnderSlots(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i, st := range empty {
-		if !st.Empty() {
-			t.Errorf("nil data: slot %d set: %+v", i, st)
-		}
-	}
-}
 
 // TestEnderChestPersistsThroughFileStore: a click saves to the file store,
 // and a fresh Server with a store built from the same path loads it back.
 func TestEnderChestPersistsThroughFileStore(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "enderchests.json")
-	fs, err := NewFileEnderChestStore(path)
+	fs, err := enderchest.NewFileStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +29,7 @@ func TestEnderChestPersistsThroughFileStore(t *testing.T) {
 		t.Fatalf("file not written: %v", err)
 	}
 
-	fs2, err := NewFileEnderChestStore(path)
+	fs2, err := enderchest.NewFileStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}

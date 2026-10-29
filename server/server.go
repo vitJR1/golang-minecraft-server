@@ -16,6 +16,7 @@ import (
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/redisc"
 	"minecraft-server/server/connlimit"
+	"minecraft-server/server/enderchest"
 	"minecraft-server/server/inventory"
 	"minecraft-server/server/moderation"
 	"minecraft-server/store"
@@ -95,9 +96,9 @@ type Server struct {
 	enderMu     sync.Mutex
 	enderChests map[[16]byte]*enderChest
 	// EnderChests persists them: store.EnderChestRepo (Postgres),
-	// FileEnderChestStore (enderchests.json) or nil for RAM only. Set by main
+	// enderchest.FileStore (enderchests.json) or nil for RAM only. Set by main
 	// before players connect.
-	EnderChests EnderChestStore
+	EnderChests enderchest.Store
 
 	// Bans is the player-ban backend the login handler and /ban //unban use.
 	// New() installs an in-memory store; main swaps in store.BanStore
