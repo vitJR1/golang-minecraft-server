@@ -58,9 +58,32 @@ func (i *Instance) setNameTag(name string, tag game.NameTag) {
 // nameTagGroups is the instance's groups by team name.
 func (i *Instance) nameTagGroups() map[string]shownTag {
 	i.tagsMu.Lock()
-	defer i.tagsMu.Unlock()
-	out := map[string]shownTag{}
+	tags := make(map[string]game.NameTag, len(i.tags))
 	for name, tag := range i.tags {
+		tags[name] = tag
+	}
+	i.tagsMu.Unlock()
+	// A bot shows the part it plays: its role joins its group and prefix
+	// ("● [Pusher] BOT_Max"), and a bot the game hasn't tagged gets a tag
+	// of its own.
+	i.Players.Range(func(c *ClientConnection) {
+		if !c.isBot() {
+			return
+		}
+		role, ok := c.bot.shownRole()
+		if !ok {
+			return
+		}
+		tag := tags[c.playerName]
+		if tag.Group == "" {
+			tag.Group = "bot"
+		}
+		tag.Group += "_" + role.code()
+		tag.Prefix += role.label() + " "
+		tags[c.playerName] = tag
+	})
+	out := map[string]shownTag{}
+	for name, tag := range tags {
 		team := nameTagTeamPrefix + tag.Group
 		if len(team) > 16 {
 			team = team[:16]

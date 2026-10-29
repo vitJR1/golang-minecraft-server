@@ -131,6 +131,10 @@ type bot struct {
 
 	brain brainState
 
+	// roleShown is the role in the bot's name tag (-1: none yet); atomic,
+	// as name tags are built on other goroutines than the bot's tick.
+	roleShown atomic.Int32
+
 	// ready is set once AddBot is done: the bot is in the player list (so
 	// the tick sees it) before the game has put it on a team and kitted it,
 	// and it mustn't act meanwhile.
@@ -223,6 +227,7 @@ func (s *Server) AddBot(inst *Instance, team string, diff Difficulty) (*ClientCo
 	c.authed.Store(true)
 	c.player = player.New(s.nextEntityID.Add(1), name, uuid)
 	c.bot = &bot{c: c, diff: diff, skill: botSkills[diff], style: rollStyle(rng), rng: rng}
+	c.bot.roleShown.Store(-1)
 	go func() { // the "client": nothing reads what the server sends
 		for range c.outbound {
 		}

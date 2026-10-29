@@ -97,6 +97,14 @@ type brainState struct {
 	resumedAt int
 	dig       *digJob
 	failed    map[world.Position]uint64
+	// around is the target it's walking round to a softer side of
+	// (digAround), nil when it isn't.
+	around *world.Position
+	// hardBlock is the cover it's stuck at (obsidian all round a bed) and
+	// hardStuck that it may go home from an enemy base to buy the tool for
+	// it — tier after tier until that tool digs it in time.
+	hardBlock world.Block
+	hardStuck bool
 
 	// Chasing: enemies given up on (unreachable) until a tick; since when
 	// the chase goal is reached with the enemy still out of reach; the last
@@ -147,6 +155,14 @@ type brainState struct {
 	// Pusher (bot_pusher.go): the next TNT drop, the tower it's building
 	// (base level, the cell to fill under it, mid-jump), and how long it
 	// waits at the forge for TNT.
+	// Falls (bot_reinforce.go): the last route floor, when it stood there,
+	// whether the fall from it is counted; falls is the bot's own count
+	// when it has no team.
+	lastFloor   world.Position
+	lastFloorAt uint64
+	fallNoted   bool
+	falls       map[world.Position]int
+
 	nextPush   uint64
 	towerBase  int
 	towerCell  world.Position
@@ -214,6 +230,7 @@ func (b *bot) tick(now uint64) {
 		in.Jump = false // spectators / lobby fliers just stand
 	}
 	b.phys.step(c.instance.World.GetBlock, in)
+	b.watchFall(now)
 	if b.phys.Pos.Y < botVoidY {
 		b.phys.Pos.Y, b.phys.Vel.Y = botVoidY, 0
 	}
@@ -492,7 +509,7 @@ func (b *bot) pursue(now uint64) physInput {
 		want = 0
 	}
 	// At an enemy bed: no going back for blocks, gear or resources — dig.
-	if b.onEnemyBase() {
+	if b.onEnemyBase() && !br.hardStuck {
 		want, br.shopping = 0, false
 	}
 	// On a raid the target's route doesn't count: the bare minimum will do.
@@ -555,6 +572,10 @@ func (b *bot) pursue(now uint64) physInput {
 			continue
 		}
 		centre := blockCentre(t)
+		// Walking round a hard cover to a softer side: see it through.
+		if br.around != nil && *br.around == t {
+			return b.digAround(now, t)
+		}
 		if br.role == rolePusher && (br.towering || anticheat.Dist(c.eye(), centre) <= botDigReach+1) {
 			if in, ok := b.pushTNT(now, t); ok {
 				return in
@@ -596,6 +617,9 @@ func (b *bot) giveUp(now uint64, t world.Position) {
 		b.brain.failed = map[world.Position]uint64{}
 	}
 	b.brain.failed[t] = now + botGiveUpTicks
+	if a := b.brain.around; a != nil && *a == t {
+		b.brain.around = nil
+	}
 }
 
 // breakTarget digs t out: whatever stands on the line from the eyes to it
@@ -627,8 +651,13 @@ func (b *bot) breakTarget(now uint64, t world.Position) physInput {
 			if b.wantWare(c.countItemName(br.plan.BlockItem)) != nil {
 				return physInput{} // the shop, next tick
 			}
+			if ticks < 0 || ticks > botMaxDig {
+				// Not with what it holds (obsidian by hand): through a
+				// softer side of the bed instead.
+				return b.digAround(now, t)
+			}
 		}
-		if ticks < 0 {
+		if ticks < 0 || ticks > botMaxDig {
 			b.giveUp(now, t)
 			return physInput{}
 		}
@@ -642,6 +671,138 @@ func (b *bot) breakTarget(now uint64, t world.Position) physInput {
 		c.breakBlock(pos, true)
 		if at(pos) == before { // the game refused (a map block): no way through
 			b.giveUp(now, t)
+		}
+		br.dig = nil
+	}
+	return physInput{}
+}
+
+// botMaxDig is the longest dig a bot takes on (ticks): obsidian by hand
+// would take minutes; with a diamond pickaxe it's ~9 s.
+const botMaxDig = 300
+
+// digAround gets at bed when the cover on the bot's line to it is too hard:
+// it picks the softest side of the bed — open, or the quickest block to dig
+// with what the bot holds — and stands where the line to the bed runs
+// through that side (digging the side block first, when it has one). No
+// side it could get through: the bed is left for a while.
+func (b *bot) digAround(now uint64, bed world.Position) physInput {
+	c, br := b.c, &b.brain
+	at := c.instance.World.GetBlock
+	var side world.Position
+	sideTicks := -1
+	for _, d := range [5][3]int{{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}, {0, 1, 0}} {
+		n := bed.Add(d[0], d[1], d[2])
+		blk := at(n)
+		if strings.HasSuffix(blk.Name, "_bed") {
+			continue // the bed's other half
+		}
+		ticks := 0
+		if world.Collidable(blk) {
+			_, ticks = b.bestTool(blk)
+			if ticks < 0 || ticks > botMaxDig {
+				continue
+			}
+		}
+		if sideTicks < 0 || ticks < sideTicks {
+			side, sideTicks = n, ticks
+		}
+	}
+	if sideTicks < 0 {
+		// Hard on every side (obsidian all round): the tool for it, from
+		// the shop — even from here — if it can pay; else leave this bed.
+		br.dig, br.around = nil, nil
+		if hard, ok := b.softestHard(bed); ok {
+			br.hardBlock, br.hardCover, br.hardStuck = hard, world.BreakInfoFor(hard.Name).Tool, true
+			if b.wantWare(c.countItemName(br.plan.BlockItem)) != nil {
+				return physInput{} // shopping, next tick
+			}
+			br.hardStuck = false
+		}
+		b.giveUp(now, bed)
+		return physInput{}
+	}
+	around := bed
+	br.around = &around
+	if sideTicks > 0 && anticheat.Dist(c.eye(), blockCentre(side)) <= botDigReach {
+		return b.digBlock(now, side, bed) // open that side up
+	}
+	// Stand where the eyes see the bed through that side.
+	centre := blockCentre(bed)
+	goal := func(cell world.Position) bool {
+		eye := anticheat.Vec{X: float64(cell.X) + 0.5, Y: float64(cell.Y) + anticheat.EyeHeight, Z: float64(cell.Z) + 0.5}
+		if anticheat.Dist(eye, centre) > botDigReach-0.5 {
+			return false
+		}
+		first, blocked := firstBlockOnRay(at, eye, centre, bed)
+		return !blocked || first == side
+	}
+	if here := c.feetCellNow(); goal(here) && b.phys.OnGround {
+		// There: through the soft side — its block first, then the bed.
+		if world.Collidable(at(side)) {
+			return b.digBlock(now, side, bed)
+		}
+		br.around = nil
+		return b.digBlock(now, bed, bed)
+	}
+	in, status := b.goToFar(now, fmt.Sprintf("around:%v", bed), side, goal, c.countItemName(br.plan.BlockItem))
+	if status == farFailed {
+		b.giveUp(now, bed)
+		br.around = nil
+	}
+	return in
+}
+
+// softestHard is the easiest of bed's covering blocks (sides, top) — the
+// one a better tool would get through first.
+func (b *bot) softestHard(bed world.Position) (world.Block, bool) {
+	at := b.c.instance.World.GetBlock
+	var best world.Block
+	bestHardness, found := 0.0, false
+	for _, d := range [5][3]int{{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}, {0, 1, 0}} {
+		blk := at(bed.Add(d[0], d[1], d[2]))
+		if !world.Collidable(blk) || strings.HasSuffix(blk.Name, "_bed") {
+			continue
+		}
+		h := world.BreakInfoFor(blk.Name).Hardness
+		if h < 0 {
+			continue // unbreakable
+		}
+		if !found || h < bestHardness {
+			best, bestHardness, found = blk, h, true
+		}
+	}
+	return best, found
+}
+
+// digBlock digs pos (on the way to target, which is given up if the game
+// refuses the break).
+func (b *bot) digBlock(now uint64, pos, target world.Position) physInput {
+	c, br := b.c, &b.brain
+	at := c.instance.World.GetBlock
+	b.lookAt(blockCentre(pos))
+	if br.dig == nil || br.dig.pos != pos {
+		blk := at(pos)
+		if blk == world.Air {
+			br.dig = nil
+			return physInput{}
+		}
+		b.holdBestTool(blk)
+		ticks := world.BreakTicksWith(world.BreakInfoFor(blk.Name), c.heldItemName(), c.digContext())
+		if ticks < 0 || ticks > botMaxDig {
+			b.giveUp(now, target)
+			return physInput{}
+		}
+		br.dig = &digJob{pos: pos, doneAt: now + uint64(ticks)}
+	}
+	if now%4 == 0 {
+		c.broadcastEntityAnimation(0)
+	}
+	if now >= br.dig.doneAt {
+		before := at(pos)
+		c.breakBlock(pos, true)
+		if at(pos) == before {
+			b.giveUp(now, target)
 		}
 		br.dig = nil
 	}
@@ -862,6 +1023,23 @@ func (b *bot) follow(now uint64) physInput {
 	if here != prev && here != step.Cell && !dropping && !(step.Leap && onLeapLine(prev, runUp, step.Cell, here)) && b.phys.OnGround {
 		b.dropRoute() // knocked off the route: pick it up again or plan anew
 		return physInput{}
+	}
+
+	if b.phys.OnGround && (here == prev || here == step.Cell) {
+		b.noteFloor(now, here)
+		// Fell off near here before: widen the way first — along the way
+		// the route goes from here (the step after, when it stands on this
+		// one already; else the way it came).
+		ahead := step.Cell
+		if ahead == here && br.routeIdx+1 < len(br.route) {
+			ahead = br.route[br.routeIdx+1].Cell
+		}
+		if ahead == here {
+			ahead = here.Add(here.X-prev.X, 0, here.Z-prev.Z)
+		}
+		if in, ok := b.reinforce(now, here, ahead); ok {
+			return in
+		}
 	}
 
 	if next, ok := nextPlacement(at, step); ok {
@@ -1121,8 +1299,9 @@ func (b *bot) holdBestWeapon() {
 	c.botHold(func(st itemStack) bool { return st.sameKind(best) && st.Count == best.Count })
 }
 
-// holdBestTool holds whatever digs blk fastest (the hand included).
-func (b *bot) holdBestTool(blk world.Block) {
+// bestTool is the hotbar slot (-1: the bare hand) that digs blk fastest and
+// how many ticks it takes (< 0: it can't be dug).
+func (b *bot) bestTool(blk world.Block) (int32, int) {
 	c := b.c
 	info := world.BreakInfoFor(blk.Name)
 	bestSlot, bestTicks := int32(-1), world.BreakTicksWith(info, "", c.digContext())
@@ -1136,6 +1315,13 @@ func (b *bot) holdBestTool(blk world.Block) {
 			bestSlot, bestTicks = k, t
 		}
 	}
+	return bestSlot, bestTicks
+}
+
+// holdBestTool holds whatever digs blk fastest (the hand included).
+func (b *bot) holdBestTool(blk world.Block) {
+	c := b.c
+	bestSlot, _ := b.bestTool(blk)
 	if bestSlot >= 0 && c.heldSlot.Load() != bestSlot {
 		c.cancelUse()
 		c.heldSlot.Store(bestSlot)

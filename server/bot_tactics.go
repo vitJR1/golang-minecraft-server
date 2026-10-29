@@ -324,11 +324,21 @@ func (b *bot) affords(w game.BotWare, blocks int) bool {
 
 // wantWare is the gear to buy now: the first it wants that it can pay for.
 func (b *bot) wantWare(blocks int) *game.BotWare {
-	if !b.brain.plan.HasShop || b.onEnemyBase() {
-		return nil // at an enemy bed nothing is worth the trip home
+	br := &b.brain
+	if !br.plan.HasShop {
+		return nil
+	}
+	// At an enemy bed nothing is worth the trip home — except the tool (or
+	// TNT) for a cover it's stuck at (obsidian all round).
+	base := b.onEnemyBase()
+	if base && !br.hardStuck {
+		return nil
 	}
 	now := b.c.instance.Tick()
 	for _, g := range b.wishList(now) {
+		if base && g[0].Kind != game.WareTNT && g[0].Kind != wareKindFor(br.hardCover) {
+			continue
+		}
 		for _, w := range g {
 			if b.affords(w, blocks) {
 				return &w
@@ -347,8 +357,15 @@ func (b *bot) buy(w *game.BotWare) {
 		return
 	}
 	if guide.BotBuy(ctx, me, w.Key) {
-		if w.Kind == game.WareTNT || w.Kind == wareKindFor(br.hardCover) {
-			br.hardCover = world.NoTool
+		switch {
+		case w.Kind == game.WareTNT:
+			br.hardCover, br.hardStuck = world.NoTool, false
+		case w.Kind == wareKindFor(br.hardCover):
+			// Done once the tools dig the cover in good time; else the next
+			// tier (the plan offers it once refreshed).
+			if _, t := b.bestTool(br.hardBlock); br.hardBlock == world.Air || (t >= 0 && t <= botMaxDig) {
+				br.hardCover, br.hardStuck = world.NoTool, false
+			}
 		}
 	} else {
 		if br.badWare == nil {

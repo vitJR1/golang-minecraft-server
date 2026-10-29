@@ -780,6 +780,9 @@ func TestBotKeepsItsRouteDownSteps(t *testing.T) {
 			if searches > 1 {
 				t.Fatalf("searched the route %d times on the way down", searches)
 			}
+			if len(b.bot.fallSpots()) != 0 {
+				t.Fatalf("the route's own steps down counted as falls: %v", b.bot.fallSpots())
+			}
 			return
 		}
 	}
@@ -859,5 +862,140 @@ func TestPusherBuysTNTFirst(t *testing.T) {
 	runTicks(inst, 200)
 	if len(guide.wares) == 0 || guide.wares[0] != "tnt" {
 		t.Fatalf("bought %v, want TNT first", guide.wares)
+	}
+}
+
+// TestBotWidensWhereItFell: knocked off a one-wide bridge twice at the same
+// spot, the bot widens the bridge there the next time it passes.
+func TestBotWidensWhereItFell(t *testing.T) {
+	inst, target := botWorld()
+	for x := 4; x <= 11; x++ { // a one-wide stone bridge between the islands
+		inst.World.SetBlock(world.Position{X: x, Y: 63, Z: 0}, world.Stone)
+	}
+	guide := &fakeGuide{plan: game.BotPlan{
+		Team:      "red",
+		BlockItem: "minecraft:white_wool",
+		Home:      world.Position{X: 0, Y: 64, Z: 0},
+		Targets:   []world.Position{target},
+	}}
+	b := addTestBot(t, inst, guide, DifficultyEasy, 0.5, 0.5) // easy: no hops
+	b.inv.set(hotbarStart+1, woolStack(t, 64))
+	spot := world.Position{X: 7, Y: 64, Z: 0}
+	for fall := 0; fall < 2; fall++ {
+		pushed := false
+		for i := 0; i < 600 && !pushed; i++ {
+			runTicks(inst, 1)
+			if b.feetCellNow() == spot && b.bot.phys.OnGround {
+				b.bot.pushVelocity(0, 0.3, 0.6) // a hit from the side
+				pushed = true
+			}
+		}
+		if !pushed {
+			t.Fatalf("fall %d: never reached the spot; at %+v", fall, b.bot.phys.Pos)
+		}
+		runTicks(inst, 40) // down it goes
+		if b.bot.phys.Pos.Y > 60 {
+			t.Fatalf("fall %d: didn't fall; at %+v", fall, b.bot.phys.Pos)
+		}
+		b.player.MoveTo(0.5, 64, 0.5, true) // "respawn" at home
+	}
+	// The fall is put on the last route cell it stood on: the spot or the
+	// one before.
+	n := 0
+	for p, k := range b.bot.fallSpots() {
+		if p.Y == spot.Y && p.Z == spot.Z && abs(p.X-spot.X) <= 1 {
+			n += k
+		}
+	}
+	if n < botFallsToReinforce {
+		t.Fatalf("falls near %v: %d, want ≥ %d (spots %v)", spot, n, botFallsToReinforce, b.bot.fallSpots())
+	}
+	runTicks(inst, 600)
+	wide := 0
+	for x := 6; x <= 8; x++ {
+		for _, z := range []int{-1, 1} {
+			if strings.HasSuffix(inst.World.GetBlock(world.Position{X: x, Y: 63, Z: z}).Name, "_wool") {
+				wide++
+			}
+		}
+	}
+	if wide < 4 {
+		var placed []world.Position
+		for x := 2; x <= 13; x++ {
+			for z := -2; z <= 2; z++ {
+				p := world.Position{X: x, Y: 63, Z: z}
+				if strings.HasSuffix(inst.World.GetBlock(p).Name, "_wool") {
+					placed = append(placed, p)
+				}
+			}
+		}
+		t.Fatalf("only %d side blocks around the fall spot, want the bridge widened; wool at %v; spots %v; bot at %+v", wide, placed, b.bot.fallSpots(), b.bot.phys.Pos)
+	}
+}
+
+// TestBotDigsRoundObsidian: the target is walled in obsidian on every side
+// but one (wool). With no pickaxe the bot never starts on the obsidian — it
+// goes round to the wool side and digs through there.
+func TestBotDigsRoundObsidian(t *testing.T) {
+	inst, target := botWorld()
+	obsidian, _ := world.BlockByName("minecraft:obsidian")
+	wool, _ := world.BlockByName("minecraft:white_wool")
+	for _, d := range [][3]int{{-1, 0, 0}, {1, 0, 0}, {0, 0, -1}, {0, 1, 0}} {
+		inst.World.SetBlock(target.Add(d[0], d[1], d[2]), obsidian)
+	}
+	soft := target.Add(0, 0, 1)
+	inst.World.SetBlock(soft, wool)
+	guide := &fakeGuide{plan: game.BotPlan{
+		BlockItem: "minecraft:white_wool",
+		Targets:   []world.Position{target},
+	}}
+	b := addTestBot(t, inst, guide, DifficultyHard, 0.5, 0.5)
+	b.inv.set(hotbarStart+1, woolStack(t, 64))
+	for i := 0; i < 2000 && inst.World.GetBlock(target) != world.Air; i++ {
+		runTicks(inst, 1)
+		if d := b.bot.brain.dig; d != nil && inst.World.GetBlock(d.pos) == obsidian {
+			t.Fatalf("started digging obsidian at %v by hand", d.pos)
+		}
+	}
+	if got := inst.World.GetBlock(target); got != world.Air {
+		t.Fatalf("target still standing (%s); bot at %+v", got.Name, b.bot.phys.Pos)
+	}
+	if inst.World.GetBlock(target.Add(-1, 0, 0)) != obsidian {
+		t.Fatal("the obsidian wall was broken")
+	}
+}
+
+// TestBotBuysAPickaxeForObsidian: obsidian on every side of the target, no
+// pickaxe, no TNT — the bot leaves the enemy base for the shop, buys the
+// pickaxe that gets through and comes back to break the target.
+func TestBotBuysAPickaxeForObsidian(t *testing.T) {
+	inst, target := botWorld()
+	for x := 4; x <= 11; x++ { // a stone bridge between the islands
+		inst.World.SetBlock(world.Position{X: x, Y: 63, Z: 0}, world.Stone)
+	}
+	obsidian, _ := world.BlockByName("minecraft:obsidian")
+	for _, d := range [][3]int{{-1, 0, 0}, {1, 0, 0}, {0, 0, -1}, {0, 0, 1}, {0, 1, 0}} {
+		inst.World.SetBlock(target.Add(d[0], d[1], d[2]), obsidian)
+	}
+	guide := &fakeGuide{plan: game.BotPlan{
+		BlockItem: "minecraft:white_wool",
+		Home:      world.Position{X: 0, Y: 64, Z: 0},
+		Shop:      world.Position{X: -2, Y: 64, Z: 1}, HasShop: true,
+		Wares: []game.BotWare{
+			{Key: "diamond_pickaxe", Kind: game.WarePickaxe, Tier: 4, Currency: "minecraft:gold_ingot", Price: 6},
+		},
+		Targets: []world.Position{target},
+	}}
+	b := addTestBot(t, inst, guide, DifficultyHard, 14.5, 0.5) // at the enemy bed
+	b.inv.set(hotbarStart+1, woolStack(t, 32))
+	b.inv.set(hotbarStart+2, itemOf(t, "minecraft:gold_ingot", 10))
+	for i := 0; i < 3000 && inst.World.GetBlock(target) != world.Air; i++ {
+		runTicks(inst, 1)
+	}
+	if len(guide.wares) == 0 || guide.wares[0] != "diamond_pickaxe" {
+		t.Fatalf("bought %v, want the diamond pickaxe", guide.wares)
+	}
+	if got := inst.World.GetBlock(target); got != world.Air {
+		t.Fatalf("target still standing (%s); bot at %+v", got.Name, b.bot.phys.Pos)
 	}
 }

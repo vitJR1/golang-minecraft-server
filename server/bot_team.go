@@ -60,6 +60,9 @@ type teamBrain struct {
 	focus    world.Position // the bed the attackers go for
 	hasFocus bool
 	intruder *ClientConnection
+	// falls counts the team's bots' falls by the route cell they fell
+	// from (bot_reinforce.go).
+	falls map[world.Position]int
 }
 
 // teamBrainFor returns (creating) the brain of the bot's team; nil for a bot
@@ -86,14 +89,47 @@ func (b *bot) teamBrainFor() *teamBrain {
 func (b *bot) teamUpdate(now uint64) {
 	tb := b.teamBrainFor()
 	if tb == nil {
-		b.brain.role = roleAttacker
+		b.setRole(roleAttacker)
 		return
 	}
 	if tb.at == 0 || now >= tb.at+botTeamEvery {
 		tb.decide(now, b.c.instance, b.brain.plan.Team)
 	}
-	b.brain.role = tb.roles[b.c.player.EntityID]
+	b.setRole(tb.roles[b.c.player.EntityID])
 }
+
+// setRole takes up a role and, when it changed, shows it in the name tag
+// (tab list, over the head) to everyone in the instance.
+func (b *bot) setRole(r botRole) {
+	b.brain.role = r
+	if old := b.roleShown.Swap(int32(r)); old != int32(r) {
+		inst := b.c.instance
+		inst.Players.Range(func(c *ClientConnection) { c.syncNameTags(inst) })
+	}
+}
+
+// shownRole is the role the bot's name tag shows (read from any goroutine);
+// false before it has one.
+func (b *bot) shownRole() (botRole, bool) {
+	r := b.roleShown.Load()
+	return botRole(r), r >= 0
+}
+
+// label is the role's name-tag text; code its short form for team names
+// (≤16 characters with the game's group).
+func (r botRole) label() string {
+	switch r {
+	case rolePusher:
+		return "§6[Pusher]"
+	case roleArcher:
+		return "§b[Archer]"
+	case roleDefender:
+		return "§a[Defender]"
+	}
+	return "§c[Warrior]"
+}
+
+func (r botRole) code() string { return string("wdap"[r]) }
 
 // decide works out the team's roles, focus and intruder. Bots tick one after
 // another on the instance's tick goroutine, so reading their plans is safe.
