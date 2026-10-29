@@ -309,6 +309,8 @@ type fakeInstance struct {
 	drops       []fakeDrop // every DropItem call, in order
 	holos       []*fakeHologram
 	projectiles []fakeProjectile
+	// frozenAt is the last FreezeTime value + 1 (0 = never frozen).
+	frozenAt int64
 	// explosionDamage is the last SetExplosionDamage value (0 = never set).
 	explosionDamage float64
 }
@@ -431,6 +433,11 @@ func (i *fakeInstance) SetTNTAutoPrime(bool)   {}
 func (i *fakeInstance) SetExplosionDamage(scale float64) {
 	i.mu.Lock()
 	i.explosionDamage = scale
+	i.mu.Unlock()
+}
+func (i *fakeInstance) FreezeTime(dayTime int64) {
+	i.mu.Lock()
+	i.frozenAt = dayTime + 1
 	i.mu.Unlock()
 }
 func (i *fakeInstance) PlaySound(string, float64, float64, float64, float32, float32) {}
@@ -886,6 +893,9 @@ func TestExplosionsSpareBedsAndHurtLess(t *testing.T) {
 	red := join(g, inst, ctx, "red", 1) // team 0
 	_ = join(g, inst, ctx, "blue", 2)   // team 1
 
+	if inst.frozenAt != bedwarsDayTime+1 {
+		t.Errorf("time of day frozen at %d, want noon", inst.frozenAt-1)
+	}
 	if inst.explosionDamage != explosionDamageScale {
 		t.Errorf("explosion damage scale on start: %v, want %v", inst.explosionDamage, explosionDamageScale)
 	}

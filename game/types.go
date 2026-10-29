@@ -235,6 +235,11 @@ type Instance interface {
 	// unaffected.
 	SetExplosionDamage(scale float64)
 
+	// FreezeTime holds this instance's time of day at dayTime (ticks:
+	// 6000 = noon, 18000 = midnight) — no day/night cycle — for everyone in
+	// it and everyone who joins.
+	FreezeTime(dayTime int64)
+
 	// ThrowProjectile launches item as a projectile from p's eyes along
 	// their look direction at speed blocks/tick, driven by hooks.
 	ThrowProjectile(p PlayerHandle, item string, speed float64, hooks ProjectileHooks)

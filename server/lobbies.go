@@ -66,6 +66,9 @@ func SetupLobbies(s *Server) {
 		}
 		inst := NewInstance(id, s, w)
 		installLobbyProtection(inst)
+		if id == LobbyBedWars {
+			inst.FreezeTime(6000) // like its arenas: always noon
+		}
 		s.AddInstance(inst)
 	}
 }

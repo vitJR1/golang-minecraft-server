@@ -118,6 +118,7 @@ const (
 	CbPlaySetExperience          = 0x56 // float bar + VarInt level + VarInt total xp
 	CbPlaySetSubtitleText        = 0x5D // "set_title_subtitle": JSON component (title.go)
 	CbPlaySetTitleText           = 0x5F // "set_title_text": JSON component — showing starts here
+	CbPlayUpdateTime             = 0x5E // "update_time": world age Long, time of day Long (negative = frozen)
 	CbPlaySetTitleAnimationTimes = 0x60 // "set_title_time": fade in / stay / fade out (Int32 ticks)
 
 	// Inventory / container packets. IDs from minecraft-data 1.20

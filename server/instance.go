@@ -256,6 +256,10 @@ type Instance struct {
 	tagsMu sync.Mutex
 	tags   map[string]game.NameTag
 
+	// fixedTime is the frozen time of day + 1 (0 = the clock runs);
+	// day_time.go.
+	fixedTime atomic.Int64
+
 	// OnRewritePlace, when set, may swap the block a player is about to
 	// place (game.PlacementRewriter). Runs before OnBlockPlace.
 	OnRewritePlace func(c *ClientConnection, pos world.Position, blk world.Block) world.Block
@@ -461,8 +465,10 @@ func (i *Instance) JoinAndAnnounce(c *ClientConnection) {
 
 	i.joinMu.Unlock()
 
-	// The instance's name-tag groups replace the previous instance's.
+	// The instance's name-tag groups replace the previous instance's; its
+	// frozen time of day replaces the fresh level's clock.
 	c.syncNameTags(i)
+	c.sendDayTime()
 
 	// Hooks fire outside the lock so game logic can call back into the
 	// instance without deadlocking.

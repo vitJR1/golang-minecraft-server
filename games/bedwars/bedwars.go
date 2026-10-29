@@ -166,6 +166,7 @@ func (g *bedWars) OnInstanceStart(ctx *game.Ctx) {
 	ctx.Instance.SetCustomRespawn(true)
 	ctx.Instance.SetTNTAutoPrime(true)
 	ctx.Instance.SetExplosionDamage(explosionDamageScale)
+	ctx.Instance.FreezeTime(bedwarsDayTime) // always day
 	ctx.Instance.BroadcastChat("", "BedWars! Protect your bed, break the others.")
 	g.spawnHolograms(ctx)
 }
@@ -689,3 +690,6 @@ func (g *bedWars) winnerLocked() (winner *teamState, decided bool) {
 func teleport(p game.PlayerHandle, sp world.SpawnPoint) {
 	p.Teleport(float64(sp.Position.X)+0.5, float64(sp.Position.Y), float64(sp.Position.Z)+0.5)
 }
+
+// bedwarsDayTime is the time of day every round is frozen at: noon.
+const bedwarsDayTime = 6000

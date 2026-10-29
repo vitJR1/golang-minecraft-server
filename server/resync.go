@@ -23,6 +23,8 @@ func (c *ClientConnection) resyncView() error {
 	if err := c.sendRespawn(); err != nil {
 		return fmt.Errorf("resync respawn: %w", err)
 	}
+	c.sendDayTime() // the new level's clock starts at 0
+
 	// 2. Re-stream spawn triplet → baked world chunks → position.
 	if err := c.sendSetDefaultSpawnPosition(int(s.X), int(s.Y), int(s.Z), 0); err != nil {
 		return fmt.Errorf("resync spawn pos: %w", err)

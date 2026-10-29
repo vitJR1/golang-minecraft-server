@@ -369,17 +369,18 @@ func parseResource(name string) (Resource, error) {
 }
 
 // defaultGenInterval is the tier-I interval per resource when the config
-// doesn't set one: iron every 2 s, gold every 5 s, diamond 30 s, emerald
-// 45 s. Diamond / emerald speed up with the generator tiers (sidebar.go).
+// doesn't set one: iron every second, gold every 3⅓ s (twice and 1.5× the
+// Hypixel rates), diamond 30 s, emerald 45 s. Diamond / emerald speed up
+// with the generator tiers (sidebar.go).
 func defaultGenInterval(r Resource) int {
 	switch r {
 	case Gold:
-		return 100
+		return 67
 	case Diamond:
 		return 600
 	case Emerald:
 		return 900
 	default: // Iron
-		return 40
+		return 20
 	}
 }

@@ -105,6 +105,7 @@ func (i *fakeInstance) SetCustomRespawn(bool)                                   
 func (i *fakeInstance) SetWeaponDamage(bool)                                          {}
 func (i *fakeInstance) SetTNTAutoPrime(bool)                                          {}
 func (i *fakeInstance) SetExplosionDamage(float64)                                    {}
+func (i *fakeInstance) FreezeTime(int64)                                              {}
 func (i *fakeInstance) PlaySound(string, float64, float64, float64, float32, float32) {}
 func (i *fakeInstance) ThrowProjectile(game.PlayerHandle, string, float64, game.ProjectileHooks) {
 }

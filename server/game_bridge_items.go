@@ -169,6 +169,7 @@ func (b instanceBridge) SetTNTAutoPrime(enabled bool)  { b.inst.SetTNTAutoPrime(
 func (b instanceBridge) SetExplosionDamage(scale float64) {
 	b.inst.SetExplosionDamage(scale)
 }
+func (b instanceBridge) FreezeTime(dayTime int64) { b.inst.FreezeTime(dayTime) }
 
 func (b instanceBridge) PlaySound(name string, x, y, z float64, volume, pitch float32) {
 	b.inst.playSound(name, soundCategoryPlayer, x, y, z, volume, pitch)
