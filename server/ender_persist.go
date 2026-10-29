@@ -8,6 +8,7 @@ import (
 	"os"
 	"sync"
 
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
@@ -94,10 +95,10 @@ type enderSlotJSON struct {
 }
 
 // encodeEnderSlots serialises the non-empty slots.
-func encodeEnderSlots(slots [chestSlotCount]itemStack) ([]byte, error) {
-	out := make([]enderSlotJSON, 0, chestSlotCount)
+func encodeEnderSlots(slots [inventory.ChestSlots]inventory.Stack) ([]byte, error) {
+	out := make([]enderSlotJSON, 0, inventory.ChestSlots)
 	for i, st := range slots {
-		if st.empty() {
+		if st.Empty() {
 			continue
 		}
 		name, ok := world.ItemName(st.ID)
@@ -113,8 +114,8 @@ func encodeEnderSlots(slots [chestSlotCount]itemStack) ([]byte, error) {
 }
 
 // decodeEnderSlots is the inverse; unknown items and bad slots are skipped.
-func decodeEnderSlots(data []byte) ([chestSlotCount]itemStack, error) {
-	var slots [chestSlotCount]itemStack
+func decodeEnderSlots(data []byte) ([inventory.ChestSlots]inventory.Stack, error) {
+	var slots [inventory.ChestSlots]inventory.Stack
 	if len(data) == 0 {
 		return slots, nil
 	}
@@ -123,15 +124,15 @@ func decodeEnderSlots(data []byte) ([chestSlotCount]itemStack, error) {
 		return slots, err
 	}
 	for _, e := range in {
-		if e.Slot < 0 || e.Slot >= chestSlotCount || e.Count <= 0 {
+		if e.Slot < 0 || e.Slot >= inventory.ChestSlots || e.Count <= 0 {
 			continue
 		}
 		id, ok := world.ItemByName(e.Item)
 		if !ok {
 			continue
 		}
-		slots[e.Slot] = itemStack{
-			ID: id, Count: byte(min(e.Count, maxStackSize)),
+		slots[e.Slot] = inventory.Stack{
+			ID: id, Count: byte(min(e.Count, inventory.MaxStack)),
 			Name: e.Name, Damage: e.Damage, Enchantments: e.Enchantments,
 		}
 	}

@@ -81,7 +81,7 @@ func (c *ClientConnection) shootBow(u *useState) {
 	if f < arrowMinForce {
 		return
 	}
-	bow := c.inv.held(u.slot)
+	bow := c.inv.Held(u.slot)
 	creative := c.gamemode() == player.Creative
 	infinite := c.enchantOf(bow, EnchantInfinity) > 0
 	switch {

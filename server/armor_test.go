@@ -6,12 +6,13 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
 func wear(c *ClientConnection, slot int16, item string, enchants map[string]int) {
 	id, _ := world.ItemByName(item)
-	c.inv.set(slot, itemStack{ID: id, Count: 1, Enchantments: enchants})
+	c.inv.Set(slot, inventory.Stack{ID: id, Count: 1, Enchantments: enchants})
 }
 
 func near(a, b float32) bool { return math.Abs(float64(a-b)) < 0.01 }
@@ -58,18 +59,18 @@ func TestArmorWearsAndBreaks(t *testing.T) {
 	inst := bareInstance(New(), world.NewMemoryWorld())
 	c := tntConn(inst, "Worn", player.Survival, 0, 64, 0)
 	boots, _ := world.ItemByName("minecraft:leather_boots") // durability 65
-	c.inv.set(armorBootsSlot, itemStack{ID: boots, Count: 1, Damage: 63})
+	c.inv.Set(armorBootsSlot, inventory.Stack{ID: boots, Count: 1, Damage: 63})
 	wear(c, armorHelmetSlot, "minecraft:iron_helmet", nil)
 
 	c.absorbDamage(8) // wear = max(1, 8/4) = 2 per piece
-	if st := c.inv.get(armorBootsSlot); !st.empty() {
+	if st := c.inv.Get(armorBootsSlot); !st.Empty() {
 		t.Errorf("boots at 63+2 ≥ 65 should break, got %+v", st)
 	}
-	if st := c.inv.get(armorHelmetSlot); st.Damage != 2 {
+	if st := c.inv.Get(armorHelmetSlot); st.Damage != 2 {
 		t.Errorf("helmet wear: %d, want 2", st.Damage)
 	}
 	c.absorbDamage(1)
-	if st := c.inv.get(armorHelmetSlot); st.Damage != 3 {
+	if st := c.inv.Get(armorHelmetSlot); st.Damage != 3 {
 		t.Errorf("small hits wear at least 1: %d, want 3", st.Damage)
 	}
 }
@@ -108,7 +109,7 @@ func TestWeaponDamageSwitch(t *testing.T) {
 	v.player.SetHealth(player.MaxHealth)
 	a.instance.tickCount.Add(1000)
 	sword, _ := world.ItemByName("minecraft:diamond_sword")
-	a.inv.set(hotbarStart, itemStack{ID: sword, Count: 1, Enchantments: map[string]int{EnchantSharpness: 2}})
+	a.inv.Set(inventory.HotbarStart, inventory.Stack{ID: sword, Count: 1, Enchantments: map[string]int{EnchantSharpness: 2}})
 	a.handleAttack(v)
 	if got := player.MaxHealth - v.player.Health(); got != 8.5 {
 		t.Errorf("diamond sword + Sharpness II: dealt %v, want 8.5", got)
@@ -128,13 +129,13 @@ func TestWeaponDamageSwitch(t *testing.T) {
 func TestKnockbackEnchantAddsHorizontalStrength(t *testing.T) {
 	_, a, v := duel(t)
 	stick, _ := world.ItemByName("minecraft:stick")
-	a.inv.set(hotbarStart, itemStack{ID: stick, Count: 1})
+	a.inv.Set(inventory.HotbarStart, inventory.Stack{ID: stick, Count: 1})
 	a.handleAttack(v)
 	plain := lastPacket(t, v, packetid.CbPlayEntityVelocity)
 
 	v.player.SetHealth(player.MaxHealth)
 	a.instance.tickCount.Add(1000)
-	a.inv.set(hotbarStart, itemStack{ID: stick, Count: 1, Enchantments: map[string]int{EnchantKnockback: 2}})
+	a.inv.Set(inventory.HotbarStart, inventory.Stack{ID: stick, Count: 1, Enchantments: map[string]int{EnchantKnockback: 2}})
 	a.handleAttack(v)
 	boosted := lastPacket(t, v, packetid.CbPlayEntityVelocity)
 	if plain == nil || boosted == nil {

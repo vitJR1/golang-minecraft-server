@@ -5,77 +5,18 @@ import (
 	"fmt"
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/inventory"
 
 	"minecraft-server/protocol"
 	"minecraft-server/world"
 )
 
-// maxStackSize is the vanilla stack ceiling for plain items; maxStackFor
-// narrows it per item (see world.MaxStackSizeOf).
-const maxStackSize = world.MaxStackSize
-
-// maxStackFor returns the vanilla max stack size of an item id.
-func maxStackFor(itemID int32) int {
-	name, ok := world.ItemName(itemID)
-	if !ok {
-		return maxStackSize
-	}
-	return world.MaxStackSizeOf(name)
-}
-
-// inventory.go is the per-connection player inventory model. It mirrors the
-// window-0 layout the client uses so the server knows what the player is
-// actually holding — used to place only a held block (no more always-stone)
-// and to pick the right throwable. It is authoritative: container clicks are
-// simulated on it (click.go), creative slot edits are taken from creative
-// players only; crafting isn't modelled.
-//
-// Window-0 slot layout (1.20.1):
-//
-//	0      crafting result
-//	1..4   crafting grid
-//	5..8   armor
-//	9..35  main inventory (3×9)
-//	36..44 hotbar (9)
-//	45     offhand
-const (
-	playerInvSize = 46
-	hotbarStart   = 36 // window-0 slot of hotbar position 0
-	mainInvStart  = 9  // window-0 slot where main inventory + hotbar begin
-)
-
-// playerInventory holds one player's window-0 slots. The zero value is an
-// all-empty inventory.
-type playerInventory struct {
-	slots [playerInvSize]itemStack
-}
-
-// set stores st at a window-0 slot (bounds-checked).
-func (inv *playerInventory) set(slot int16, st itemStack) {
-	if slot >= 0 && int(slot) < playerInvSize {
-		inv.slots[slot] = st
-	}
-}
-
-// get returns the stack at a window-0 slot (empty for out-of-range).
-func (inv *playerInventory) get(slot int16) itemStack {
-	if slot >= 0 && int(slot) < playerInvSize {
-		return inv.slots[slot]
-	}
-	return itemStack{}
-}
-
-// held returns the stack in the selected hotbar slot (heldSlot 0..8).
-func (inv *playerInventory) held(heldSlot int32) itemStack {
-	return inv.get(int16(hotbarStart) + int16(heldSlot))
-}
-
 // writeInventoryMirror appends the 36 player-inventory slots (main 9..35 then
 // hotbar 36..44) of a container window, from the server-side model, so an
 // open chest/menu shows the player's real items instead of blanks.
 func (c *ClientConnection) writeInventoryMirror(buf *bytes.Buffer) {
-	for slot := int16(mainInvStart); slot < hotbarStart+9; slot++ {
-		writeStack(buf, c.inv.get(slot))
+	for slot := int16(inventory.MainStart); slot < inventory.HotbarStart+9; slot++ {
+		inventory.WriteSlot(buf, c.inv.Get(slot))
 	}
 }
 
@@ -86,11 +27,11 @@ func (c *ClientConnection) sendInventoryContents() error {
 	var buf bytes.Buffer
 	buf.WriteByte(0)                        // window 0 = player inventory
 	protocol.WriteVarInt32ToBuffer(&buf, 0) // state id
-	protocol.WriteVarInt32ToBuffer(&buf, int32(playerInvSize))
-	for slot := int16(0); slot < playerInvSize; slot++ {
-		writeStack(&buf, c.inv.get(slot))
+	protocol.WriteVarInt32ToBuffer(&buf, int32(inventory.PlayerSlots))
+	for slot := int16(0); slot < inventory.PlayerSlots; slot++ {
+		inventory.WriteSlot(&buf, c.inv.Get(slot))
 	}
-	writeStack(&buf, c.cursor)
+	inventory.WriteSlot(&buf, c.cursor)
 	return c.safeWrite(packetid.CbPlaySetContainerContent, buf.Bytes())
 }
 
@@ -98,10 +39,10 @@ func (c *ClientConnection) sendInventoryContents() error {
 // arena selector) from the inventory. Called when the player enters a game
 // instance, where those slots belong to the game's economy.
 func (c *ClientConnection) stripNavigatorItems() {
-	for slot := int16(mainInvStart); slot < hotbarStart+9; slot++ {
-		st := c.inv.get(slot)
-		if st.Name == navigatorName || st.Name == selectorName {
-			c.inv.set(slot, itemStack{})
+	for slot := int16(inventory.MainStart); slot < inventory.HotbarStart+9; slot++ {
+		st := c.inv.Get(slot)
+		if st.Name == inventory.NavigatorName || st.Name == inventory.SelectorName {
+			c.inv.Set(slot, inventory.Stack{})
 		}
 	}
 }
@@ -119,12 +60,12 @@ func (c *ClientConnection) onSetCreativeSlot(packet *bytes.Buffer) {
 	if err != nil {
 		return
 	}
-	st, ok := readSlot(packet)
+	st, ok := inventory.ReadSlot(packet)
 	if !ok {
 		return
 	}
 	slot := int16(raw)
-	inRange := slot >= 1 && slot < playerInvSize // 0 is the crafting output
+	inRange := slot >= 1 && slot < inventory.PlayerSlots // 0 is the crafting output
 	switch {
 	case c.gamemode() != player.Creative:
 		c.flag("inventory.creative", fmt.Sprintf("creative slot %d ← item %d ×%d in %v", slot, st.ID, st.Count, c.gamemode()))
@@ -133,14 +74,14 @@ func (c *ClientConnection) onSetCreativeSlot(packet *bytes.Buffer) {
 	case !inRange:
 		c.flag("badpackets.creativeslot", fmt.Sprintf("creative slot %d", slot))
 		return
-	case !st.empty() && int(st.Count) > maxStackFor(st.ID):
+	case !st.Empty() && int(st.Count) > inventory.MaxStackFor(st.ID):
 		c.flag("badpackets.creativeslot", fmt.Sprintf("item %d ×%d over its stack size", st.ID, st.Count))
 	default:
-		c.inv.set(slot, st)
+		c.inv.Set(slot, st)
 		return
 	}
 	if inRange {
-		_ = c.sendSetSlot(0, slot, c.inv.get(slot))
+		_ = c.sendSetSlot(0, slot, c.inv.Get(slot))
 	}
 }
 
@@ -161,8 +102,8 @@ func (c *ClientConnection) giveItem(itemID int32, count int) int {
 	remaining := count
 	// giveStack takes a byte count; feed it in stack-sized chunks.
 	for remaining > 0 {
-		chunk := min(remaining, maxStackSize)
-		left := c.giveStack(itemStack{ID: itemID, Count: byte(chunk)})
+		chunk := min(remaining, inventory.MaxStack)
+		left := c.giveStack(inventory.Stack{ID: itemID, Count: byte(chunk)})
 		remaining -= chunk - left
 		if left > 0 {
 			break
@@ -173,26 +114,26 @@ func (c *ClientConnection) giveItem(itemID int32, count int) int {
 
 // giveStack adds st (with all its display / enchantment data) to the
 // inventory: first topping up stacks of the same kind, then filling empty
-// slots hotbar-first, like giveItem. Stack limits follow maxStackFor. Every
+// slots hotbar-first, like giveItem. Stack limits follow inventory.MaxStackFor. Every
 // touched slot is synced with its NBT. Returns the units that did not fit.
-func (c *ClientConnection) giveStack(st itemStack) int {
-	if st.empty() {
+func (c *ClientConnection) giveStack(st inventory.Stack) int {
+	if st.Empty() {
 		return 0
 	}
 	remaining := int(st.Count)
-	limit := maxStackFor(st.ID)
+	limit := inventory.MaxStackFor(st.ID)
 	for pass := 0; pass < 2 && remaining > 0; pass++ {
-		for _, slot := range giveSlotOrder {
+		for _, slot := range inventory.GiveOrder {
 			if remaining == 0 {
 				break
 			}
-			cur := c.inv.get(slot)
+			cur := c.inv.Get(slot)
 			if pass == 0 {
-				if cur.empty() || !cur.sameKind(st) || int(cur.Count) >= limit {
+				if cur.Empty() || !cur.SameKind(st) || int(cur.Count) >= limit {
 					continue
 				}
 			} else {
-				if !cur.empty() {
+				if !cur.Empty() {
 					continue
 				}
 				cur = st
@@ -201,7 +142,7 @@ func (c *ClientConnection) giveStack(st itemStack) int {
 			add := min(limit-int(cur.Count), remaining)
 			cur.Count += byte(add)
 			remaining -= add
-			c.inv.set(slot, cur)
+			c.inv.Set(slot, cur)
 			_ = c.sendSetSlot(0, slot, cur)
 		}
 	}
@@ -211,14 +152,14 @@ func (c *ClientConnection) giveStack(st itemStack) int {
 
 // setSlot overwrites one window-0 slot in the model and on the client. An
 // empty stack clears it. Armour / held changes are broadcast as equipment.
-func (c *ClientConnection) setSlot(slot int16, st itemStack) {
-	if slot < 0 || int(slot) >= playerInvSize {
+func (c *ClientConnection) setSlot(slot int16, st inventory.Stack) {
+	if slot < 0 || int(slot) >= inventory.PlayerSlots {
 		return
 	}
-	if st.empty() {
-		st = itemStack{}
+	if st.Empty() {
+		st = inventory.Stack{}
 	}
-	c.inv.set(slot, st)
+	c.inv.Set(slot, st)
 	_ = c.sendSetSlot(0, slot, st)
 	c.equipmentChanged()
 }
@@ -226,10 +167,10 @@ func (c *ClientConnection) setSlot(slot int16, st itemStack) {
 // clearInventory empties every slot (armour, main, hotbar, offhand, cursor)
 // and re-sends the whole window so the client agrees.
 func (c *ClientConnection) clearInventory() {
-	for slot := int16(0); slot < playerInvSize; slot++ {
-		c.inv.set(slot, itemStack{})
+	for slot := int16(0); slot < inventory.PlayerSlots; slot++ {
+		c.inv.Set(slot, inventory.Stack{})
 	}
-	c.cursor = itemStack{}
+	c.cursor = inventory.Stack{}
 	_ = c.sendInventoryContents()
 	c.equipmentChanged()
 }
@@ -237,8 +178,8 @@ func (c *ClientConnection) clearInventory() {
 // inventorySnapshot returns a copy of every non-empty slot with its index.
 func (c *ClientConnection) inventorySnapshot() []indexedStack {
 	var out []indexedStack
-	for slot := int16(0); slot < playerInvSize; slot++ {
-		if st := c.inv.get(slot); !st.empty() {
+	for slot := int16(0); slot < inventory.PlayerSlots; slot++ {
+		if st := c.inv.Get(slot); !st.Empty() {
 			out = append(out, indexedStack{slot: slot, stack: st})
 		}
 	}
@@ -248,14 +189,14 @@ func (c *ClientConnection) inventorySnapshot() []indexedStack {
 // indexedStack pairs a stack with its window-0 slot.
 type indexedStack struct {
 	slot  int16
-	stack itemStack
+	stack inventory.Stack
 }
 
 // countItem sums the units of itemID across the main inventory + hotbar.
 func (c *ClientConnection) countItem(itemID int32) int {
 	n := 0
-	for _, slot := range giveSlotOrder {
-		if st := c.inv.get(slot); !st.empty() && st.ID == itemID {
+	for _, slot := range inventory.GiveOrder {
+		if st := c.inv.Get(slot); !st.Empty() && st.ID == itemID {
 			n += int(st.Count)
 		}
 	}
@@ -273,45 +214,32 @@ func (c *ClientConnection) takeItem(itemID int32, count int) bool {
 		return false
 	}
 	remaining := count
-	for idx := len(giveSlotOrder) - 1; idx >= 0 && remaining > 0; idx-- {
-		slot := giveSlotOrder[idx]
-		st := c.inv.get(slot)
-		if st.empty() || st.ID != itemID {
+	for idx := len(inventory.GiveOrder) - 1; idx >= 0 && remaining > 0; idx-- {
+		slot := inventory.GiveOrder[idx]
+		st := c.inv.Get(slot)
+		if st.Empty() || st.ID != itemID {
 			continue
 		}
 		take := min(int(st.Count), remaining)
 		st.Count -= byte(take)
 		remaining -= take
 		if st.Count == 0 {
-			st = itemStack{}
+			st = inventory.Stack{}
 		}
-		c.inv.set(slot, st)
+		c.inv.Set(slot, st)
 		_ = c.sendSetSlot(0, slot, st)
 	}
 	return true
 }
 
-// giveSlotOrder is the slot visiting order for giveItem: the 9 hotbar slots
-// first, then the 27 main-inventory slots.
-var giveSlotOrder = func() []int16 {
-	order := make([]int16, 0, 36)
-	for slot := int16(hotbarStart); slot < hotbarStart+9; slot++ {
-		order = append(order, slot)
-	}
-	for slot := int16(mainInvStart); slot < hotbarStart; slot++ {
-		order = append(order, slot)
-	}
-	return order
-}()
-
 // sendSetSlot writes a single inventory slot on the client (Set Container
 // Slot). windowID 0 is the player's own inventory; slot is a window-0 index.
-func (c *ClientConnection) sendSetSlot(windowID byte, slot int16, st itemStack) error {
+func (c *ClientConnection) sendSetSlot(windowID byte, slot int16, st inventory.Stack) error {
 	var buf bytes.Buffer
 	buf.WriteByte(windowID)
 	protocol.WriteVarInt32ToBuffer(&buf, 0) // state id
 	buf.Write(protocol.WriteShort(slot))
-	writeStack(&buf, st) // keeps name / lore / enchantments / damage
+	inventory.WriteSlot(&buf, st) // keeps name / lore / enchantments / damage
 	return c.safeWrite(packetid.CbPlaySetContainerSlot, buf.Bytes())
 }
 
@@ -323,16 +251,16 @@ func (c *ClientConnection) consumeHeld() {
 	if c.gamemode() == player.Creative {
 		return
 	}
-	slot := int16(hotbarStart) + int16(c.heldSlot.Load())
-	st := c.inv.get(slot)
-	if st.empty() {
+	slot := int16(inventory.HotbarStart) + int16(c.heldSlot.Load())
+	st := c.inv.Get(slot)
+	if st.Empty() {
 		return
 	}
 	st.Count--
 	if st.Count == 0 {
-		st = itemStack{}
+		st = inventory.Stack{}
 	}
-	c.inv.set(slot, st)
+	c.inv.Set(slot, st)
 	_ = c.sendSetSlot(0, slot, st)
 	c.equipmentChanged()
 }
@@ -340,8 +268,8 @@ func (c *ClientConnection) consumeHeld() {
 // heldItemName returns the namespaced id of the item in the selected hotbar
 // slot, or "" if the slot is empty / the item id is unknown.
 func (c *ClientConnection) heldItemName() string {
-	st := c.inv.held(c.heldSlot.Load())
-	if st.empty() {
+	st := c.inv.Held(c.heldSlot.Load())
+	if st.Empty() {
 		return ""
 	}
 	name, ok := world.ItemName(st.ID)

@@ -2,6 +2,7 @@ package server
 
 import (
 	"math"
+	"minecraft-server/server/inventory"
 	"time"
 )
 
@@ -27,9 +28,9 @@ const (
 // dropHeld throws one unit (all=false) or the whole stack (all=true) from
 // the selected hotbar slot and syncs the slot to the client.
 func (c *ClientConnection) dropHeld(all bool) {
-	slot := int16(hotbarStart) + int16(c.heldSlot.Load())
-	st := c.inv.get(slot)
-	if st.empty() || st.undroppable() {
+	slot := int16(inventory.HotbarStart) + int16(c.heldSlot.Load())
+	st := c.inv.Get(slot)
+	if st.Empty() || st.Undroppable() {
 		_ = c.sendSetSlot(0, slot, st) // undo the client's predicted drop
 		return
 	}
@@ -46,9 +47,9 @@ func (c *ClientConnection) dropHeld(all bool) {
 	thrown.Count = byte(n)
 	st.Count -= byte(n)
 	if st.Count == 0 {
-		st = itemStack{}
+		st = inventory.Stack{}
 	}
-	c.inv.set(slot, st)
+	c.inv.Set(slot, st)
 	_ = c.sendSetSlot(0, slot, st)
 	c.equipmentChanged()
 	c.throwStack(thrown)
@@ -56,8 +57,8 @@ func (c *ClientConnection) dropHeld(all bool) {
 
 // throwStack spawns the stack flying from the player's eyes in the direction
 // they look (vanilla drop velocity), keeping its NBT.
-func (c *ClientConnection) throwStack(st itemStack) {
-	if st.empty() || c.instance == nil || c.player == nil {
+func (c *ClientConnection) throwStack(st inventory.Stack) {
+	if st.Empty() || c.instance == nil || c.player == nil {
 		return
 	}
 	s := c.player.Snapshot()
@@ -72,15 +73,15 @@ func (c *ClientConnection) throwStack(st itemStack) {
 // dropCursor throws whatever the client is carrying on its cursor (window
 // closed with an item picked up) and clears it.
 func (c *ClientConnection) dropCursor() {
-	if c.cursor.empty() {
+	if c.cursor.Empty() {
 		return
 	}
 	st := c.cursor
-	c.cursor = itemStack{}
-	if st.undroppable() {
+	c.cursor = inventory.Stack{}
+	if st.Undroppable() {
 		// Back into the inventory instead of onto the ground.
 		if left := c.giveStack(st); left > 0 {
-			c.cursor = withCount(st, left) // nowhere to go: keep it carried
+			c.cursor = inventory.WithCount(st, left) // nowhere to go: keep it carried
 		}
 		return
 	}

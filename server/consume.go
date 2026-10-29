@@ -8,6 +8,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
@@ -121,9 +122,9 @@ func (i *Instance) consumeTick(tick uint64) {
 
 // finishConsume applies the item's effect and spends it.
 func (c *ClientConnection) finishConsume(u *useState) {
-	slot := int16(hotbarStart) + int16(u.slot)
-	st := c.inv.get(slot)
-	if st.empty() {
+	slot := int16(inventory.HotbarStart) + int16(u.slot)
+	st := c.inv.Get(slot)
+	if st.Empty() {
 		return
 	}
 	if !c.instance.fireItemConsume(c, st) {
@@ -144,8 +145,8 @@ func (c *ClientConnection) finishConsume(u *useState) {
 		// The bottle stays behind (not in creative).
 		if c.gamemode() != player.Creative {
 			bottle, _ := world.ItemByName("minecraft:glass_bottle")
-			c.inv.set(slot, itemStack{ID: bottle, Count: 1})
-			_ = c.sendSetSlot(0, slot, c.inv.get(slot))
+			c.inv.Set(slot, inventory.Stack{ID: bottle, Count: 1})
+			_ = c.sendSetSlot(0, slot, c.inv.Get(slot))
 			c.equipmentChanged()
 		}
 		return

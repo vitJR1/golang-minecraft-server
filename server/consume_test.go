@@ -6,6 +6,7 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
@@ -14,7 +15,7 @@ func TestGoldenAppleEffectsAfterEating(t *testing.T) {
 	c := tntConn(inst, "Eater", player.Survival, 0, 64, 0)
 	c.player.SetHealth(10)
 	apple, _ := world.ItemByName("minecraft:golden_apple")
-	c.inv.set(hotbarStart, itemStack{ID: apple, Count: 2})
+	c.inv.Set(inventory.HotbarStart, inventory.Stack{ID: apple, Count: 2})
 	inst.tickCount.Store(100)
 
 	c.startUse("minecraft:golden_apple")
@@ -37,7 +38,7 @@ func TestGoldenAppleEffectsAfterEating(t *testing.T) {
 	if a := c.player.Absorption(); a != 4 {
 		t.Errorf("absorption pool after the apple: %v, want 4 (two yellow hearts)", a)
 	}
-	if st := c.inv.get(hotbarStart); st.Count != 1 {
+	if st := c.inv.Get(inventory.HotbarStart); st.Count != 1 {
 		t.Errorf("one apple should be eaten, left %+v", st)
 	}
 	if c.using.Load() != nil {
@@ -50,13 +51,13 @@ func TestEatingCancelledBySlotChange(t *testing.T) {
 	c := tntConn(inst, "Fickle", player.Survival, 0, 64, 0)
 	c.player.SetHealth(10)
 	apple, _ := world.ItemByName("minecraft:golden_apple")
-	c.inv.set(hotbarStart, itemStack{ID: apple, Count: 1})
+	c.inv.Set(inventory.HotbarStart, inventory.Stack{ID: apple, Count: 1})
 	c.startUse("minecraft:golden_apple")
 	c.heldSlot.Store(3)
 	for tick := uint64(1); tick <= consumeTicks+5; tick++ {
 		inst.consumeTick(tick)
 	}
-	if c.player.Health() != 10 || c.inv.get(hotbarStart).Count != 1 {
+	if c.player.Health() != 10 || c.inv.Get(inventory.HotbarStart).Count != 1 {
 		t.Error("switching slots must abandon the apple")
 	}
 }
@@ -65,14 +66,14 @@ func TestPotionAppliesEffectAndLeavesBottle(t *testing.T) {
 	inst := bareInstance(New(), world.NewMemoryWorld())
 	c := tntConn(inst, "Drinker", player.Survival, 0, 64, 0)
 	potion, _ := world.ItemByName("minecraft:potion")
-	c.inv.set(hotbarStart, itemStack{ID: potion, Count: 1, Potion: "minecraft:strong_swiftness"})
+	c.inv.Set(inventory.HotbarStart, inventory.Stack{ID: potion, Count: 1, Potion: "minecraft:strong_swiftness"})
 	c.startUse("minecraft:potion")
 	inst.consumeTick(consumeTicks)
 	if c.effectLevel(EffectSpeed) != 2 {
 		t.Errorf("strong swiftness should give Speed II, got %d", c.effectLevel(EffectSpeed))
 	}
 	bottle, _ := world.ItemByName("minecraft:glass_bottle")
-	if st := c.inv.get(hotbarStart); st.ID != bottle {
+	if st := c.inv.Get(inventory.HotbarStart); st.ID != bottle {
 		t.Errorf("drinking should leave a glass bottle, got %+v", st)
 	}
 	if _, _, d, ok := potionEffect("minecraft:invisibility"); !ok || d != 3*time.Minute {
@@ -84,10 +85,10 @@ func TestPearlAndFireChargeAreConsumed(t *testing.T) {
 	inst := bareInstance(New(), tntWorld())
 	c := tntConn(inst, "Thrower", player.Survival, 0.5, 64, 0.5)
 	pearl, _ := world.ItemByName("minecraft:ender_pearl")
-	c.inv.set(hotbarStart, itemStack{ID: pearl, Count: 3})
+	c.inv.Set(inventory.HotbarStart, inventory.Stack{ID: pearl, Count: 3})
 	c.throwProjectile("minecraft:ender_pearl")
 	c.consumeHeld()
-	if st := c.inv.get(hotbarStart); st.Count != 2 {
+	if st := c.inv.Get(inventory.HotbarStart); st.Count != 2 {
 		t.Errorf("pearl should be spent: %+v", st)
 	}
 	inst.projMu.Lock()

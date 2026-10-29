@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"minecraft-server/player"
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
@@ -97,7 +98,7 @@ func TestDropItemMergesNearby(t *testing.T) {
 
 func TestDropItemMergeRespectsStackLimit(t *testing.T) {
 	inst := bareInstance(New(), floorWorld())
-	inst.DropItem(0.5, 70, 0.5, "minecraft:iron_ingot", maxStackSize)
+	inst.DropItem(0.5, 70, 0.5, "minecraft:iron_ingot", inventory.MaxStack)
 	inst.itemTick(0)
 	inst.DropItem(0.5, 70, 0.5, "minecraft:iron_ingot", 1)
 	if len(inst.items) != 2 {
@@ -124,8 +125,8 @@ func TestItemPickedUpByNearbyPlayer(t *testing.T) {
 	}
 	iron, _ := world.ItemByName("minecraft:iron_ingot")
 	total := 0
-	for slot := int16(mainInvStart); slot < hotbarStart+9; slot++ {
-		if st := c.inv.get(slot); st.ID == iron {
+	for slot := int16(inventory.MainStart); slot < inventory.HotbarStart+9; slot++ {
+		if st := c.inv.Get(slot); st.ID == iron {
 			total += int(st.Count)
 		}
 	}
@@ -157,10 +158,10 @@ func TestItemPickupLeavesOverflowOnGround(t *testing.T) {
 	iron, _ := world.ItemByName("minecraft:iron_ingot")
 	// Fill every main-inventory + hotbar slot with full iron stacks except one
 	// slot with 62, so only 2 more units fit.
-	for slot := int16(mainInvStart); slot < hotbarStart+9; slot++ {
-		c.inv.set(slot, itemStack{ID: iron, Count: maxStackSize})
+	for slot := int16(inventory.MainStart); slot < inventory.HotbarStart+9; slot++ {
+		c.inv.Set(slot, inventory.Stack{ID: iron, Count: inventory.MaxStack})
 	}
-	c.inv.set(hotbarStart, itemStack{ID: iron, Count: maxStackSize - 2})
+	c.inv.Set(inventory.HotbarStart, inventory.Stack{ID: iron, Count: inventory.MaxStack - 2})
 	inst.DropItem(0.5, 70, 0.5, "minecraft:iron_ingot", 5)
 	for i := 0; i <= itemPickupDelay+1; i++ {
 		inst.itemTick(uint64(i))
@@ -182,7 +183,7 @@ func TestItemDespawns(t *testing.T) {
 }
 
 func TestItemPayloads(t *testing.T) {
-	it := &itemEntity{eid: 9, stack: itemStack{ID: 1, Count: 3}, x: 1, y: 2, z: 3}
+	it := &itemEntity{eid: 9, stack: inventory.Stack{ID: 1, Count: 3}, x: 1, y: 2, z: 3}
 	it.uuid = entityUUID(it.eid)
 	spawn := spawnItemPayload(it)
 	// eid(1) + uuid(16) + type(1) + 3 doubles(24) + 3 angles + data(1) + 3 shorts(6)

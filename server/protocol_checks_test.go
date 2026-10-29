@@ -8,6 +8,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
@@ -95,7 +96,7 @@ func TestDropFloodCapped(t *testing.T) {
 	inst := bareInstance(New(), tntWorld())
 	c := offlineConn(inst, "Dropper", player.Survival, 0.5, 64, 0.5)
 	iron, _ := world.ItemByName("minecraft:iron_ingot")
-	c.inv.set(hotbarStart, itemStack{ID: iron, Count: 64})
+	c.inv.Set(inventory.HotbarStart, inventory.Stack{ID: iron, Count: 64})
 
 	for i := 0; i < 64; i++ {
 		dropAction(t, c, 4) // Q: one unit
@@ -104,7 +105,7 @@ func TestDropFloodCapped(t *testing.T) {
 	if dropped < int(anticheat.DropBurst) || dropped > int(anticheat.DropBurst)+2 {
 		t.Fatalf("dropped %d in a burst, want about %v", dropped, anticheat.DropBurst)
 	}
-	if left := int(c.inv.get(hotbarStart).Count); left+dropped != 64 {
+	if left := int(c.inv.Get(inventory.HotbarStart).Count); left+dropped != 64 {
 		t.Fatalf("items lost: %d dropped + %d left != 64", dropped, left)
 	}
 }
@@ -113,13 +114,13 @@ func TestWindowThrowsShareDropBudget(t *testing.T) {
 	inst := bareInstance(New(), tntWorld())
 	c := offlineConn(inst, "Thrower", player.Survival, 0.5, 64, 0.5)
 	iron, _ := world.ItemByName("minecraft:iron_ingot")
-	c.inv.set(mainInvStart, itemStack{ID: iron, Count: 64})
+	c.inv.Set(inventory.MainStart, inventory.Stack{ID: iron, Count: 64})
 	for i := 0; i < 64; i++ {
-		clickIn(t, c, 0, int16(mainInvStart), 0, clickThrow)
+		clickIn(t, c, 0, int16(inventory.MainStart), 0, inventory.ClickThrow)
 	}
 	dropped := itemsIn(inst)[iron]
-	if dropped > int(anticheat.DropBurst)+2 || dropped+int(c.inv.get(mainInvStart).Count) != 64 {
-		t.Fatalf("window throws: dropped %d, left %d", dropped, c.inv.get(mainInvStart).Count)
+	if dropped > int(anticheat.DropBurst)+2 || dropped+int(c.inv.Get(inventory.MainStart).Count) != 64 {
+		t.Fatalf("window throws: dropped %d, left %d", dropped, c.inv.Get(inventory.MainStart).Count)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
@@ -21,40 +22,40 @@ func TestGiveItemFillsHotbarBeforeMainInventory(t *testing.T) {
 	if left := c.giveItem(iron, 3); left != 0 {
 		t.Fatalf("leftover: %d", left)
 	}
-	if st := c.inv.get(hotbarStart); st.ID != iron || st.Count != 3 {
+	if st := c.inv.Get(inventory.HotbarStart); st.ID != iron || st.Count != 3 {
 		t.Errorf("hotbar slot 0: %+v, want 3 iron", st)
 	}
-	if st := c.inv.get(mainInvStart); !st.empty() {
+	if st := c.inv.Get(inventory.MainStart); !st.Empty() {
 		t.Errorf("main inventory must stay empty, got %+v", st)
 	}
 
 	// A different item takes the next free hotbar slot.
 	c.giveItem(sword, 1)
-	if st := c.inv.get(hotbarStart + 1); st.ID != sword {
+	if st := c.inv.Get(inventory.HotbarStart + 1); st.ID != sword {
 		t.Errorf("hotbar slot 1: %+v, want sword", st)
 	}
 
 	// Existing partial stacks are topped up (hotbar stack first, then a
 	// main-inventory stack) before any empty slot is used.
-	c.inv.set(mainInvStart+5, itemStack{ID: iron, Count: 60})
+	c.inv.Set(inventory.MainStart+5, inventory.Stack{ID: iron, Count: 60})
 	c.giveItem(iron, 65)
-	if st := c.inv.get(hotbarStart); st.Count != 64 {
+	if st := c.inv.Get(inventory.HotbarStart); st.Count != 64 {
 		t.Errorf("hotbar stack should be topped up to 64 first, got %d", st.Count)
 	}
-	if st := c.inv.get(mainInvStart + 5); st.Count != 64 {
+	if st := c.inv.Get(inventory.MainStart + 5); st.Count != 64 {
 		t.Errorf("main stack should be topped up to 64 next, got %d", st.Count)
 	}
-	if st := c.inv.get(hotbarStart + 2); !st.empty() {
+	if st := c.inv.Get(inventory.HotbarStart + 2); !st.Empty() {
 		t.Errorf("no leftover iron expected in a new slot, got %+v", st)
 	}
 
 	// Hotbar full → a new item spills into the main inventory, first free slot.
-	for slot := int16(hotbarStart + 2); slot < hotbarStart+9; slot++ {
-		c.inv.set(slot, itemStack{ID: sword, Count: 1})
+	for slot := int16(inventory.HotbarStart + 2); slot < inventory.HotbarStart+9; slot++ {
+		c.inv.Set(slot, inventory.Stack{ID: sword, Count: 1})
 	}
 	diamond, _ := world.ItemByName("minecraft:diamond")
 	c.giveItem(diamond, 1)
-	if st := c.inv.get(mainInvStart); st.ID != diamond {
+	if st := c.inv.Get(inventory.MainStart); st.ID != diamond {
 		t.Errorf("overflow should land in main slot 9, got %+v", st)
 	}
 }
@@ -64,8 +65,8 @@ func TestCountAndTakeItem(t *testing.T) {
 	c := offlineConn(inst, "Buyer", player.Survival, 0, 64, 0)
 
 	iron, _ := world.ItemByName("minecraft:iron_ingot")
-	c.inv.set(hotbarStart, itemStack{ID: iron, Count: 10})
-	c.inv.set(mainInvStart+3, itemStack{ID: iron, Count: 20})
+	c.inv.Set(inventory.HotbarStart, inventory.Stack{ID: iron, Count: 10})
+	c.inv.Set(inventory.MainStart+3, inventory.Stack{ID: iron, Count: 20})
 	if got := c.countItem(iron); got != 30 {
 		t.Fatalf("count: %d, want 30", got)
 	}
@@ -79,10 +80,10 @@ func TestCountAndTakeItem(t *testing.T) {
 	if !c.takeItem(iron, 25) {
 		t.Fatal("take 25 should succeed")
 	}
-	if st := c.inv.get(mainInvStart + 3); !st.empty() {
+	if st := c.inv.Get(inventory.MainStart + 3); !st.Empty() {
 		t.Errorf("main stack should be gone, got %+v", st)
 	}
-	if st := c.inv.get(hotbarStart); st.Count != 5 {
+	if st := c.inv.Get(inventory.HotbarStart); st.Count != 5 {
 		t.Errorf("hotbar stack: %d, want 5", st.Count)
 	}
 	if got := c.countItem(iron); got != 5 {
@@ -98,7 +99,7 @@ func TestNavigatorStrippedOnGameJoinAndKeptInHub(t *testing.T) {
 	s.AddInstance(arena)
 
 	c := offlineHub(s, "Gamer")
-	if c.inv.get(hotbarStart).Name != navigatorName {
+	if c.inv.Get(inventory.HotbarStart).Name != inventory.NavigatorName {
 		t.Fatal("hub join should hand out the navigator")
 	}
 
@@ -109,10 +110,10 @@ func TestNavigatorStrippedOnGameJoinAndKeptInHub(t *testing.T) {
 		t.Fatal(err)
 	}
 	drain(c)
-	if st := c.inv.get(hotbarStart); !st.empty() {
+	if st := c.inv.Get(inventory.HotbarStart); !st.Empty() {
 		t.Errorf("navigator should be stripped in a game instance, got %+v", st)
 	}
-	if st := c.inv.get(hotbarStart + 1); st.ID != iron || st.Count != 5 {
+	if st := c.inv.Get(inventory.HotbarStart + 1); st.ID != iron || st.Count != 5 {
 		t.Errorf("real items must survive the move, got %+v", st)
 	}
 
@@ -122,10 +123,10 @@ func TestNavigatorStrippedOnGameJoinAndKeptInHub(t *testing.T) {
 		t.Fatal(err)
 	}
 	drain(c)
-	if c.inv.get(hotbarStart).Name != navigatorName {
+	if c.inv.Get(inventory.HotbarStart).Name != inventory.NavigatorName {
 		t.Error("hub join should hand out the navigator again")
 	}
-	if st := c.inv.get(hotbarStart + 1); !st.empty() {
+	if st := c.inv.Get(inventory.HotbarStart + 1); !st.Empty() {
 		t.Errorf("game loot must not follow the player into the hub: %+v", st)
 	}
 }
@@ -145,7 +146,7 @@ func TestReturnToHubResetsSpectatorAndState(t *testing.T) {
 	// What a lost BedWars round leaves behind: spectator, kit, effects, low HP.
 	c.player.SetGamemode(player.Spectator)
 	sword, _ := world.ItemByName("minecraft:diamond_sword")
-	c.inv.set(hotbarStart, itemStack{ID: sword, Count: 1})
+	c.inv.Set(inventory.HotbarStart, inventory.Stack{ID: sword, Count: 1})
 	c.applyEffect(EffectSpeed, 2, time.Minute)
 	c.player.SetHealth(3)
 
@@ -162,11 +163,11 @@ func TestReturnToHubResetsSpectatorAndState(t *testing.T) {
 	if c.effectLevel(EffectSpeed) != 0 {
 		t.Error("effects must be cleared")
 	}
-	if st := c.inv.get(hotbarStart); st.Name != navigatorName {
+	if st := c.inv.Get(inventory.HotbarStart); st.Name != inventory.NavigatorName {
 		t.Errorf("hotbar 0 should be the navigator, got %+v", st)
 	}
-	for slot := int16(0); slot < playerInvSize; slot++ {
-		if st := c.inv.get(slot); !st.empty() && st.Name != navigatorName {
+	for slot := int16(0); slot < inventory.PlayerSlots; slot++ {
+		if st := c.inv.Get(slot); !st.Empty() && st.Name != inventory.NavigatorName {
 			t.Errorf("slot %d still holds %+v", slot, st)
 		}
 	}
@@ -204,16 +205,16 @@ func TestWindowZeroClickUpdatesModel(t *testing.T) {
 	c := offlineConn(inst, "Mover", player.Survival, 0, 64, 0)
 
 	iron, _ := world.ItemByName("minecraft:iron_ingot")
-	c.inv.set(hotbarStart, itemStack{ID: iron, Count: 1})
-	c.inv.set(hotbarStart+1, itemStack{ID: iron, Count: 63})
+	c.inv.Set(inventory.HotbarStart, inventory.Stack{ID: iron, Count: 1})
+	c.inv.Set(inventory.HotbarStart+1, inventory.Stack{ID: iron, Count: 63})
 
 	// Pick up the single iron, then left-click the 63 stack: they merge.
-	clickSlot(t, c, int16(hotbarStart), 0, 0,
-		map[int16]itemStack{int16(hotbarStart): {}}, itemStack{ID: iron, Count: 1})
-	clickSlot(t, c, int16(hotbarStart+1), 0, 0,
-		map[int16]itemStack{int16(hotbarStart + 1): {ID: iron, Count: 64}}, itemStack{})
-	if !c.inv.get(hotbarStart).empty() || c.inv.get(hotbarStart+1).Count != 64 {
-		t.Errorf("model after merge: %+v / %+v", c.inv.get(hotbarStart), c.inv.get(hotbarStart+1))
+	clickSlot(t, c, int16(inventory.HotbarStart), 0, 0,
+		map[int16]inventory.Stack{int16(inventory.HotbarStart): {}}, inventory.Stack{ID: iron, Count: 1})
+	clickSlot(t, c, int16(inventory.HotbarStart+1), 0, 0,
+		map[int16]inventory.Stack{int16(inventory.HotbarStart + 1): {ID: iron, Count: 64}}, inventory.Stack{})
+	if !c.inv.Get(inventory.HotbarStart).Empty() || c.inv.Get(inventory.HotbarStart+1).Count != 64 {
+		t.Errorf("model after merge: %+v / %+v", c.inv.Get(inventory.HotbarStart), c.inv.Get(inventory.HotbarStart+1))
 	}
 	if got := c.countItem(iron); got != 64 {
 		t.Errorf("count after merge: %d", got)
@@ -224,15 +225,15 @@ func TestMenuWindowMirrorsRealInventory(t *testing.T) {
 	inst := bareInstance(New(), world.NewMemoryWorld())
 	c := offlineConn(inst, "Shopper", player.Survival, 0, 64, 0)
 	iron, _ := world.ItemByName("minecraft:iron_ingot")
-	c.inv.set(mainInvStart+2, itemStack{ID: iron, Count: 7})
-	c.inv.set(hotbarStart+4, itemStack{ID: iron, Count: 9})
+	c.inv.Set(inventory.MainStart+2, inventory.Stack{ID: iron, Count: 7})
+	c.inv.Set(inventory.HotbarStart+4, inventory.Stack{ID: iron, Count: 9})
 
 	var buf bytes.Buffer
 	c.writeInventoryMirror(&buf)
 	// 36 wire slots: parse them back and check the two stacks are present
 	// at the expected positions (main index 2, hotbar index 4 → 27+4).
 	for i := 0; i < 36; i++ {
-		st, ok := readSlot(&buf)
+		st, ok := inventory.ReadSlot(&buf)
 		if !ok {
 			t.Fatalf("slot %d unreadable", i)
 		}
@@ -246,7 +247,7 @@ func TestMenuWindowMirrorsRealInventory(t *testing.T) {
 				t.Errorf("hotbar slot 4: %+v", st)
 			}
 		default:
-			if !st.empty() {
+			if !st.Empty() {
 				t.Errorf("slot %d should be empty, got %+v", i, st)
 			}
 		}

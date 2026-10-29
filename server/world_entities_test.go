@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"minecraft-server/player"
+	"minecraft-server/server/inventory"
 	"testing"
 
 	"minecraft-server/protocol"
@@ -126,8 +127,8 @@ func TestCreativeSlotHeldItem(t *testing.T) {
 	}
 
 	var b bytes.Buffer
-	b.Write(protocol.WriteShort(hotbarStart)) // slot 36
-	b.Write(protocol.WriteSlot(frameID, 1))   // present item (with NBT terminator)
+	b.Write(protocol.WriteShort(inventory.HotbarStart)) // slot 36
+	b.Write(protocol.WriteSlot(frameID, 1))             // present item (with NBT terminator)
 	c.onSetCreativeSlot(&b)
 
 	if got := c.heldItemName(); got != "minecraft:item_frame" {
@@ -136,7 +137,7 @@ func TestCreativeSlotHeldItem(t *testing.T) {
 
 	// Clearing the slot (empty slot) drops the held item.
 	var empty bytes.Buffer
-	empty.Write(protocol.WriteShort(hotbarStart))
+	empty.Write(protocol.WriteShort(inventory.HotbarStart))
 	empty.Write(protocol.WriteEmptySlot())
 	c.onSetCreativeSlot(&empty)
 	if got := c.heldItemName(); got != "" {

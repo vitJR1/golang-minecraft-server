@@ -4,6 +4,7 @@ import (
 	"math"
 
 	"minecraft-server/player"
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
@@ -107,9 +108,9 @@ func (c *ClientConnection) swapHeld(item string) {
 	if !ok {
 		return
 	}
-	slot := int16(hotbarStart) + int16(c.heldSlot.Load())
-	st := itemStack{ID: id, Count: 1}
-	c.inv.set(slot, st)
+	slot := int16(inventory.HotbarStart) + int16(c.heldSlot.Load())
+	st := inventory.Stack{ID: id, Count: 1}
+	c.inv.Set(slot, st)
 	_ = c.sendSetSlot(0, slot, st)
 	c.equipmentChanged()
 }

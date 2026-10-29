@@ -3,6 +3,7 @@ package server
 import (
 	"math"
 
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
@@ -30,8 +31,8 @@ func (c *ClientConnection) absorbDamage(dmg float32) float32 {
 	epf := 0
 	worn := 0
 	for _, slot := range armorSlots {
-		st := c.inv.get(slot)
-		if st.empty() {
+		st := c.inv.Get(slot)
+		if st.Empty() {
 			continue
 		}
 		name, ok := world.ItemName(st.ID)
@@ -66,8 +67,8 @@ func (c *ClientConnection) absorbDamage(dmg float32) float32 {
 func (c *ClientConnection) wearArmor(n int) {
 	changed := false
 	for _, slot := range armorSlots {
-		st := c.inv.get(slot)
-		if st.empty() {
+		st := c.inv.Get(slot)
+		if st.Empty() {
 			continue
 		}
 		name, ok := world.ItemName(st.ID)
@@ -83,13 +84,13 @@ func (c *ClientConnection) wearArmor(n int) {
 		}
 		st.Damage += n
 		if st.Damage >= maxDamage {
-			st = itemStack{}
+			st = inventory.Stack{}
 			if c.player != nil {
 				s := c.player.Snapshot()
 				c.instance.playSound("minecraft:entity.item.break", soundCategoryPlayer, s.X, s.Y, s.Z, 0.8, 1)
 			}
 		}
-		c.inv.set(slot, st)
+		c.inv.Set(slot, st)
 		_ = c.sendSetSlot(0, slot, st)
 		changed = true
 	}

@@ -5,13 +5,14 @@ import (
 
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/inventory"
 )
 
 // equipment.go: Set Equipment (Cb 0x55) — what other players see in a
 // player's hands and on their body. The payload is built from the
 // server-side inventory model (window-0 slots: 5 helmet, 6 chestplate,
 // 7 leggings, 8 boots, 45 off hand, 36+heldSlot main hand) through
-// writeStack, so NBT (enchant glint, dyed leather) travels along.
+// inventory.WriteSlot, so NBT (enchant glint, dyed leather) travels along.
 //
 // It is broadcast to everyone else in the instance whenever something that
 // shows changes — the selected hotbar slot, the held stack, armor — via
@@ -43,14 +44,14 @@ const (
 func (c *ClientConnection) equipmentPayload() []byte {
 	entries := []struct {
 		slot byte
-		st   itemStack
+		st   inventory.Stack
 	}{
-		{equipMainHand, c.inv.held(c.heldSlot.Load())},
-		{equipOffHand, c.inv.get(offHandSlot)},
-		{equipBoots, c.inv.get(armorBootsSlot)},
-		{equipLeggings, c.inv.get(armorLeggingsSlot)},
-		{equipChestplate, c.inv.get(armorChestplateSlot)},
-		{equipHelmet, c.inv.get(armorHelmetSlot)},
+		{equipMainHand, c.inv.Held(c.heldSlot.Load())},
+		{equipOffHand, c.inv.Get(offHandSlot)},
+		{equipBoots, c.inv.Get(armorBootsSlot)},
+		{equipLeggings, c.inv.Get(armorLeggingsSlot)},
+		{equipChestplate, c.inv.Get(armorChestplateSlot)},
+		{equipHelmet, c.inv.Get(armorHelmetSlot)},
 	}
 	var buf bytes.Buffer
 	protocol.WriteVarInt32ToBuffer(&buf, c.player.EntityID)
@@ -60,7 +61,7 @@ func (c *ClientConnection) equipmentPayload() []byte {
 			slot |= 0x80 // another entry follows
 		}
 		buf.WriteByte(slot)
-		writeStack(&buf, e.st)
+		inventory.WriteSlot(&buf, e.st)
 	}
 	return buf.Bytes()
 }

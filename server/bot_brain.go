@@ -10,6 +10,7 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/server/botnav"
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
@@ -1245,9 +1246,9 @@ func (c *ClientConnection) countItemName(item string) int {
 
 // botHold selects a hotbar slot holding a stack that matches, swapping one
 // in from the main inventory if needed. False when there's none.
-func (c *ClientConnection) botHold(match func(itemStack) bool) bool {
+func (c *ClientConnection) botHold(match func(inventory.Stack) bool) bool {
 	for k := int16(0); k < 9; k++ {
-		if st := c.inv.get(hotbarStart + k); !st.empty() && match(st) {
+		if st := c.inv.Get(inventory.HotbarStart + k); !st.Empty() && match(st) {
 			if c.heldSlot.Load() != int32(k) {
 				c.cancelUse()
 				c.heldSlot.Store(int32(k))
@@ -1256,11 +1257,11 @@ func (c *ClientConnection) botHold(match func(itemStack) bool) bool {
 			return true
 		}
 	}
-	for s := int16(mainInvStart); s < hotbarStart; s++ {
-		if st := c.inv.get(s); !st.empty() && match(st) {
-			last := int16(hotbarStart + 8)
+	for s := int16(inventory.MainStart); s < inventory.HotbarStart; s++ {
+		if st := c.inv.Get(s); !st.Empty() && match(st) {
+			last := int16(inventory.HotbarStart + 8)
 			c.cancelUse()
-			c.inv.slots[s], c.inv.slots[last] = c.inv.slots[last], c.inv.slots[s]
+			c.inv.Slots[s], c.inv.Slots[last] = c.inv.Slots[last], c.inv.Slots[s]
 			c.heldSlot.Store(8)
 			c.equipmentChanged()
 			return true
@@ -1271,10 +1272,10 @@ func (c *ClientConnection) botHold(match func(itemStack) bool) bool {
 
 // weaponDamage is how hard a stack hits: the item's attack damage plus
 // Sharpness, as handleAttack computes it.
-func weaponDamage(st itemStack) float32 {
+func weaponDamage(st inventory.Stack) float32 {
 	name, _ := world.ItemName(st.ID)
 	d := world.AttackDamage(name)
-	if lvl := st.enchantLevel(EnchantSharpness); lvl > 0 {
+	if lvl := st.EnchantLevel(EnchantSharpness); lvl > 0 {
 		d += 0.5*float32(lvl) + 0.5
 	}
 	return d
@@ -1284,20 +1285,20 @@ func weaponDamage(st itemStack) float32 {
 // what's in hand.
 func (b *bot) holdBestWeapon() {
 	c := b.c
-	held := c.inv.held(c.heldSlot.Load())
-	best, bestDamage := itemStack{}, float32(1) // a bare hand
-	if !held.empty() {
+	held := c.inv.Held(c.heldSlot.Load())
+	best, bestDamage := inventory.Stack{}, float32(1) // a bare hand
+	if !held.Empty() {
 		bestDamage = weaponDamage(held)
 	}
-	for s := int16(mainInvStart); s < hotbarStart+9; s++ {
-		if st := c.inv.get(s); !st.empty() && weaponDamage(st) > bestDamage {
+	for s := int16(inventory.MainStart); s < inventory.HotbarStart+9; s++ {
+		if st := c.inv.Get(s); !st.Empty() && weaponDamage(st) > bestDamage {
 			best, bestDamage = st, weaponDamage(st)
 		}
 	}
-	if best.empty() {
+	if best.Empty() {
 		return
 	}
-	c.botHold(func(st itemStack) bool { return st.sameKind(best) && st.Count == best.Count })
+	c.botHold(func(st inventory.Stack) bool { return st.SameKind(best) && st.Count == best.Count })
 }
 
 // bestTool is the hotbar slot (-1: the bare hand) that digs blk fastest and
@@ -1307,8 +1308,8 @@ func (b *bot) bestTool(blk world.Block) (int32, int) {
 	info := world.BreakInfoFor(blk.Name)
 	bestSlot, bestTicks := int32(-1), world.BreakTicksWith(info, "", c.digContext())
 	for k := int32(0); k < 9; k++ {
-		st := c.inv.get(int16(hotbarStart) + int16(k))
-		if st.empty() {
+		st := c.inv.Get(int16(inventory.HotbarStart) + int16(k))
+		if st.Empty() {
 			continue
 		}
 		name, _ := world.ItemName(st.ID)
@@ -1340,7 +1341,7 @@ func (c *ClientConnection) botPlace(pos world.Position, item string) bool {
 // botPlaceWith places the first held-able block matching; a placed TNT
 // lights itself where the game wants it to (like a player's).
 func (c *ClientConnection) botPlaceWith(pos world.Position, match func(string) bool) bool {
-	if !c.botHold(func(st itemStack) bool {
+	if !c.botHold(func(st inventory.Stack) bool {
 		name, _ := world.ItemName(st.ID)
 		return match(name)
 	}) {

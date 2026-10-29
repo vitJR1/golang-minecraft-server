@@ -8,6 +8,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
@@ -89,7 +90,7 @@ func placeWith(t *testing.T, c *ClientConnection, clicked world.Position, face i
 
 func stoneStack(c *ClientConnection) {
 	stone, _ := world.ItemByName("minecraft:stone")
-	c.inv.set(hotbarStart, itemStack{ID: stone, Count: 64})
+	c.inv.Set(inventory.HotbarStart, inventory.Stack{ID: stone, Count: 64})
 	c.heldSlot.Store(0)
 }
 

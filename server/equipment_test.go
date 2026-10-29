@@ -7,21 +7,22 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
 // readEquipment parses a Set Equipment body into entity id + slot→stack.
-func readEquipment(t *testing.T, body []byte) (int32, map[byte]itemStack) {
+func readEquipment(t *testing.T, body []byte) (int32, map[byte]inventory.Stack) {
 	t.Helper()
 	buf := bytes.NewBuffer(body)
 	eid, _ := protocol.ReadVarInt(buf)
-	out := map[byte]itemStack{}
+	out := map[byte]inventory.Stack{}
 	for {
 		slot, err := buf.ReadByte()
 		if err != nil {
 			t.Fatal("truncated equipment")
 		}
-		st, ok := readSlot(buf)
+		st, ok := inventory.ReadSlot(buf)
 		if !ok {
 			t.Fatal("bad slot")
 		}
@@ -40,8 +41,8 @@ func TestEquipmentBroadcastToOthersOnly(t *testing.T) {
 
 	sword, _ := world.ItemByName("minecraft:iron_sword")
 	helmet, _ := world.ItemByName("minecraft:iron_helmet")
-	alice.inv.set(hotbarStart+2, itemStack{ID: sword, Count: 1, Enchantments: map[string]int{"minecraft:sharpness": 2}})
-	alice.inv.set(armorHelmetSlot, itemStack{ID: helmet, Count: 1})
+	alice.inv.Set(inventory.HotbarStart+2, inventory.Stack{ID: sword, Count: 1, Enchantments: map[string]int{"minecraft:sharpness": 2}})
+	alice.inv.Set(armorHelmetSlot, inventory.Stack{ID: helmet, Count: 1})
 	alice.heldSlot.Store(2)
 	alice.equipmentChanged()
 
@@ -53,13 +54,13 @@ func TestEquipmentBroadcastToOthersOnly(t *testing.T) {
 	if eid != alice.player.EntityID {
 		t.Errorf("entity id %d, want Alice's %d", eid, alice.player.EntityID)
 	}
-	if eq[equipMainHand].ID != sword || eq[equipMainHand].enchantLevel("minecraft:sharpness") != 2 {
+	if eq[equipMainHand].ID != sword || eq[equipMainHand].EnchantLevel("minecraft:sharpness") != 2 {
 		t.Errorf("main hand: %+v", eq[equipMainHand])
 	}
 	if eq[equipHelmet].ID != helmet {
 		t.Errorf("helmet: %+v", eq[equipHelmet])
 	}
-	if !eq[equipBoots].empty() || !eq[equipOffHand].empty() {
+	if !eq[equipBoots].Empty() || !eq[equipOffHand].Empty() {
 		t.Error("empty slots must be sent empty")
 	}
 	if len(eq) != 6 {
@@ -74,7 +75,7 @@ func TestOthersEquipmentSentOnJoin(t *testing.T) {
 	inst := bareInstance(New(), world.NewMemoryWorld())
 	alice := tntConn(inst, "Alice", player.Survival, 0, 64, 0)
 	chest, _ := world.ItemByName("minecraft:diamond_chestplate")
-	alice.inv.set(armorChestplateSlot, itemStack{ID: chest, Count: 1})
+	alice.inv.Set(armorChestplateSlot, inventory.Stack{ID: chest, Count: 1})
 
 	bob := tntConn(inst, "Bob", player.Survival, 2, 64, 0)
 	bob.sendOthersEquipment()
@@ -93,7 +94,7 @@ func TestHeldSlotChangeRebroadcastsEquipment(t *testing.T) {
 	alice := tntConn(inst, "Alice", player.Survival, 0, 64, 0)
 	bob := tntConn(inst, "Bob", player.Survival, 2, 64, 0)
 	pick, _ := world.ItemByName("minecraft:iron_pickaxe")
-	alice.inv.set(hotbarStart+1, itemStack{ID: pick, Count: 1})
+	alice.inv.Set(inventory.HotbarStart+1, inventory.Stack{ID: pick, Count: 1})
 
 	// Consuming the held stack and swapping the held slot both notify.
 	alice.heldSlot.Store(1)

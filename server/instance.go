@@ -10,6 +10,7 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 	"sync"
 	"sync/atomic"
@@ -280,7 +281,7 @@ type Instance struct {
 
 	// OnItemConsume fires when eating/drinking finishes. true = the game
 	// handled the effect; the core then only consumes the item.
-	OnItemConsume func(c *ClientConnection, st itemStack) bool
+	OnItemConsume func(c *ClientConnection, st inventory.Stack) bool
 
 	// OnStop fires once when the instance is being torn down (via
 	// Server.RemoveInstance or Instance.Stop). Use for game cleanup;

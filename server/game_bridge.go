@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"minecraft-server/game"
 	"minecraft-server/player"
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 	"time"
 )
@@ -222,7 +223,7 @@ func (s *Server) AttachLogic(inst *Instance, logic game.Logic) *game.Ctx {
 	inst.OnItemUse = func(c *ClientConnection, use game.ItemUse) bool {
 		return logic.OnItemUse(ctx, playerBridge{conn: c}, use)
 	}
-	inst.OnItemConsume = func(c *ClientConnection, st itemStack) bool {
+	inst.OnItemConsume = func(c *ClientConnection, st inventory.Stack) bool {
 		return logic.OnItemConsume(ctx, playerBridge{conn: c}, toGameStack(st, -1))
 	}
 	inst.OnStop = func() {

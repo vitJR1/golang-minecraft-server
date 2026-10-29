@@ -7,6 +7,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
@@ -253,7 +254,7 @@ func TestFlintAndSteelIgnitesTNT(t *testing.T) {
 	pos := world.Position{X: 0, Y: 64, Z: 0}
 	inst.World.SetBlock(pos, world.TNT)
 	flint, _ := world.ItemByName("minecraft:flint_and_steel")
-	c.inv.set(hotbarStart, itemStack{ID: flint, Count: 1})
+	c.inv.Set(inventory.HotbarStart, inventory.Stack{ID: flint, Count: 1})
 	c.heldSlot.Store(0)
 
 	if !c.tryIgniteTNT(pos, "minecraft:flint_and_steel") {
@@ -265,8 +266,8 @@ func TestFlintAndSteelIgnitesTNT(t *testing.T) {
 	if inst.tnts[0].igniter != c {
 		t.Error("igniter should be recorded")
 	}
-	if c.inv.held(0).Damage != 1 {
-		t.Errorf("flint and steel should wear one point, damage=%d", c.inv.held(0).Damage)
+	if c.inv.Held(0).Damage != 1 {
+		t.Errorf("flint and steel should wear one point, damage=%d", c.inv.Held(0).Damage)
 	}
 	// Other items / other blocks do nothing.
 	if c.tryIgniteTNT(world.Position{X: 1, Y: 63, Z: 1}, "minecraft:flint_and_steel") {
@@ -311,7 +312,7 @@ func TestExplosionBehindWoolWallWithArmor(t *testing.T) {
 		if !ok {
 			t.Fatalf("unknown item %s", name)
 		}
-		c.inv.set(int16(5+i), itemStack{ID: id, Count: 1})
+		c.inv.Set(int16(5+i), inventory.Stack{ID: id, Count: 1})
 	}
 	pos := world.Position{X: 0, Y: 64, Z: 0}
 	inst.World.SetBlock(pos, world.TNT)

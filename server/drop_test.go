@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"minecraft-server/game"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/inventory"
 	"testing"
 
 	"minecraft-server/player"
@@ -30,13 +31,13 @@ func TestQDropsOneThenCtrlQDropsStack(t *testing.T) {
 	inst := bareInstance(New(), tntWorld())
 	c := offlineConn(inst, "Dropper", player.Survival, 0.5, 64, 0.5)
 	iron, _ := world.ItemByName("minecraft:iron_ingot")
-	c.inv.set(hotbarStart, itemStack{ID: iron, Count: 10})
+	c.inv.Set(inventory.HotbarStart, inventory.Stack{ID: iron, Count: 10})
 
 	dropAction(t, c, 4) // Q
 	if itemsIn(inst)[iron] != 1 {
 		t.Errorf("Q should drop one unit, ground has %v", itemsIn(inst))
 	}
-	if st := c.inv.get(hotbarStart); st.Count != 9 {
+	if st := c.inv.Get(inventory.HotbarStart); st.Count != 9 {
 		t.Errorf("held stack after Q: %+v, want 9", st)
 	}
 
@@ -44,7 +45,7 @@ func TestQDropsOneThenCtrlQDropsStack(t *testing.T) {
 	if itemsIn(inst)[iron] != 10 {
 		t.Errorf("ctrl+Q should drop the rest, ground has %v", itemsIn(inst))
 	}
-	if st := c.inv.get(hotbarStart); !st.empty() {
+	if st := c.inv.Get(inventory.HotbarStart); !st.Empty() {
 		t.Errorf("held stack after ctrl+Q: %+v, want empty", st)
 	}
 
@@ -62,11 +63,11 @@ func TestNavigatorNotDroppable(t *testing.T) {
 	s := New()
 	SetupHubMenu(s)
 	c := offlineHub(s, "Keeper")
-	if c.inv.get(hotbarStart).Name != navigatorName {
+	if c.inv.Get(inventory.HotbarStart).Name != inventory.NavigatorName {
 		t.Fatal("hub join should hand out the navigator")
 	}
 	dropAction(t, c, 3)
-	if c.inv.get(hotbarStart).Name != navigatorName || len(itemsIn(s.Hub)) != 0 {
+	if c.inv.Get(inventory.HotbarStart).Name != inventory.NavigatorName || len(itemsIn(s.Hub)) != 0 {
 		t.Error("navigator must stay in the hotbar and never become an item entity")
 	}
 }
@@ -75,10 +76,10 @@ func TestCursorDropOutsideWindowAndOnClose(t *testing.T) {
 	inst := bareInstance(New(), tntWorld())
 	c := offlineConn(inst, "Cursor", player.Survival, 0.5, 64, 0.5)
 	iron, _ := world.ItemByName("minecraft:iron_ingot")
-	c.inv.set(hotbarStart, itemStack{ID: iron, Count: 8})
+	c.inv.Set(inventory.HotbarStart, inventory.Stack{ID: iron, Count: 8})
 
 	// Pick the stack up onto the cursor: nothing dropped yet.
-	clickSlot(t, c, int16(hotbarStart), 0, 0, map[int16]itemStack{int16(hotbarStart): {}}, itemStack{ID: iron, Count: 8})
+	clickSlot(t, c, int16(inventory.HotbarStart), 0, 0, map[int16]inventory.Stack{int16(inventory.HotbarStart): {}}, inventory.Stack{ID: iron, Count: 8})
 	if c.cursor.Count != 8 {
 		t.Fatalf("cursor should hold 8, got %+v", c.cursor)
 	}
@@ -87,7 +88,7 @@ func TestCursorDropOutsideWindowAndOnClose(t *testing.T) {
 	}
 
 	// Right-click outside the window: one unit leaves the cursor.
-	clickSlot(t, c, -999, 1, 0, nil, itemStack{ID: iron, Count: 7})
+	clickSlot(t, c, -999, 1, 0, nil, inventory.Stack{ID: iron, Count: 7})
 	if itemsIn(inst)[iron] != 1 {
 		t.Errorf("one unit should drop from the cursor, ground has %v", itemsIn(inst))
 	}
@@ -99,7 +100,7 @@ func TestCursorDropOutsideWindowAndOnClose(t *testing.T) {
 	if itemsIn(inst)[iron] != 8 {
 		t.Errorf("closing should drop the cursor, ground has %v", itemsIn(inst))
 	}
-	if !c.cursor.empty() {
+	if !c.cursor.Empty() {
 		t.Errorf("cursor should be cleared on close, got %+v", c.cursor)
 	}
 }
@@ -108,14 +109,14 @@ func TestDropKeyOverSlotInWindow(t *testing.T) {
 	inst := bareInstance(New(), tntWorld())
 	c := offlineConn(inst, "Keyed", player.Survival, 0.5, 64, 0.5)
 	iron, _ := world.ItemByName("minecraft:iron_ingot")
-	c.inv.set(mainInvStart, itemStack{ID: iron, Count: 5})
+	c.inv.Set(inventory.MainStart, inventory.Stack{ID: iron, Count: 5})
 
 	// Drop key over the slot (mode 4): the client reports the slot shrunk.
-	clickSlot(t, c, int16(mainInvStart), 0, 4, map[int16]itemStack{int16(mainInvStart): {ID: iron, Count: 4}}, itemStack{})
+	clickSlot(t, c, int16(inventory.MainStart), 0, 4, map[int16]inventory.Stack{int16(inventory.MainStart): {ID: iron, Count: 4}}, inventory.Stack{})
 	if itemsIn(inst)[iron] != 1 {
 		t.Errorf("drop key should drop one, ground has %v", itemsIn(inst))
 	}
-	if st := c.inv.get(mainInvStart); st.Count != 4 {
+	if st := c.inv.Get(inventory.MainStart); st.Count != 4 {
 		t.Errorf("slot after drop key: %+v", st)
 	}
 }
@@ -149,42 +150,42 @@ func TestThrownItemFliesForwardAndSlides(t *testing.T) {
 }
 
 // noDropWool is a game-marked undroppable stack (BedWars' team selector).
-func noDropWool(t *testing.T) itemStack {
+func noDropWool(t *testing.T) inventory.Stack {
 	t.Helper()
 	id, ok := world.ItemByName("minecraft:white_wool")
 	if !ok {
 		t.Fatal("white_wool not registered")
 	}
-	return itemStack{ID: id, Count: 1, Name: "§fSelect team", NoDrop: true}
+	return inventory.Stack{ID: id, Count: 1, Name: "§fSelect team", NoDrop: true}
 }
 
 func TestNoDropItemStaysInInventory(t *testing.T) {
 	inst := bareInstance(New(), tntWorld())
 	c := offlineConn(inst, "Keeper", player.Adventure, 0.5, 64, 0.5)
 	wool := noDropWool(t)
-	c.inv.set(hotbarStart, wool)
+	c.inv.Set(inventory.HotbarStart, wool)
 
-	dropAction(t, c, 4)                                 // Q
-	dropAction(t, c, 3)                                 // ctrl+Q
-	clickIn(t, c, 0, int16(hotbarStart), 1, clickThrow) // drop key over the slot
-	if !stackEqual(c.inv.get(hotbarStart), wool) {
-		t.Fatalf("selector left its slot: %+v", c.inv.get(hotbarStart))
+	dropAction(t, c, 4)                                                     // Q
+	dropAction(t, c, 3)                                                     // ctrl+Q
+	clickIn(t, c, 0, int16(inventory.HotbarStart), 1, inventory.ClickThrow) // drop key over the slot
+	if !inventory.Equal(c.inv.Get(inventory.HotbarStart), wool) {
+		t.Fatalf("selector left its slot: %+v", c.inv.Get(inventory.HotbarStart))
 	}
 
 	// Picked up onto the cursor and clicked outside: refused.
-	clickIn(t, c, 0, int16(hotbarStart), 0, clickPickup)
-	if !stackEqual(c.cursor, wool) {
+	clickIn(t, c, 0, int16(inventory.HotbarStart), 0, inventory.ClickPickup)
+	if !inventory.Equal(c.cursor, wool) {
 		t.Fatalf("pickup onto the cursor: %+v", c.cursor)
 	}
-	clickIn(t, c, 0, slotOutside, 0, clickPickup)
-	if !stackEqual(c.cursor, wool) {
+	clickIn(t, c, 0, inventory.SlotOutside, 0, inventory.ClickPickup)
+	if !inventory.Equal(c.cursor, wool) {
 		t.Fatal("thrown from the cursor")
 	}
 	// Closing the inventory with it on the cursor puts it back.
 	var p bytes.Buffer
 	p.WriteByte(0)
 	play(t, c, packetid.SbPlayCloseContainer, p.Bytes())
-	if !c.cursor.empty() || c.countItem(wool.ID) != 1 {
+	if !c.cursor.Empty() || c.countItem(wool.ID) != 1 {
 		t.Fatalf("after close: cursor %+v, in inventory %d", c.cursor, c.countItem(wool.ID))
 	}
 	if n := len(itemsIn(inst)); n != 0 {
@@ -196,15 +197,15 @@ func TestNoDropItemCantGoIntoChest(t *testing.T) {
 	inst := bareInstance(New(), world.NewMemoryWorld())
 	c := offlineConn(inst, "Stasher", player.Survival, 0, 64, 0)
 	wool := noDropWool(t)
-	c.inv.set(hotbarStart, wool)
+	c.inv.Set(inventory.HotbarStart, wool)
 	pos := world.Position{X: 1, Y: 64, Z: 0}
 	c.openBlockChest(pos)
 	drain(c)
 
-	clickIn(t, c, menuWindowID, chestHotbar0, 0, clickPickup) // onto the cursor
-	clickIn(t, c, menuWindowID, 0, 0, clickPickup)            // into chest slot 0
-	clickIn(t, c, menuWindowID, chestHotbar0, 0, clickQuickMove)
-	if got := inst.chestAt(pos); !got[0].empty() {
+	clickIn(t, c, menuWindowID, chestHotbar0, 0, inventory.ClickPickup) // onto the cursor
+	clickIn(t, c, menuWindowID, 0, 0, inventory.ClickPickup)            // into chest slot 0
+	clickIn(t, c, menuWindowID, chestHotbar0, 0, inventory.ClickQuickMove)
+	if got := inst.chestAt(pos); !got[0].Empty() {
 		t.Fatalf("selector stashed in the chest: %+v", got[0])
 	}
 	if c.countItem(wool.ID)+int(c.cursor.Count) != 1 {
@@ -216,7 +217,7 @@ func TestNoDropDoesNotMergeWithPlainStack(t *testing.T) {
 	wool := noDropWool(t)
 	plain := wool
 	plain.NoDrop = false
-	if wool.sameKind(plain) {
+	if wool.SameKind(plain) {
 		t.Fatal("a NoDrop stack would merge with (and lend its mark to) plain wool")
 	}
 }
@@ -227,7 +228,7 @@ func TestGameNoDropReachesTheModel(t *testing.T) {
 	inst := bareInstance(New(), world.NewMemoryWorld())
 	c := offlineConn(inst, "Bridged", player.Adventure, 0, 64, 0)
 	playerBridge{conn: c}.SetSlot(game.SlotHotbar0, game.ItemStack{Item: "minecraft:white_wool", Count: 1, NoDrop: true})
-	if !c.inv.get(hotbarStart).NoDrop {
+	if !c.inv.Get(inventory.HotbarStart).NoDrop {
 		t.Fatal("NoDrop lost on the way in")
 	}
 	if inv := (playerBridge{conn: c}).Inventory(); len(inv) == 0 || !inv[0].NoDrop {

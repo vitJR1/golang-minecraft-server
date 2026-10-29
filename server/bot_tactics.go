@@ -8,6 +8,7 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/server/botnav"
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
@@ -73,7 +74,7 @@ func (b *bot) shoot(now uint64, t *ClientConnection) (botnav.Input, bool) {
 	}
 	if br.drawAt == 0 {
 		if now >= br.nextShot {
-			if !c.botHold(func(st itemStack) bool { n, _ := world.ItemName(st.ID); return n == itemBow }) {
+			if !c.botHold(func(st inventory.Stack) bool { n, _ := world.ItemName(st.ID); return n == itemBow }) {
 				return botnav.Input{}, false
 			}
 			c.startDraw()

@@ -6,6 +6,7 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
@@ -15,8 +16,8 @@ import (
 
 // toGameStack converts a model stack for plugins. slot is the window-0
 // index (or -1 when unknown). Enchantments and Lore are copied.
-func toGameStack(st itemStack, slot int) game.ItemStack {
-	if st.empty() {
+func toGameStack(st inventory.Stack, slot int) game.ItemStack {
+	if st.Empty() {
 		return game.ItemStack{Slot: slot}
 	}
 	name, _ := world.ItemName(st.ID)
@@ -38,19 +39,19 @@ func toGameStack(st itemStack, slot int) game.ItemStack {
 
 // fromGameStack converts a plugin stack to the model. ok is false for an
 // unknown item id.
-func fromGameStack(gs game.ItemStack) (itemStack, bool) {
+func fromGameStack(gs game.ItemStack) (inventory.Stack, bool) {
 	if gs.Empty() {
-		return itemStack{}, true
+		return inventory.Stack{}, true
 	}
 	id, ok := world.ItemByName(gs.Item)
 	if !ok {
-		return itemStack{}, false
+		return inventory.Stack{}, false
 	}
 	count := gs.Count
 	if count > 64 {
 		count = 64
 	}
-	st := itemStack{ID: id, Count: byte(count), Name: gs.Name, Color: gs.Color, Potion: gs.Potion, Damage: gs.Damage, NoDrop: gs.NoDrop}
+	st := inventory.Stack{ID: id, Count: byte(count), Name: gs.Name, Color: gs.Color, Potion: gs.Potion, Damage: gs.Damage, NoDrop: gs.NoDrop}
 	if len(gs.Lore) > 0 {
 		st.Lore = append([]string(nil), gs.Lore...)
 	}
@@ -67,7 +68,7 @@ func fromGameStack(gs game.ItemStack) (itemStack, bool) {
 
 func (b playerBridge) GiveStack(gs game.ItemStack) int {
 	st, ok := fromGameStack(gs)
-	if !ok || st.empty() {
+	if !ok || st.Empty() {
 		return gs.Count
 	}
 	// Stacks above the wire byte come in chunks.

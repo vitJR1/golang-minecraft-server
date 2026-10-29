@@ -7,6 +7,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
@@ -34,7 +35,7 @@ func archery(t *testing.T, arrows int) (*Instance, *ClientConnection, *ClientCon
 	hold(a, "minecraft:bow")
 	if arrows > 0 {
 		id, _ := world.ItemByName("minecraft:arrow")
-		a.inv.set(mainInvStart, itemStack{ID: id, Count: byte(arrows)})
+		a.inv.Set(inventory.MainStart, inventory.Stack{ID: id, Count: byte(arrows)})
 	}
 	return inst, a, v
 }
@@ -56,7 +57,7 @@ func TestFullDrawArrowHitsAndConsumesArrow(t *testing.T) {
 	if lost := player.MaxHealth - v.player.Health(); lost < 7 || lost > 9 {
 		t.Errorf("full-draw crit arrow dealt %v, want 7..9", lost)
 	}
-	if st := a.inv.get(mainInvStart); st.Count != 1 {
+	if st := a.inv.Get(inventory.MainStart); st.Count != 1 {
 		t.Errorf("one arrow should be spent, left %+v", st)
 	}
 	if lastPacket(t, v, packetid.CbPlayHurtAnimation) == nil {
@@ -75,7 +76,7 @@ func TestShortDrawIsWeakerAndPowerIsStronger(t *testing.T) {
 	v.player.SetHealth(player.MaxHealth)
 	inst.tickCount.Add(100)
 	bow, _ := world.ItemByName("minecraft:bow")
-	a.inv.set(hotbarStart, itemStack{ID: bow, Count: 1, Enchantments: map[string]int{EnchantPower: 2}})
+	a.inv.Set(inventory.HotbarStart, inventory.Stack{ID: bow, Count: 1, Enchantments: map[string]int{EnchantPower: 2}})
 	fire(inst, a, 25)
 	if lost := player.MaxHealth - v.player.Health(); lost < 11 {
 		t.Errorf("Power II full draw should deal ≥ 11, dealt %v", lost)
@@ -293,7 +294,7 @@ func TestStuckArrowIsPickedUpBySurvivalPlayer(t *testing.T) {
 func TestInfinityBowKeepsArrowAndMakesItCreativeOnly(t *testing.T) {
 	inst, a, v := archery(t, 1)
 	bow, _ := world.ItemByName("minecraft:bow")
-	a.inv.set(hotbarStart, itemStack{ID: bow, Count: 1, Enchantments: map[string]int{EnchantInfinity: 1}})
+	a.inv.Set(inventory.HotbarStart, inventory.Stack{ID: bow, Count: 1, Enchantments: map[string]int{EnchantInfinity: 1}})
 	p := stickArrow(t, inst, a)
 	if a.countItem(arrowItemID()) != 1 {
 		t.Errorf("Infinity must not spend the arrow, left %d", a.countItem(arrowItemID()))
@@ -317,7 +318,7 @@ func TestInfinityBowKeepsArrowAndMakesItCreativeOnly(t *testing.T) {
 		t.Error("creative pickup of an Infinity arrow gives nothing")
 	}
 	// No arrows at all: Infinity still needs one in the quiver.
-	a.inv.set(mainInvStart, itemStack{})
+	a.inv.Set(inventory.MainStart, inventory.Stack{})
 	a.startDraw()
 	inst.tickCount.Add(25)
 	a.releaseUse()

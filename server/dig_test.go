@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"minecraft-server/player"
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
@@ -122,7 +123,7 @@ func TestCannotPlaceBlockIntoPlayer(t *testing.T) {
 	inst := bareInstance(New(), world.NewMemoryWorld())
 	c := offlineConn(inst, "Placer", player.Survival, 0.5, 64, 0.5)
 	stone, _ := world.ItemByName("minecraft:stone")
-	c.inv.set(hotbarStart, itemStack{ID: stone, Count: 10})
+	c.inv.Set(inventory.HotbarStart, inventory.Stack{ID: stone, Count: 10})
 	c.heldSlot.Store(0)
 
 	// Clicking the top of the block under the feet targets (0,64,0) — the
@@ -151,20 +152,20 @@ func TestPlacingConsumesHeldBlockInSurvival(t *testing.T) {
 	inst := bareInstance(New(), world.NewMemoryWorld())
 	c := offlineConn(inst, "Placer", player.Survival, 0.5, 64, 0.5)
 	stoneID, _ := world.ItemByName("minecraft:stone")
-	c.inv.set(hotbarStart, itemStack{ID: stoneID, Count: 32})
+	c.inv.Set(inventory.HotbarStart, inventory.Stack{ID: stoneID, Count: 32})
 	c.heldSlot.Store(0)
 
 	placeOn(t, c, world.Position{X: 3, Y: 63, Z: 0}, 1)
 	if inst.World.GetBlock(world.Position{X: 3, Y: 64, Z: 0}) != world.Stone {
 		t.Fatal("block should be placed")
 	}
-	if got := c.inv.held(0).Count; got != 31 {
+	if got := c.inv.Held(0).Count; got != 31 {
 		t.Errorf("held stack after placing: %d, want 31", got)
 	}
 
 	// A vetoed placement (into the player) must not consume anything.
 	placeOn(t, c, world.Position{X: 0, Y: 63, Z: 0}, 1)
-	if got := c.inv.held(0).Count; got != 31 {
+	if got := c.inv.Held(0).Count; got != 31 {
 		t.Errorf("vetoed placement changed the stack: %d", got)
 	}
 
@@ -174,7 +175,7 @@ func TestPlacingConsumesHeldBlockInSurvival(t *testing.T) {
 	if inst.World.GetBlock(world.Position{X: 4, Y: 64, Z: 0}) != world.Stone {
 		t.Error("creative block should be placed")
 	}
-	if got := c.inv.held(0).Count; got != 31 {
+	if got := c.inv.Held(0).Count; got != 31 {
 		t.Errorf("creative placement consumed the stack: %d", got)
 	}
 }

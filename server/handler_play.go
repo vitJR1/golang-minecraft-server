@@ -9,6 +9,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 	"strings"
 )
@@ -261,7 +262,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		// on the clicked face — roll that back, then launch like Use Item.
 		if held == "minecraft:fire_charge" {
 			_ = c.sendBlockUpdate(placePos, c.instance.World.GetBlock(placePos))
-			if c.instance.allowItemUse(c, game.ItemUse{Item: held, Name: c.inv.held(c.heldSlot.Load()).Name, Slot: int(c.heldSlot.Load())}) {
+			if c.instance.allowItemUse(c, game.ItemUse{Item: held, Name: c.inv.Held(c.heldSlot.Load()).Name, Slot: int(c.heldSlot.Load())}) {
 				c.throwFireball()
 				c.consumeHeld()
 			}
@@ -543,14 +544,14 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		// Server-given menu items are recognised by their custom name in the
 		// inventory model (wherever the player moved them), so a plain ender
 		// pearl is still throwable while the "Arena selector" opens a menu.
-		held := c.inv.held(c.heldSlot.Load())
+		held := c.inv.Held(c.heldSlot.Load())
 		_, inLobby := arenasForLobby(c.instance.ID)
 		switch {
-		case held.Name == navigatorName:
+		case held.Name == inventory.NavigatorName:
 			if c.instance == c.server.Hub || inLobby {
 				c.openHubMainMenu()
 			}
-		case held.Name == selectorName:
+		case held.Name == inventory.SelectorName:
 			// BedWars lobby gets the live DOTA arena browser (create/join);
 			// other lobbies keep the placeholder arena list for now.
 			if c.instance.ID == LobbyBedWars {
@@ -597,7 +598,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		}
 		slot := int16(raw) // signed cast preserves bits; vanilla sends 0..8
 		// Anything else would address main-inventory slots as "held"
-		// (hotbarStart + slot): using a sword straight from the backpack.
+		// (inventory.HotbarStart + slot): using a sword straight from the backpack.
 		if !anticheat.ValidHotbarSlot(int(slot)) {
 			c.flag("badpackets.helditem", fmt.Sprintf("held slot %d", slot))
 			break
@@ -636,7 +637,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		if winID == 0 {
 			// The player's own inventory screen: simulated on the model
 			// (click.go); the client's predicted result is only compared.
-			claim, err := readClickClaim(packet)
+			claim, err := inventory.ReadClaim(packet)
 			if err != nil {
 				c.flag("badpackets.click", err.Error())
 				_ = c.sendInventoryContents()
@@ -653,7 +654,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			switch {
 			case m.kind == "chest":
 				// Simulated against the chest + inventory (click.go).
-				claim, err := readClickClaim(packet)
+				claim, err := inventory.ReadClaim(packet)
 				if err != nil {
 					c.flag("badpackets.click", err.Error())
 					_ = c.sendChestInventory(m.chest.contents())
@@ -698,7 +699,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		// Closing any window (the inventory screen is window 0) with a stack
 		// still on the cursor drops it, like vanilla; the inventory screen
 		// also hands back its 2×2 crafting grid.
-		c.drag.reset()
+		c.drag.Reset()
 		c.dropCursor()
 		if winID == 0 {
 			c.returnCraftGrid()

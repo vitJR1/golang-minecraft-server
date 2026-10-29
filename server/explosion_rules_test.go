@@ -6,6 +6,7 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
@@ -114,7 +115,7 @@ func TestFireballThrownAtOwnFeet(t *testing.T) {
 	c := offlineConn(inst, "Jumper", player.Survival, 0.5, 64, 0.5)
 	c.player.MoveAndLook(0.5, 64, 0.5, 0, 90, true) // looking straight down
 	charge, _ := world.ItemByName("minecraft:fire_charge")
-	c.inv.set(hotbarStart, itemStack{ID: charge, Count: 2})
+	c.inv.Set(inventory.HotbarStart, inventory.Stack{ID: charge, Count: 2})
 	drain(c)
 
 	floor := world.Position{X: 0, Y: 63, Z: 0}
@@ -130,7 +131,7 @@ func TestFireballThrownAtOwnFeet(t *testing.T) {
 	if n != 1 || item != "minecraft:fire_charge" {
 		t.Fatalf("fireball should be in flight: %d projectiles (%q)", n, item)
 	}
-	if st := c.inv.get(hotbarStart); st.Count != 1 {
+	if st := c.inv.Get(inventory.HotbarStart); st.Count != 1 {
 		t.Errorf("one charge should be spent, left %+v", st)
 	}
 	if inst.World.GetBlock(world.Position{X: 0, Y: 64, Z: 0}) != world.Air {

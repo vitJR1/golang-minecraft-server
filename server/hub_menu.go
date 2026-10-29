@@ -8,6 +8,7 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/inventory"
 	"minecraft-server/templates"
 	"minecraft-server/world"
 	"strings"
@@ -140,12 +141,12 @@ type menuEntry struct {
 }
 
 // stack renders the entry as the item stack shown in the window.
-func (e menuEntry) stack() itemStack {
+func (e menuEntry) stack() inventory.Stack {
 	count := e.count
 	if count == 0 {
 		count = 1
 	}
-	return itemStack{ID: e.itemID, Count: count, Name: e.name, Lore: e.lore, Glint: e.glint}
+	return inventory.Stack{ID: e.itemID, Count: count, Name: e.name, Lore: e.lore, Glint: e.glint}
 }
 
 // hubMenuTargets maps a menu icon's `key` to the lobby instance ID the
@@ -218,35 +219,28 @@ func SetupHubMenu(s *Server) {
 // slot 0. Used by hub + lobby OnPlayerJoin so it's always available.
 // State ID 0 is fine for a first write — vanilla's State ID checks
 // only kick in after the server sends Set Container Content.
-// Display names of the server-given hub UI items; SbPlayUseItem dispatches
-// on them (not on the slot index), and stripNavigatorItems removes them.
-const (
-	navigatorName = "Navigator"
-	selectorName  = "Arena selector"
-)
-
 func giveBlazeRod(c *ClientConnection) {
-	giveHotbarItem(c, hotbarSlot0, itemBlazeRod, navigatorName)
+	giveHotbarItem(c, hotbarSlot0, itemBlazeRod, inventory.NavigatorName)
 }
 
 // giveArenaSelector puts an "Arena selector" ender pearl into hotbar
 // slot 1. Lobbies call this so the player can press `2` and right-click
 // to open the per-game arena picker.
 func giveArenaSelector(c *ClientConnection) {
-	giveHotbarItem(c, hotbarSlot1, itemEnderPearl, selectorName)
+	giveHotbarItem(c, hotbarSlot1, itemEnderPearl, inventory.SelectorName)
 }
 
 // giveHotbarItem is the underlying push used by giveBlazeRod /
 // giveArenaSelector: records the named item in the inventory model and
 // sends a single Set Container Slot at window 0 (player inventory).
 func giveHotbarItem(c *ClientConnection, slot int16, itemID int32, name string) {
-	st := itemStack{ID: itemID, Count: 1, Name: name}
-	c.inv.set(slot, st)
+	st := inventory.Stack{ID: itemID, Count: 1, Name: name}
+	c.inv.Set(slot, st)
 	var buf bytes.Buffer
 	buf.WriteByte(0)                        // window id 0 = player inventory
 	protocol.WriteVarInt32ToBuffer(&buf, 0) // state id
 	buf.Write(protocol.WriteShort(slot))
-	writeStack(&buf, st)
+	inventory.WriteSlot(&buf, st)
 	if err := c.safeWrite(packetid.CbPlaySetContainerSlot, buf.Bytes()); err != nil {
 		slog.Warn("give hotbar item failed",
 			"player", c.playerName, "item", name, "err", err)
@@ -473,7 +467,7 @@ func (c *ClientConnection) sendChestContents(rows int, entries map[int16]menuEnt
 	protocol.WriteVarInt32ToBuffer(&buf, int32(chestSlots+36))
 	for s := int16(0); s < chestSlots; s++ {
 		if e, ok := entries[s]; ok {
-			writeStack(&buf, e.stack())
+			inventory.WriteSlot(&buf, e.stack())
 		} else {
 			buf.Write(protocol.WriteEmptySlot())
 		}

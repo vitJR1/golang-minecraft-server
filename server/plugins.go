@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"minecraft-server/game"
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
@@ -206,7 +207,7 @@ func (i *Instance) allowItemUse(c *ClientConnection, use game.ItemUse) bool {
 // fireItemConsume fires OnItemConsume when eating/drinking completes. true =
 // some hook handled the effect, so the caller skips the vanilla default.
 // Listeners run first; the first handler wins.
-func (i *Instance) fireItemConsume(c *ClientConnection, st itemStack) bool {
+func (i *Instance) fireItemConsume(c *ClientConnection, st inventory.Stack) bool {
 	ctx, p := i.pluginCtx(), playerBridge{conn: c}
 	gs := toGameStack(st, -1)
 	for _, l := range i.listeners {

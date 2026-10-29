@@ -6,6 +6,7 @@ import (
 
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
@@ -39,7 +40,7 @@ const (
 type itemEntity struct {
 	eid      int32
 	uuid     [16]byte
-	stack    itemStack // item + count + NBT (a dropped enchanted sword keeps its enchantments)
+	stack    inventory.Stack // item + count + NBT (a dropped enchanted sword keeps its enchantments)
 	x, y, z  float64
 	vx, vy   float64
 	vz       float64
@@ -59,7 +60,7 @@ func (i *Instance) DropItem(x, y, z float64, itemName string, count int) bool {
 	if !ok {
 		return false
 	}
-	return i.spawnStack(itemStack{ID: itemID, Count: byte(min(count, maxStackSize))}, x, y, z, 0, itemPopVelocity, 0, itemPickupDelay, true)
+	return i.spawnStack(inventory.Stack{ID: itemID, Count: byte(min(count, inventory.MaxStack))}, x, y, z, 0, itemPopVelocity, 0, itemPickupDelay, true)
 }
 
 // ThrowItem spawns count of itemID flying from (x, y, z) with the given
@@ -68,15 +69,15 @@ func (i *Instance) DropItem(x, y, z float64, itemName string, count int) bool {
 // collected for itemThrowDelay ticks, so the thrower doesn't vacuum it
 // straight back up.
 func (i *Instance) ThrowItem(itemID int32, count int, x, y, z, vx, vy, vz float64) bool {
-	return i.ThrowStack(itemStack{ID: itemID, Count: byte(min(count, maxStackSize))}, x, y, z, vx, vy, vz)
+	return i.ThrowStack(inventory.Stack{ID: itemID, Count: byte(min(count, inventory.MaxStack))}, x, y, z, vx, vy, vz)
 }
 
 // ThrowStack is ThrowItem for a full stack (name, enchantments, …).
-func (i *Instance) ThrowStack(st itemStack, x, y, z, vx, vy, vz float64) bool {
+func (i *Instance) ThrowStack(st inventory.Stack, x, y, z, vx, vy, vz float64) bool {
 	return i.spawnStack(st, x, y, z, vx, vy, vz, itemThrowDelay, false)
 }
 
-func (i *Instance) spawnStack(st itemStack, x, y, z, vx, vy, vz float64, pickupAt int, merge bool) bool {
+func (i *Instance) spawnStack(st inventory.Stack, x, y, z, vx, vy, vz float64, pickupAt int, merge bool) bool {
 	count := int(st.Count)
 	if count <= 0 || i.Server == nil {
 		return false
@@ -84,14 +85,14 @@ func (i *Instance) spawnStack(st itemStack, x, y, z, vx, vy, vz float64, pickupA
 	if _, ok := world.ItemName(st.ID); !ok {
 		return false
 	}
-	limit := maxStackFor(st.ID)
+	limit := inventory.MaxStackFor(st.ID)
 
 	i.itemsMu.Lock()
 	// Merge into a nearby stack of the same item first (airborne or not — the
 	// distance check already bounds how far apart they can be).
 	if merge {
 		for _, it := range i.items {
-			if !it.stack.sameKind(st) || int(it.stack.Count)+count > limit {
+			if !it.stack.SameKind(st) || int(it.stack.Count)+count > limit {
 				continue
 			}
 			if distXZ(it.x, it.z, x, z) <= itemMergeRadius && math.Abs(it.y-y) <= itemMergeRadius {
@@ -351,7 +352,7 @@ func itemMetadataPayload(it *itemEntity) []byte {
 	protocol.WriteVarInt32ToBuffer(&buf, it.eid)
 	buf.WriteByte(8)                        // index: Item
 	protocol.WriteVarInt32ToBuffer(&buf, 7) // type: Slot
-	writeStack(&buf, it.stack)
+	inventory.WriteSlot(&buf, it.stack)
 	buf.WriteByte(0xFF) // end of metadata
 	return buf.Bytes()
 }

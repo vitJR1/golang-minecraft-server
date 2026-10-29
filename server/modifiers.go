@@ -10,6 +10,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
@@ -44,7 +45,7 @@ const (
 
 // enchantOf returns the level of enchantment on st via the server's
 // Enchantments source (0 without a server).
-func (c *ClientConnection) enchantOf(st itemStack, enchantment string) int {
+func (c *ClientConnection) enchantOf(st inventory.Stack, enchantment string) int {
 	if c.server == nil || c.server.Enchantments == nil {
 		return 0
 	}
@@ -53,19 +54,19 @@ func (c *ClientConnection) enchantOf(st itemStack, enchantment string) int {
 
 // heldEnchant is enchantOf for the held hotbar stack.
 func (c *ClientConnection) heldEnchant(enchantment string) int {
-	return c.enchantOf(c.inv.held(c.heldSlot.Load()), enchantment)
+	return c.enchantOf(c.inv.Held(c.heldSlot.Load()), enchantment)
 }
 
 // Enchantments answers "what level of enchantment e does this stack have".
 type Enchantments interface {
-	Level(st itemStack, enchantment string) int
+	Level(st inventory.Stack, enchantment string) int
 }
 
 // nbtEnchantments is the default Enchantments: levels parsed from item NBT.
 type nbtEnchantments struct{}
 
-func (nbtEnchantments) Level(st itemStack, enchantment string) int {
-	return st.enchantLevel(enchantment)
+func (nbtEnchantments) Level(st inventory.Stack, enchantment string) int {
+	return st.EnchantLevel(enchantment)
 }
 
 // Effect is a potion effect id with its vanilla numeric registry id (the
@@ -410,8 +411,8 @@ func entityEffectPayload(eid int32, effect Effect, level int, d time.Duration) [
 
 // digContext gathers the modifiers for this player's current dig.
 func (c *ClientConnection) digContext() world.DigContext {
-	held := c.inv.held(c.heldSlot.Load())
-	helmet := c.inv.get(armorHelmetSlot)
+	held := c.inv.Held(c.heldSlot.Load())
+	helmet := c.inv.Get(armorHelmetSlot)
 	ctx := world.DigContext{OnGround: true}
 	if c.server != nil {
 		ctx.Efficiency = c.server.Enchantments.Level(held, EnchantEfficiency)
@@ -435,9 +436,9 @@ const armorHelmetSlot = 5
 // breaking it — slot emptied, break sound — when its durability runs out.
 // Non-tools are untouched.
 func (c *ClientConnection) damageHeldTool(n int) {
-	slot := int16(hotbarStart) + int16(c.heldSlot.Load())
-	st := c.inv.get(slot)
-	if st.empty() {
+	slot := int16(inventory.HotbarStart) + int16(c.heldSlot.Load())
+	st := c.inv.Get(slot)
+	if st.Empty() {
 		return
 	}
 	name, ok := world.ItemName(st.ID)
@@ -453,14 +454,14 @@ func (c *ClientConnection) damageHeldTool(n int) {
 	}
 	st.Damage += n
 	if st.Damage >= maxDamage {
-		st = itemStack{}
+		st = inventory.Stack{}
 		if c.player != nil {
 			s := c.player.Snapshot()
 			_ = c.safeWrite(packetid.CbPlaySoundEffect,
 				soundEffectPayload("minecraft:entity.item.break", soundCategoryPlayer, s.X, s.Y, s.Z, 0.8, 1))
 		}
 	}
-	c.inv.set(slot, st)
+	c.inv.Set(slot, st)
 	_ = c.sendSetSlot(0, slot, st)
 	c.equipmentChanged()
 }

@@ -8,6 +8,7 @@ import (
 
 	"minecraft-server/game"
 	"minecraft-server/player"
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
@@ -118,13 +119,13 @@ func runTicks(inst *Instance, n int, players ...*ClientConnection) {
 	}
 }
 
-func itemOf(t *testing.T, item string, n int) itemStack {
+func itemOf(t *testing.T, item string, n int) inventory.Stack {
 	t.Helper()
 	id, ok := world.ItemByName(item)
 	if !ok {
 		t.Fatalf("%s not registered", item)
 	}
-	return itemStack{ID: id, Count: byte(n)}
+	return inventory.Stack{ID: id, Count: byte(n)}
 }
 
 // gapWorld: two strips along X at y=63, z=-1..1 — x=-3..2 and x=3+gap..12+gap.
@@ -142,12 +143,12 @@ func gapWorld(gap int) *Instance {
 	return inst
 }
 
-func woolStack(t *testing.T, n int) itemStack {
+func woolStack(t *testing.T, n int) inventory.Stack {
 	id, ok := world.ItemByName("minecraft:white_wool")
 	if !ok {
 		t.Fatal("white_wool not registered")
 	}
-	return itemStack{ID: id, Count: byte(n)}
+	return inventory.Stack{ID: id, Count: byte(n)}
 }
 
 func TestBotJoinsAsAPlayer(t *testing.T) {
@@ -184,7 +185,7 @@ func TestBotBridgesAndBreaksTarget(t *testing.T) {
 		Targets:   []world.Position{target},
 	}}
 	b := addTestBot(t, inst, guide, DifficultyHard, 0.5, 0.5)
-	b.inv.set(hotbarStart+1, woolStack(t, 32))
+	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 32))
 
 	runTicks(inst, 1200)
 	if got := inst.World.GetBlock(target); got != world.Air {
@@ -239,17 +240,17 @@ func TestBotBuysBlocksAtTheShop(t *testing.T) {
 	}}
 	b := addTestBot(t, inst, guide, DifficultyNormal, -2.5, -2.5)
 	iron, _ := world.ItemByName("minecraft:iron_ingot")
-	b.inv.set(hotbarStart+2, itemStack{ID: iron, Count: 8})
+	b.inv.Set(inventory.HotbarStart+2, inventory.Stack{ID: iron, Count: 8})
 
 	runTicks(inst, 400)
 	if guide.buys != 2 || b.countItemName("minecraft:white_wool") != 32 {
 		t.Fatalf("buys=%d wool=%d, want 2 purchases → 32 wool", guide.buys, b.countItemName("minecraft:white_wool"))
 	}
 	// Broke and short of blocks? It goes to the station.
-	b.inv.set(hotbarStart+1, itemStack{})
-	for s := int16(0); s < playerInvSize; s++ {
-		if st := b.inv.get(s); st.ID == woolStack(t, 1).ID {
-			b.inv.set(s, itemStack{})
+	b.inv.Set(inventory.HotbarStart+1, inventory.Stack{})
+	for s := int16(0); s < inventory.PlayerSlots; s++ {
+		if st := b.inv.Get(s); st.ID == woolStack(t, 1).ID {
+			b.inv.Set(s, inventory.Stack{})
 		}
 	}
 	runTicks(inst, 300)
@@ -276,9 +277,9 @@ func TestBotFightsWithItsBestWeapon(t *testing.T) {
 	inst, _ := botWorld()
 	guide := &fakeGuide{plan: game.BotPlan{}}
 	b := addTestBot(t, inst, guide, DifficultyHard, 0.5, 0.5)
-	b.inv.set(hotbarStart, woolStack(t, 32)) // in hand: wool from bridging
+	b.inv.Set(inventory.HotbarStart, woolStack(t, 32)) // in hand: wool from bridging
 	sword, _ := world.ItemByName("minecraft:iron_sword")
-	b.inv.set(mainInvStart+5, itemStack{ID: sword, Count: 1}) // in the backpack
+	b.inv.Set(inventory.MainStart+5, inventory.Stack{ID: sword, Count: 1}) // in the backpack
 	b.heldSlot.Store(0)
 	enemy := offlineConn(inst, "Enemy", player.Survival, 2.5, 64, 0.5)
 
@@ -311,7 +312,7 @@ func TestBotLeapsToAnEnemy(t *testing.T) {
 func TestBotBridgesToAnEnemy(t *testing.T) {
 	inst := gapWorld(6)
 	b := addTestBot(t, inst, &fakeGuide{plan: game.BotPlan{BlockItem: "minecraft:white_wool"}}, DifficultyHard, 0.5, 0.5)
-	b.inv.set(hotbarStart+1, woolStack(t, 32))
+	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 32))
 	enemy := offlineConn(inst, "Enemy", player.Survival, 11.5, 64, 0.5)
 	runTicks(inst, 600, enemy)
 	if enemy.player.Health() >= player.MaxHealth {
@@ -327,7 +328,7 @@ func TestBotBuildsStairsToAnEnemy(t *testing.T) {
 		inst.World.SetBlock(world.Position{X: 6, Y: y, Z: 0}, world.Stone)
 	}
 	b := addTestBot(t, inst, &fakeGuide{plan: game.BotPlan{BlockItem: "minecraft:white_wool"}}, DifficultyNormal, 0.5, 0.5)
-	b.inv.set(hotbarStart+1, woolStack(t, 32))
+	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 32))
 	enemy := offlineConn(inst, "Enemy", player.Survival, 6.5, 67, 0.5)
 	runTicks(inst, 600, enemy)
 	if enemy.player.Health() >= player.MaxHealth {
@@ -339,8 +340,8 @@ func TestBotBuildsStairsToAnEnemy(t *testing.T) {
 func TestBotShootsAnUnreachableEnemy(t *testing.T) {
 	inst, _ := botWorld()
 	b := addTestBot(t, inst, &fakeGuide{plan: game.BotPlan{}}, DifficultyHard, 0.5, 0.5)
-	b.inv.set(hotbarStart+3, itemOf(t, "minecraft:bow", 1))
-	b.inv.set(mainInvStart, itemOf(t, "minecraft:arrow", 16))
+	b.inv.Set(inventory.HotbarStart+3, itemOf(t, "minecraft:bow", 1))
+	b.inv.Set(inventory.MainStart, itemOf(t, "minecraft:arrow", 16))
 	enemy := offlineConn(inst, "Enemy", player.Survival, 13.5, 64, 0.5)
 	runTicks(inst, 400, enemy)
 	if b.countItemName("minecraft:arrow") == 16 {
@@ -378,8 +379,8 @@ func TestBotBuysGear(t *testing.T) {
 		},
 	}}
 	b := addTestBot(t, inst, guide, DifficultyNormal, -2.5, -2.5)
-	b.inv.set(hotbarStart+1, woolStack(t, 64))
-	b.inv.set(hotbarStart+2, itemOf(t, "minecraft:iron_ingot", 12))
+	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 64))
+	b.inv.Set(inventory.HotbarStart+2, itemOf(t, "minecraft:iron_ingot", 12))
 	runTicks(inst, 300)
 	if len(guide.wares) != 1 || guide.wares[0] != "stone_sword" {
 		t.Fatalf("bought %v, want the stone sword", guide.wares)
@@ -405,8 +406,8 @@ func TestBotBlastsHardCover(t *testing.T) {
 		Targets:   []world.Position{target},
 	}}
 	b := addTestBot(t, inst, guide, DifficultyHard, 0.5, 0.5)
-	b.inv.set(hotbarStart+1, woolStack(t, 32))
-	b.inv.set(hotbarStart+4, itemOf(t, "minecraft:tnt", 1))
+	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 32))
+	b.inv.Set(inventory.HotbarStart+4, itemOf(t, "minecraft:tnt", 1))
 	lit := false
 	for i := 0; i < 1500 && !lit; i++ {
 		runTicks(inst, 1)
@@ -441,7 +442,7 @@ func TestBotTeamRoles(t *testing.T) {
 	var bots []*ClientConnection
 	for i := 0; i < 3; i++ {
 		b := addTestBot(t, inst, guide, DifficultyHard, 1.5, float64(i)-0.5)
-		b.inv.set(hotbarStart+1, woolStack(t, 32))
+		b.inv.Set(inventory.HotbarStart+1, woolStack(t, 32))
 		bots = append(bots, b)
 	}
 	runTicks(inst, 20) // roles are handed out before anyone has gone anywhere
@@ -553,7 +554,7 @@ func TestBotRaidsEmeraldsAndShops(t *testing.T) {
 		Pickups: []game.BotPickup{{Pos: gen, Item: "minecraft:emerald"}},
 	}}
 	b := addTestBot(t, inst, guide, DifficultyNormal, 0.5, 0.5)
-	b.inv.set(hotbarStart+1, woolStack(t, 64)) // no reason to shop for blocks
+	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 64)) // no reason to shop for blocks
 	inst.DropItem(10.5, 64, 0.5, "minecraft:emerald", 4)
 
 	got := false
@@ -632,8 +633,8 @@ func TestBotBreaksTheBedBeforeShopping(t *testing.T) {
 		Targets: []world.Position{target},
 	}}
 	b := addTestBot(t, inst, guide, DifficultyHard, 14.5, 0.5)
-	b.inv.set(hotbarStart+1, woolStack(t, 32))
-	b.inv.set(hotbarStart+2, itemOf(t, "minecraft:emerald", 8))
+	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 32))
+	b.inv.Set(inventory.HotbarStart+2, itemOf(t, "minecraft:emerald", 8))
 	runTicks(inst, 200)
 	if got := inst.World.GetBlock(target); got != world.Air {
 		t.Fatalf("bed still standing (%s); bot at %+v", got.Name, b.player.Snapshot())
@@ -670,8 +671,8 @@ func TestArcherShootsFarEnemies(t *testing.T) {
 	if archer == nil {
 		t.Fatal("no archer among three bots")
 	}
-	archer.inv.set(hotbarStart+3, itemOf(t, "minecraft:bow", 1))
-	archer.inv.set(mainInvStart, itemOf(t, "minecraft:arrow", 32))
+	archer.inv.Set(inventory.HotbarStart+3, itemOf(t, "minecraft:bow", 1))
+	archer.inv.Set(inventory.MainStart, itemOf(t, "minecraft:arrow", 32))
 	enemy := offlineConn(inst, "Enemy", player.Survival, 60.5, 64, 0.5)
 	runTicks(inst, 600, enemy)
 	if archer.countItemName("minecraft:arrow") == 32 {
@@ -730,7 +731,7 @@ func TestDefenderFortifiesThenFights(t *testing.T) {
 	var bots []*ClientConnection
 	for i := 0; i < 2; i++ {
 		b := addTestBot(t, inst, guide, DifficultyHard, 1.5, float64(i)+1.5)
-		b.inv.set(hotbarStart+1, woolStack(t, 64))
+		b.inv.Set(inventory.HotbarStart+1, woolStack(t, 64))
 		bots = append(bots, b)
 	}
 	runTicks(inst, 20)
@@ -807,8 +808,8 @@ func TestPusherTowersAndDropsTNT(t *testing.T) {
 		Targets:   []world.Position{target},
 	}}
 	b := addTestBot(t, inst, guide, DifficultyHard, 0.5, 0.5)
-	b.inv.set(hotbarStart+1, woolStack(t, 64))
-	b.inv.set(hotbarStart+4, itemOf(t, "minecraft:tnt", 2))
+	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 64))
+	b.inv.Set(inventory.HotbarStart+4, itemOf(t, "minecraft:tnt", 2))
 	runTicks(inst, 20)
 	if b.bot.brain.role != rolePusher {
 		t.Fatalf("a lone bot with beds to break is a %v", b.bot.brain.role)
@@ -858,8 +859,8 @@ func TestPusherBuysTNTFirst(t *testing.T) {
 		Targets: []world.Position{target},
 	}}
 	b := addTestBot(t, inst, guide, DifficultyNormal, 0.5, 0.5)
-	b.inv.set(hotbarStart+1, woolStack(t, 64))
-	b.inv.set(hotbarStart+2, itemOf(t, "minecraft:gold_ingot", 8))
+	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 64))
+	b.inv.Set(inventory.HotbarStart+2, itemOf(t, "minecraft:gold_ingot", 8))
 	runTicks(inst, 200)
 	if len(guide.wares) == 0 || guide.wares[0] != "tnt" {
 		t.Fatalf("bought %v, want TNT first", guide.wares)
@@ -880,7 +881,7 @@ func TestBotWidensWhereItFell(t *testing.T) {
 		Targets:   []world.Position{target},
 	}}
 	b := addTestBot(t, inst, guide, DifficultyEasy, 0.5, 0.5) // easy: no hops
-	b.inv.set(hotbarStart+1, woolStack(t, 64))
+	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 64))
 	spot := world.Position{X: 7, Y: 64, Z: 0}
 	for fall := 0; fall < 2; fall++ {
 		pushed := false
@@ -951,7 +952,7 @@ func TestBotDigsRoundObsidian(t *testing.T) {
 		Targets:   []world.Position{target},
 	}}
 	b := addTestBot(t, inst, guide, DifficultyHard, 0.5, 0.5)
-	b.inv.set(hotbarStart+1, woolStack(t, 64))
+	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 64))
 	for i := 0; i < 2000 && inst.World.GetBlock(target) != world.Air; i++ {
 		runTicks(inst, 1)
 		if d := b.bot.brain.dig; d != nil && inst.World.GetBlock(d.pos) == obsidian {
@@ -988,8 +989,8 @@ func TestBotBuysAPickaxeForObsidian(t *testing.T) {
 		Targets: []world.Position{target},
 	}}
 	b := addTestBot(t, inst, guide, DifficultyHard, 14.5, 0.5) // at the enemy bed
-	b.inv.set(hotbarStart+1, woolStack(t, 32))
-	b.inv.set(hotbarStart+2, itemOf(t, "minecraft:gold_ingot", 10))
+	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 32))
+	b.inv.Set(inventory.HotbarStart+2, itemOf(t, "minecraft:gold_ingot", 10))
 	for i := 0; i < 3000 && inst.World.GetBlock(target) != world.Air; i++ {
 		runTicks(inst, 1)
 	}
@@ -1033,8 +1034,8 @@ func TestPusherKeepsTNTOffObsidian(t *testing.T) {
 		Targets:   []world.Position{target},
 	}}
 	b := addTestBot(t, inst, guide, DifficultyHard, 0.5, 0.5)
-	b.inv.set(hotbarStart+1, woolStack(t, 64))
-	b.inv.set(hotbarStart+4, itemOf(t, "minecraft:tnt", 2))
+	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 64))
+	b.inv.Set(inventory.HotbarStart+4, itemOf(t, "minecraft:tnt", 2))
 	for i := 0; i < 2000 && inst.World.GetBlock(target) != world.Air; i++ {
 		runTicks(inst, 1)
 	}

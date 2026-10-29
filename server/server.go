@@ -16,6 +16,7 @@ import (
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/redisc"
 	"minecraft-server/server/connlimit"
+	"minecraft-server/server/inventory"
 	"minecraft-server/server/moderation"
 	"minecraft-server/store"
 	"minecraft-server/templates"
@@ -461,10 +462,10 @@ func (c *ClientConnection) resetForHub() {
 	if c.gamemode() != player.Creative || c.server == nil || !c.server.Ops.Has(c.playerName) {
 		c.player.SetGamemode(player.Adventure)
 	}
-	for slot := int16(0); slot < playerInvSize; slot++ {
-		c.inv.set(slot, itemStack{})
+	for slot := int16(0); slot < inventory.PlayerSlots; slot++ {
+		c.inv.Set(slot, inventory.Stack{})
 	}
-	c.cursor = itemStack{}
+	c.cursor = inventory.Stack{}
 }
 
 // Name returns the player's chosen username (immutable for the session).
@@ -629,7 +630,7 @@ type ClientConnection struct {
 	// Whatever leaves the modelled slots without reaching the cursor (or
 	// leaves the cursor without reaching a slot) was dropped and becomes an
 	// item entity — see drop.go. Only touched from the readLoop goroutine.
-	cursor itemStack
+	cursor inventory.Stack
 
 	// bot is set when this connection is a server-driven bot (bot.go):
 	// no socket, an AI moves and acts for it.
@@ -642,7 +643,7 @@ type ClientConnection struct {
 
 	// drag is the drag-click (Click Container mode 5) in progress across
 	// packets (click.go). Only touched from the readLoop goroutine.
-	drag dragState
+	drag inventory.Drag
 
 	// authed gates the connection through the offline-mode auth plugin.
 	// True = player has run /register or /login successfully (or auth
@@ -661,7 +662,7 @@ type ClientConnection struct {
 	// clicks. UseItemOnBlock / throwing read the held slot from it, so a block
 	// is only placed when one is actually held. Touched only on the readLoop
 	// goroutine, so no lock.
-	inv playerInventory
+	inv inventory.Player
 
 	// ac is the anticheat state (anticheat/): pending teleports, Ping/Pong
 	// transactions, per-tick position history, violation levels, packet

@@ -7,6 +7,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
@@ -79,7 +80,7 @@ func placeOn(t *testing.T, c *ClientConnection, clicked world.Position, face int
 // clickSlot sends a window-0 Click Container with the given changed slots
 // and resulting cursor — the client's prediction, which the server only
 // compares against its own simulation (click.go).
-func clickSlot(t *testing.T, c *ClientConnection, slot int16, button byte, mode int32, changed map[int16]itemStack, cursor itemStack) {
+func clickSlot(t *testing.T, c *ClientConnection, slot int16, button byte, mode int32, changed map[int16]inventory.Stack, cursor inventory.Stack) {
 	t.Helper()
 	clickWith(t, c, 0, slot, button, mode, changed, cursor)
 }
@@ -89,10 +90,10 @@ func clickSlot(t *testing.T, c *ClientConnection, slot int16, button byte, mode 
 // "prediction" disagrees, re-sends the window — drained by play.
 func clickIn(t *testing.T, c *ClientConnection, window byte, slot int16, button byte, mode int32) {
 	t.Helper()
-	clickWith(t, c, window, slot, button, mode, nil, itemStack{})
+	clickWith(t, c, window, slot, button, mode, nil, inventory.Stack{})
 }
 
-func clickWith(t *testing.T, c *ClientConnection, window byte, slot int16, button byte, mode int32, changed map[int16]itemStack, cursor itemStack) {
+func clickWith(t *testing.T, c *ClientConnection, window byte, slot int16, button byte, mode int32, changed map[int16]inventory.Stack, cursor inventory.Stack) {
 	t.Helper()
 	var p bytes.Buffer
 	p.WriteByte(window)
@@ -103,15 +104,15 @@ func clickWith(t *testing.T, c *ClientConnection, window byte, slot int16, butto
 	protocol.WriteVarInt32ToBuffer(&p, int32(len(changed)))
 	for s, st := range changed {
 		p.Write(protocol.WriteShort(s))
-		writeStack(&p, st)
+		inventory.WriteSlot(&p, st)
 	}
-	writeStack(&p, cursor)
+	inventory.WriteSlot(&p, cursor)
 	play(t, c, packetid.SbPlayClickContainer, p.Bytes())
 }
 
 // hold puts one item in hotbar slot 0 and selects it.
 func hold(c *ClientConnection, item string) {
 	id, _ := world.ItemByName(item)
-	c.inv.set(hotbarStart, itemStack{ID: id, Count: 1})
+	c.inv.Set(inventory.HotbarStart, inventory.Stack{ID: id, Count: 1})
 	c.heldSlot.Store(0)
 }

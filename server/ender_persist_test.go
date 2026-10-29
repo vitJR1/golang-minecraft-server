@@ -6,15 +6,16 @@ import (
 	"path/filepath"
 	"testing"
 
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
 func TestEnderSlotsCodecRoundTrip(t *testing.T) {
 	diamond, _ := world.ItemByName("minecraft:diamond")
 	pick, _ := world.ItemByName("minecraft:diamond_pickaxe")
-	var slots [chestSlotCount]itemStack
-	slots[0] = itemStack{ID: diamond, Count: 3}
-	slots[26] = itemStack{ID: pick, Count: 1, Damage: 12, Enchantments: map[string]int{"minecraft:efficiency": 2}, Name: "Digger"}
+	var slots [inventory.ChestSlots]inventory.Stack
+	slots[0] = inventory.Stack{ID: diamond, Count: 3}
+	slots[26] = inventory.Stack{ID: pick, Count: 1, Damage: 12, Enchantments: map[string]int{"minecraft:efficiency": 2}, Name: "Digger"}
 
 	data, err := encodeEnderSlots(slots)
 	if err != nil {
@@ -31,7 +32,7 @@ func TestEnderSlotsCodecRoundTrip(t *testing.T) {
 		t.Errorf("slot 26: %+v", back[26])
 	}
 	for i := 1; i < 26; i++ {
-		if !back[i].empty() {
+		if !back[i].Empty() {
 			t.Errorf("slot %d should be empty: %+v", i, back[i])
 		}
 	}
@@ -41,7 +42,7 @@ func TestEnderSlotsCodecRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i, st := range odd {
-		if !st.empty() {
+		if !st.Empty() {
 			t.Errorf("slot %d unexpectedly set: %+v", i, st)
 		}
 	}
@@ -53,7 +54,7 @@ func TestEnderSlotsCodecRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i, st := range empty {
-		if !st.empty() {
+		if !st.Empty() {
 			t.Errorf("nil data: slot %d set: %+v", i, st)
 		}
 	}
@@ -71,7 +72,7 @@ func TestEnderChestPersistsThroughFileStore(t *testing.T) {
 	s.EnderChests = fs
 	owner := [16]byte{7}
 	e := s.enderChestFor(owner)
-	e.setSlot(4, itemStack{ID: 764, Count: 5})
+	e.setSlot(4, inventory.Stack{ID: 764, Count: 5})
 	s.saveEnderChest(e)
 
 	if _, err := os.Stat(path); err != nil {
@@ -89,7 +90,7 @@ func TestEnderChestPersistsThroughFileStore(t *testing.T) {
 		t.Fatalf("reloaded slot 4 = %+v, want diamond×5", got[4])
 	}
 	for i, st := range s2.enderChestFor([16]byte{8}).contents() {
-		if !st.empty() {
+		if !st.Empty() {
 			t.Errorf("other player's chest slot %d should be empty: %+v", i, st)
 		}
 	}
@@ -108,7 +109,7 @@ func TestEnderChestLoadFailureBlocksSave(t *testing.T) {
 	if !e.noSave {
 		t.Fatal("failed load should mark the chest noSave")
 	}
-	e.setSlot(0, itemStack{ID: 1, Count: 1})
+	e.setSlot(0, inventory.Stack{ID: 1, Count: 1})
 	s.saveEnderChest(e)
 	if fail.saves != 0 {
 		t.Errorf("save went through after a failed load: %d", fail.saves)

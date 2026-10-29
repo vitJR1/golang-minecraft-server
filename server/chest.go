@@ -2,13 +2,11 @@ package server
 
 import (
 	"bytes"
-	"encoding/json"
-	"sort"
 	"sync"
 
-	"minecraft-server/nbt"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
@@ -19,245 +17,24 @@ import (
 // every instance (enderChestStore on Server). There's no item NBT model, so
 // stacks are just (item id, count) plus the tool fields below.
 
-// chestSlotCount is a single chest's slot count (generic_9x3).
-const chestSlotCount = 27
-
 // chestRows is the GUI row count for a single chest.
 const chestRows = 3
 
-// itemStack is one inventory slot's contents. Count 0 means the slot is empty
-// (ID is then ignored).
-type itemStack struct {
-	ID    int32
-	Count byte
-	// Name is an optional custom display name (server-given UI items such as
-	// the "Navigator" blaze rod).
-	Name string
-	// Damage is the wear on a tool (NBT "Damage"); the item breaks when it
-	// reaches world.ToolDurability.
-	Damage int
-	// Enchantments maps enchantment id ("minecraft:efficiency") → level,
-	// from the item's NBT "Enchantments" list.
-	Enchantments map[string]int
-	// Lore is the hover text under the name (NBT display.Lore).
-	Lore []string
-	// Color is a leather-armour dye as 0xRRGGBB (NBT display.color); 0 = none.
-	Color int32
-	// Potion is the potion id of a minecraft:potion stack (NBT "Potion").
-	Potion string
-	// Glint forces the enchanted shimmer without a real enchantment (menu
-	// icons): written as a hidden dummy enchantment.
-	Glint bool
-	// NoDrop: the stack can't leave the player's inventory (game.ItemStack.
-	// NoDrop). Server-only, never written to the item's NBT.
-	NoDrop bool
-}
-
-func (s itemStack) empty() bool { return s.Count == 0 }
-
-// undroppable reports whether the stack must stay in the player's
-// inventory: marked NoDrop by a game, or a hub UI item (navigator, arena
-// selector).
-func (s itemStack) undroppable() bool {
-	return !s.empty() && (s.NoDrop || s.Name == navigatorName || s.Name == selectorName)
-}
-
-// sameKind reports whether two stacks can merge: same item and identical
-// display / enchantment / potion data (count and wear aside).
-func (s itemStack) sameKind(o itemStack) bool {
-	if s.ID != o.ID || s.Name != o.Name || s.Color != o.Color || s.Potion != o.Potion || s.Glint != o.Glint || s.NoDrop != o.NoDrop {
-		return false
-	}
-	if s.Damage != o.Damage || len(s.Lore) != len(o.Lore) || len(s.Enchantments) != len(o.Enchantments) {
-		return false
-	}
-	for i := range s.Lore {
-		if s.Lore[i] != o.Lore[i] {
-			return false
-		}
-	}
-	for k, v := range s.Enchantments {
-		if o.Enchantments[k] != v {
-			return false
-		}
-	}
-	return true
-}
-
-// enchantLevel returns the level of an enchantment on the stack (0 = none).
-func (s itemStack) enchantLevel(id string) int { return s.Enchantments[id] }
-
-// tag rebuilds the stack's NBT (name, damage, enchantments); nil when plain.
-func (s itemStack) tag() nbt.Compound {
-	var tag nbt.Compound
-	set := func(k string, v nbt.Value) {
-		if tag == nil {
-			tag = nbt.Compound{}
-		}
-		tag[k] = v
-	}
-	if s.Name != "" || len(s.Lore) > 0 || s.Color != 0 {
-		display := nbt.Compound{}
-		if s.Name != "" {
-			display["Name"] = nbt.String(textJSON(s.Name))
-		}
-		if len(s.Lore) > 0 {
-			lore := nbt.List{ElemTag: nbt.TagString}
-			for _, line := range s.Lore {
-				lore.Items = append(lore.Items, nbt.String(textJSON(line)))
-			}
-			display["Lore"] = lore
-		}
-		if s.Color != 0 {
-			display["color"] = nbt.Int(s.Color)
-		}
-		set("display", display)
-	}
-	if s.Damage > 0 {
-		set("Damage", nbt.Int(int32(s.Damage)))
-	}
-	if s.Potion != "" {
-		set("Potion", nbt.String(s.Potion))
-	}
-	if len(s.Enchantments) > 0 {
-		ids := make([]string, 0, len(s.Enchantments))
-		for id := range s.Enchantments {
-			ids = append(ids, id)
-		}
-		sort.Strings(ids)
-		list := nbt.List{ElemTag: nbt.TagCompound}
-		for _, id := range ids {
-			list.Items = append(list.Items, nbt.Compound{"id": nbt.String(id), "lvl": nbt.Short(int16(s.Enchantments[id]))})
-		}
-		set("Enchantments", list)
-	} else if s.Glint {
-		// A hidden dummy enchantment gives the shimmer without a tooltip line.
-		set("Enchantments", nbt.List{ElemTag: nbt.TagCompound, Items: []nbt.Value{
-			nbt.Compound{"id": nbt.String("minecraft:unbreaking"), "lvl": nbt.Short(1)}}})
-		set("HideFlags", nbt.Int(1))
-	}
-	return tag
-}
-
-// textJSON wraps plain text (§ codes allowed; vanilla renders them) as a
-// chat component. Italic is switched off so names/lore look like vanilla
-// item text rather than the default italic custom name.
-func textJSON(text string) string {
-	return `{"text":"` + protocol.EscapeJSON(text) + `","italic":false}`
-}
-
-// textFromJSON extracts the plain text of a chat component string; a
-// non-JSON value is returned as-is.
-func textFromJSON(raw string) string {
-	var comp struct {
-		Text  string `json:"text"`
-		Extra []struct {
-			Text string `json:"text"`
-		} `json:"extra"`
-	}
-	if err := json.Unmarshal([]byte(raw), &comp); err != nil {
-		var plain string
-		if json.Unmarshal([]byte(raw), &plain) == nil {
-			return plain
-		}
-		return raw
-	}
-	out := comp.Text
-	for _, e := range comp.Extra {
-		out += e.Text
-	}
-	return out
-}
-
-// writeStack appends the wire Slot for st (empty, plain, or tagged).
-func writeStack(buf *bytes.Buffer, st itemStack) {
-	if st.empty() {
-		buf.Write(protocol.WriteEmptySlot())
-		return
-	}
-	buf.Write(protocol.WriteSlotTagged(st.ID, st.Count, st.tag()))
-}
-
-// stackFromTag fills Damage/Enchantments/display/Potion from a slot's NBT
-// compound (the client echoes the full tag back in container clicks).
-func stackFromTag(st itemStack, tag nbt.Compound) itemStack {
-	if d, ok := tag["Damage"].(nbt.Int); ok {
-		st.Damage = int(d)
-	}
-	if potion, ok := tag["Potion"].(nbt.String); ok {
-		st.Potion = string(potion)
-	}
-	if display, ok := tag["display"].(nbt.Compound); ok {
-		if name, ok := display["Name"].(nbt.String); ok {
-			st.Name = textFromJSON(string(name))
-		}
-		if lore, ok := display["Lore"].(nbt.List); ok {
-			for _, line := range lore.Items {
-				if sline, ok := line.(nbt.String); ok {
-					st.Lore = append(st.Lore, textFromJSON(string(sline)))
-				}
-			}
-		}
-		if color, ok := display["color"].(nbt.Int); ok {
-			st.Color = int32(color)
-		}
-	}
-	if hide, ok := tag["HideFlags"].(nbt.Int); ok && hide&1 != 0 {
-		// Our glint marker: a hidden single dummy enchantment.
-		if list, ok := tag["Enchantments"].(nbt.List); ok && len(list.Items) == 1 {
-			if ench, ok := list.Items[0].(nbt.Compound); ok {
-				if id, _ := ench["id"].(nbt.String); id == "minecraft:unbreaking" {
-					st.Glint = true
-					return st
-				}
-			}
-		}
-	}
-	if list, ok := tag["Enchantments"].(nbt.List); ok {
-		for _, item := range list.Items {
-			ench, ok := item.(nbt.Compound)
-			if !ok {
-				continue
-			}
-			id, _ := ench["id"].(nbt.String)
-			if id == "" {
-				continue
-			}
-			lvl := 0
-			switch v := ench["lvl"].(type) {
-			case nbt.Short:
-				lvl = int(v)
-			case nbt.Int:
-				lvl = int(v)
-			case nbt.Byte:
-				lvl = int(v)
-			}
-			if lvl > 0 {
-				if st.Enchantments == nil {
-					st.Enchantments = map[string]int{}
-				}
-				st.Enchantments[string(id)] = lvl
-			}
-		}
-	}
-	return st
-}
-
 // chestInventory is one chest's stored slots.
 type chestInventory struct {
-	slots [chestSlotCount]itemStack
+	slots [inventory.ChestSlots]inventory.Stack
 }
 
 // chestStore is what an open chest GUI reads from and writes to: a block
 // chest bound to a position, or a player's ender chest.
 type chestStore interface {
 	// contents returns a copy of the 27 stored slots.
-	contents() [chestSlotCount]itemStack
+	contents() [inventory.ChestSlots]inventory.Stack
 	// setSlot stores st at idx (0..26); out-of-range is ignored.
-	setSlot(idx int, st itemStack)
+	setSlot(idx int, st inventory.Stack)
 	// update runs fn on the stored slots under the store's lock: a click
 	// reads and writes the chest atomically (click.go).
-	update(fn func(*[chestSlotCount]itemStack))
+	update(fn func(*[inventory.ChestSlots]inventory.Stack))
 	// title is the GUI window title.
 	title() string
 }
@@ -268,10 +45,10 @@ type blockChest struct {
 	pos  world.Position
 }
 
-func (b blockChest) contents() [chestSlotCount]itemStack { return b.inst.chestAt(b.pos) }
-func (b blockChest) setSlot(idx int, st itemStack)       { b.inst.setChestSlot(b.pos, idx, st) }
-func (b blockChest) title() string                       { return "Chest" }
-func (b blockChest) update(fn func(*[chestSlotCount]itemStack)) {
+func (b blockChest) contents() [inventory.ChestSlots]inventory.Stack { return b.inst.chestAt(b.pos) }
+func (b blockChest) setSlot(idx int, st inventory.Stack)             { b.inst.setChestSlot(b.pos, idx, st) }
+func (b blockChest) title() string                                   { return "Chest" }
+func (b blockChest) update(fn func(*[inventory.ChestSlots]inventory.Stack)) {
 	b.inst.updateChest(b.pos, fn)
 }
 
@@ -283,17 +60,17 @@ type enderChest struct {
 	uuid   [16]byte
 	noSave bool // set when the load failed, so we never clobber saved data
 	mu     sync.Mutex
-	slots  [chestSlotCount]itemStack
+	slots  [inventory.ChestSlots]inventory.Stack
 }
 
-func (e *enderChest) contents() [chestSlotCount]itemStack {
+func (e *enderChest) contents() [inventory.ChestSlots]inventory.Stack {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.slots
 }
 
-func (e *enderChest) setSlot(idx int, st itemStack) {
-	if idx < 0 || idx >= chestSlotCount {
+func (e *enderChest) setSlot(idx int, st inventory.Stack) {
+	if idx < 0 || idx >= inventory.ChestSlots {
 		return
 	}
 	e.mu.Lock()
@@ -303,7 +80,7 @@ func (e *enderChest) setSlot(idx int, st itemStack) {
 
 func (e *enderChest) title() string { return "Ender Chest" }
 
-func (e *enderChest) update(fn func(*[chestSlotCount]itemStack)) {
+func (e *enderChest) update(fn func(*[inventory.ChestSlots]inventory.Stack)) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	fn(&e.slots)
@@ -330,18 +107,18 @@ func isEnderChest(b world.Block) bool { return b.Name == "minecraft:ender_chest"
 
 // chestAt returns (a copy of) the chest's stored slots at pos, creating an
 // empty record on first access.
-func (i *Instance) chestAt(pos world.Position) [chestSlotCount]itemStack {
+func (i *Instance) chestAt(pos world.Position) [inventory.ChestSlots]inventory.Stack {
 	i.chestsMu.Lock()
 	defer i.chestsMu.Unlock()
 	if inv := i.chests[pos]; inv != nil {
 		return inv.slots
 	}
-	return [chestSlotCount]itemStack{}
+	return [inventory.ChestSlots]inventory.Stack{}
 }
 
 // setChestSlot stores stack in chest pos's slot idx (idx in 0..26).
-func (i *Instance) setChestSlot(pos world.Position, idx int, stack itemStack) {
-	if idx < 0 || idx >= chestSlotCount {
+func (i *Instance) setChestSlot(pos world.Position, idx int, stack inventory.Stack) {
+	if idx < 0 || idx >= inventory.ChestSlots {
 		return
 	}
 	i.chestsMu.Lock()
@@ -359,7 +136,7 @@ func (i *Instance) setChestSlot(pos world.Position, idx int, stack itemStack) {
 
 // updateChest runs fn on chest pos's slots under chestsMu, creating the
 // record on first use.
-func (i *Instance) updateChest(pos world.Position, fn func(*[chestSlotCount]itemStack)) {
+func (i *Instance) updateChest(pos world.Position, fn func(*[inventory.ChestSlots]inventory.Stack)) {
 	i.chestsMu.Lock()
 	defer i.chestsMu.Unlock()
 	if i.chests == nil {
@@ -386,7 +163,7 @@ func (c *ClientConnection) openBlockChest(pos world.Position) {
 
 // openChestStore shows store's contents in the chest GUI.
 func (c *ClientConnection) openChestStore(store chestStore) {
-	c.drag.reset()
+	c.drag.Reset()
 	c.menu.Store(&openMenu{kind: "chest", chest: store})
 	_ = c.sendOpenScreen(store.title(), chestRows)
 	_ = c.sendChestInventory(store.contents())
@@ -395,53 +172,15 @@ func (c *ClientConnection) openChestStore(store chestStore) {
 // sendChestInventory streams a chest's contents (Set Container Content): the 27
 // chest slots from `slots`, then the player's real inventory (main + hotbar
 // mirror from c.inv), then the cursor.
-func (c *ClientConnection) sendChestInventory(slots [chestSlotCount]itemStack) error {
+func (c *ClientConnection) sendChestInventory(slots [inventory.ChestSlots]inventory.Stack) error {
 	var buf bytes.Buffer
 	buf.WriteByte(menuWindowID)
 	protocol.WriteVarInt32ToBuffer(&buf, 0) // state id
-	protocol.WriteVarInt32ToBuffer(&buf, int32(chestSlotCount+36))
-	for s := 0; s < chestSlotCount; s++ {
-		writeStack(&buf, slots[s])
+	protocol.WriteVarInt32ToBuffer(&buf, int32(inventory.ChestSlots+36))
+	for s := 0; s < inventory.ChestSlots; s++ {
+		inventory.WriteSlot(&buf, slots[s])
 	}
 	c.writeInventoryMirror(&buf)
-	writeStack(&buf, c.cursor)
+	inventory.WriteSlot(&buf, c.cursor)
 	return c.safeWrite(packetid.CbPlaySetContainerContent, buf.Bytes())
-}
-
-// readSlot reads one wire Slot from buf: present bool, then (item id, count,
-// NBT). The NBT is skipped via nbt.SkipTag. Returns the stack (Count 0 when the
-// slot is absent) and whether the read succeeded.
-func readSlot(buf *bytes.Buffer) (itemStack, bool) {
-	present, err := protocol.ReadBool(buf)
-	if err != nil {
-		return itemStack{}, false
-	}
-	if !present {
-		return itemStack{}, true // empty slot
-	}
-	id, err := protocol.ReadVarInt(buf)
-	if err != nil {
-		return itemStack{}, false
-	}
-	count, err := buf.ReadByte()
-	if err != nil {
-		return itemStack{}, false
-	}
-	// Measure the item's optional NBT, then decode it for the fields we
-	// model (Damage, Enchantments, display). Client stacks are only ever
-	// compared against the model (click.go), never stored, except a
-	// creative player's Set Creative Mode Slot.
-	r := bytes.NewReader(buf.Bytes())
-	before := r.Len()
-	if err := nbt.SkipTag(r); err != nil {
-		return itemStack{}, false
-	}
-	raw := buf.Next(before - r.Len())
-	st := itemStack{ID: int32(id), Count: count}
-	if len(raw) > 1 {
-		if tag, err := nbt.UnmarshalNetwork(raw); err == nil {
-			st = stackFromTag(st, tag)
-		}
-	}
-	return st, true
 }
