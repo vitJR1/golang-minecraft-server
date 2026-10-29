@@ -118,3 +118,12 @@ func armorDurability(item string) int {
 	}
 	return table[material][pieceIndex(piece)]
 }
+
+// Flight of an arrow shot at full draw (server/arrow.go; the bots aim with
+// the same numbers).
+const (
+	ArrowSpeed      = 3.0  // blocks/tick at full draw
+	ArrowGravity    = 0.05 // per tick
+	ArrowDrag       = 0.99
+	ArrowHitInflate = 0.3 // hitboxes grow by this for an arrow's hit test
+)

@@ -121,3 +121,26 @@ func SeenFrom(now, confirmed uint64, hasConfirmed bool) uint64 {
 	}
 	return from - back
 }
+
+// SegmentHitsBox is the slab test of the segment a→b against an
+// axis-aligned box, returning the entry parameter t ∈ [0,1] on a hit.
+func SegmentHitsBox(ax, ay, az, bx, by, bz, minX, minY, minZ, maxX, maxY, maxZ float64) (float64, bool) {
+	tmin, tmax := 0.0, 1.0
+	axis := func(a, b, lo, hi float64) bool {
+		d := b - a
+		if math.Abs(d) < 1e-9 {
+			return a >= lo && a <= hi
+		}
+		t1, t2 := (lo-a)/d, (hi-a)/d
+		if t1 > t2 {
+			t1, t2 = t2, t1
+		}
+		tmin = math.Max(tmin, t1)
+		tmax = math.Min(tmax, t2)
+		return tmin <= tmax
+	}
+	if !axis(ax, bx, minX, maxX) || !axis(ay, by, minY, maxY) || !axis(az, bz, minZ, maxZ) {
+		return 0, false
+	}
+	return tmin, true
+}

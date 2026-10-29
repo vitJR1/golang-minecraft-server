@@ -554,6 +554,9 @@ var exactBlastResistance = map[string]float64{
 	"minecraft:tnt":               0,
 }
 
+// TNTPower is a TNT explosion's strength.
+const TNTPower = 4.0
+
 // BlastResistance returns the block's vanilla blast resistance, used by the
 // explosion ray march: each ray loses (resistance + 0.3) * 0.3 per block it
 // crosses. Unbreakable blocks report an effectively infinite value.

@@ -39,7 +39,6 @@ import (
 
 const (
 	tntFuseTicks    = 80   // vanilla fuse when lit by hand
-	tntPower        = 4.0  // explosion strength
 	tntGravity      = 0.04 // per tick
 	tntDrag         = 0.98 // velocity retained per tick
 	tntGroundDrag   = 0.7  // extra horizontal friction while resting
@@ -168,7 +167,7 @@ func (i *Instance) tntTick(uint64) {
 		i.Players.Broadcast(packetid.CbPlayRemoveEntities, removeEntitiesPayload(removed), -1)
 	}
 	for _, t := range exploding {
-		i.explode(t.x, t.y+tntHeight*0.0625, t.z, tntPower, t.igniter)
+		i.explode(t.x, t.y+tntHeight*0.0625, t.z, world.TNTPower, t.igniter)
 	}
 }
 

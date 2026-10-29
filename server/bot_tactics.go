@@ -109,8 +109,8 @@ func (b *bot) friendInLine(from, to anticheat.Vec) *ClientConnection {
 		if s.Dead || s.Gamemode == player.Spectator || guide.BotEnemy(ctx, me, playerBridge{conn: o}) {
 			continue
 		}
-		const half, pad = 0.3, arrowHitInflate
-		if _, hit := segmentHitsBox(from.X, from.Y, from.Z, to.X, to.Y, to.Z,
+		const half, pad = 0.3, world.ArrowHitInflate
+		if _, hit := anticheat.SegmentHitsBox(from.X, from.Y, from.Z, to.X, to.Y, to.Z,
 			s.X-half-pad, s.Y-pad, s.Z-half-pad, s.X+half+pad, s.Y+1.8+pad, s.Z+half+pad); hit {
 			return o
 		}
@@ -188,13 +188,13 @@ func aimArrow(from, to anticheat.Vec) (yaw, pitch float32, flight int, ok bool) 
 	best, bestScore, bestTicks := 0.0, math.Inf(1), 0
 	for p := -45.0; p <= 45; p += 0.25 { // pitch: negative is up
 		rad := p * math.Pi / 180
-		vh, vy := arrowSpeed*math.Cos(rad), -arrowSpeed*math.Sin(rad)
+		vh, vy := world.ArrowSpeed*math.Cos(rad), -world.ArrowSpeed*math.Sin(rad)
 		x, y := 0.0, 0.0
 		ticks := 0
 		for i := 0; i < 200 && x < dist; i++ {
 			ticks = i + 1
-			vh *= arrowDrag
-			vy = vy*arrowDrag - arrowGravity
+			vh *= world.ArrowDrag
+			vy = vy*world.ArrowDrag - world.ArrowGravity
 			nx, ny := x+vh, y+vy
 			if nx >= dist {
 				y += (ny - y) * (dist - x) / (nx - x)
@@ -451,7 +451,7 @@ func (b *bot) blast(now uint64, cover world.Position) bool {
 // than that at the first step — obsidian (1200), not end stone (9) — is
 // immune however close the TNT lies.
 func tntBreaks(blk world.Block) bool {
-	return (world.BlastResistance(blk.Name)+0.3)*0.3 < tntPower*1.3
+	return (world.BlastResistance(blk.Name)+0.3)*0.3 < world.TNTPower*1.3
 }
 
 // flee walks away from the TNT it lit, homeward.

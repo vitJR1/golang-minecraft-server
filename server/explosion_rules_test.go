@@ -20,7 +20,7 @@ func explosionLoss(t *testing.T, scale float64) float32 {
 		inst.SetExplosionDamage(scale)
 	}
 	victim := tntConn(inst, "Victim", player.Survival, 5.5, 64, 0.5)
-	inst.explode(0.5, 64.06, 0.5, tntPower, nil)
+	inst.explode(0.5, 64.06, 0.5, world.TNTPower, nil)
 	return player.MaxHealth - victim.player.Health()
 }
 
@@ -74,7 +74,7 @@ func TestExplosionBreakVetoKeepsBlock(t *testing.T) {
 	s.AttachLogic(inst, logic)
 
 	igniter := tntConn(inst, "Igniter", player.Creative, 10, 64, 10)
-	inst.explode(0.5, 64.06, 0.5, tntPower, igniter)
+	inst.explode(0.5, 64.06, 0.5, world.TNTPower, igniter)
 
 	if inst.World.GetBlock(shielded) != world.Stone {
 		t.Error("the vetoed block must survive the blast")
@@ -94,7 +94,7 @@ func TestExplosionBreakVetoKeepsBlock(t *testing.T) {
 	// Unknown igniter → nil handle, and the veto still applies.
 	inst.World.SetBlock(shielded, world.Stone)
 	logic.igniters = nil
-	inst.explode(0.5, 64.06, 0.5, tntPower, nil)
+	inst.explode(0.5, 64.06, 0.5, world.TNTPower, nil)
 	if inst.World.GetBlock(shielded) != world.Stone {
 		t.Error("the vetoed block must survive an anonymous blast too")
 	}

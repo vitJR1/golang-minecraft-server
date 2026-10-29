@@ -3,6 +3,7 @@ package server
 import (
 	"math"
 
+	"minecraft-server/anticheat"
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
@@ -36,11 +37,7 @@ import (
 //     there).
 const (
 	arrowEntityID   int32   = 3
-	arrowSpeed              = 3.0  // blocks/tick at full draw
-	arrowGravity            = 0.05 // per tick
-	arrowDrag               = 0.99
 	arrowMinForce           = 0.1
-	arrowHitInflate         = 0.3
 	arrowStuckTicks         = 1200 // 60 s in a block, then gone
 	arrowBaseDamage float32 = 2
 	arrowCritScale  float32 = 1.5
@@ -104,14 +101,14 @@ func (c *ClientConnection) shootBow(u *useState) {
 		pickup:  pickup,
 		typeID:  arrowEntityID,
 		item:    "minecraft:arrow",
-		gravity: arrowGravity,
-		drag:    arrowDrag,
+		gravity: world.ArrowGravity,
+		drag:    world.ArrowDrag,
 		data:    c.player.EntityID, // Spawn Entity data = owner id (0 = none) since 1.17's Projectile
 		power:   c.enchantOf(bow, EnchantPower),
 		punch:   c.enchantOf(bow, EnchantPunch),
 		crit:    f >= 1,
 	}
-	if !c.launch(p, arrowSpeed*f) {
+	if !c.launch(p, world.ArrowSpeed*f) {
 		return
 	}
 	c.damageHeldTool(1)
@@ -138,38 +135,15 @@ func (i *Instance) arrowHitPlayer(p *projectile, nx, ny, nz float64) *ClientConn
 		if s.Gamemode == player.Spectator {
 			continue
 		}
-		half := playerHalfWidth + arrowHitInflate
-		t, ok := segmentHitsBox(p.x, p.y, p.z, nx, ny, nz,
-			s.X-half, s.Y-arrowHitInflate, s.Z-half,
-			s.X+half, s.Y+playerHeight+arrowHitInflate, s.Z+half)
+		half := playerHalfWidth + world.ArrowHitInflate
+		t, ok := anticheat.SegmentHitsBox(p.x, p.y, p.z, nx, ny, nz,
+			s.X-half, s.Y-world.ArrowHitInflate, s.Z-half,
+			s.X+half, s.Y+playerHeight+world.ArrowHitInflate, s.Z+half)
 		if ok && t < bestT {
 			best, bestT = c, t
 		}
 	}
 	return best
-}
-
-// segmentHitsBox is the slab test of the segment a→b against an
-// axis-aligned box, returning the entry parameter t ∈ [0,1] on a hit.
-func segmentHitsBox(ax, ay, az, bx, by, bz, minX, minY, minZ, maxX, maxY, maxZ float64) (float64, bool) {
-	tmin, tmax := 0.0, 1.0
-	axis := func(a, b, lo, hi float64) bool {
-		d := b - a
-		if math.Abs(d) < 1e-9 {
-			return a >= lo && a <= hi
-		}
-		t1, t2 := (lo-a)/d, (hi-a)/d
-		if t1 > t2 {
-			t1, t2 = t2, t1
-		}
-		tmin = math.Max(tmin, t1)
-		tmax = math.Min(tmax, t2)
-		return tmin <= tmax
-	}
-	if !axis(ax, bx, minX, maxX) || !axis(ay, by, minY, maxY) || !axis(az, bz, minZ, maxZ) {
-		return 0, false
-	}
-	return tmin, true
 }
 
 // arrowDamage is the hit damage of an arrow travelling at speed blocks/tick.

@@ -141,14 +141,14 @@ func TestTNTExplosionHurtsSurvivalNotCreative(t *testing.T) {
 	builder := tntConn(inst, "Builder", player.Creative, -2.5, 64, 0.5)
 	far := tntConn(inst, "Far", player.Survival, 20, 64, 0.5)
 
-	inst.explode(0.5, 64.06, 0.5, tntPower, nil)
+	inst.explode(0.5, 64.06, 0.5, world.TNTPower, nil)
 
 	if h := victim.player.Snapshot().Health; h >= player.MaxHealth || h <= 0 {
 		t.Errorf("survival player 5 blocks away should be hurt but alive, health=%v", h)
 	}
 	// Point blank is lethal, as in vanilla.
 	close := tntConn(inst, "Close", player.Survival, 1.5, 64, 0.5)
-	inst.explode(0.5, 64.06, 0.5, tntPower, nil)
+	inst.explode(0.5, 64.06, 0.5, world.TNTPower, nil)
 	if !close.player.IsDead() {
 		t.Errorf("player 1 block from a TNT blast should die, health=%v", close.player.Snapshot().Health)
 	}
@@ -211,7 +211,7 @@ func TestExplosionPacketSkipsDistantPlayers(t *testing.T) {
 	inst.combatEnabled.Store(true)
 	near := tntConn(inst, "Near", player.Survival, 30, 64, 0.5)
 	distant := tntConn(inst, "Distant", player.Survival, 100, 64, 0.5)
-	inst.explode(0.5, 64.06, 0.5, tntPower, nil)
+	inst.explode(0.5, 64.06, 0.5, world.TNTPower, nil)
 	if lastPacket(t, near, packetid.CbPlayExplosion) == nil {
 		t.Error("player 30 blocks away should get the Explosion packet")
 	}
@@ -242,7 +242,7 @@ func TestTNTExplosionNeedsCombat(t *testing.T) {
 	inst := bareInstance(New(), tntWorld())
 	inst.combatEnabled.Store(false)
 	victim := tntConn(inst, "Safe", player.Survival, 1.5, 64, 0.5)
-	inst.explode(0.5, 64.06, 0.5, tntPower, nil)
+	inst.explode(0.5, 64.06, 0.5, world.TNTPower, nil)
 	if h := victim.player.Snapshot().Health; h != player.MaxHealth {
 		t.Errorf("explosions must not hurt players when combat is off, health=%v", h)
 	}
