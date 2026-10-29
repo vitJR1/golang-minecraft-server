@@ -634,7 +634,7 @@ func TestKillEliminatesWhenBedDead_AndLastTeamWins(t *testing.T) {
 	if !over {
 		t.Error("round should be over with one team left")
 	}
-	if !inst.sawBroadcast("FINAL KILL") || !inst.sawBroadcast("Red team wins") {
+	if !inst.sawBroadcast("FINAL KILL") || !inst.sawBroadcast("§cRed §6team wins") {
 		t.Errorf("expected final-kill + Red win broadcasts, got %v", inst.broadcasts)
 	}
 }
@@ -653,7 +653,7 @@ func TestVoidKill(t *testing.T) {
 	if blue.Pose().Gamemode != player.Spectator {
 		t.Error("dead player spectates until respawn")
 	}
-	if !inst.sawBroadcast("blue died") {
+	if !inst.sawBroadcast("§9blue §7died") {
 		t.Errorf("expected death broadcast, got %v", inst.broadcasts)
 	}
 	// Already dead players aren't killed again.
@@ -879,7 +879,7 @@ func TestDuelOneKillAfterBedBreakWins(t *testing.T) {
 	if blue.Pose().Gamemode != player.Spectator {
 		t.Error("blue should be eliminated once bedless")
 	}
-	if !inst.sawBroadcast("Red team wins") {
+	if !inst.sawBroadcast("§cRed §6team wins") {
 		t.Errorf("expected Red win broadcast, got %v", inst.broadcasts)
 	}
 }

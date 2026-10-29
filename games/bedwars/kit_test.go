@@ -84,7 +84,7 @@ func TestDeathLootsKillerDowngradesToolsAndRespawnsAfterDelay(t *testing.T) {
 	if blue.Pose().Gamemode != player.Spectator {
 		t.Error("dead player spectates while waiting")
 	}
-	if !inst.sawBroadcast("blue was killed by red") {
+	if !inst.sawBroadcast("§9blue §7was killed by §cred") {
 		t.Errorf("kill message missing: %v", inst.broadcasts)
 	}
 

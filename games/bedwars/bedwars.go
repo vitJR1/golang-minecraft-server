@@ -189,7 +189,7 @@ func (g *bedWars) OnPlayerJoin(ctx *game.Ctx, p game.PlayerHandle) {
 		g.engaged = true
 	}
 	spawn := g.arena.Spawns[ts.team.ID]
-	teamName := ts.team.Name
+	col, teamName := teamColour(ts.team), ts.team.Name
 	k := g.kitOfLocked(p.EntityID())
 	tick := g.tick
 	g.mu.Unlock()
@@ -199,7 +199,7 @@ func (g *bedWars) OnPlayerJoin(ctx *game.Ctx, p game.PlayerHandle) {
 	p.SetGamemode(player.Survival)
 	teleport(p, spawn)
 	g.equip(p, ts, k)
-	ctx.Instance.BroadcastChat("", fmt.Sprintf("%s joined the %s team.", p.Name(), teamName))
+	ctx.Instance.BroadcastChat("", fmt.Sprintf("%s%s §7joined the %s%s §7team.", col, p.Name(), col, teamName))
 }
 
 // OnPlayerLeave drops the player from their team and re-checks the win
@@ -221,6 +221,15 @@ func (g *bedWars) OnPlayerLeave(ctx *game.Ctx, p game.PlayerHandle) {
 	if decided {
 		g.finish(ctx, winner)
 	}
+}
+
+// chatNameLocked is p's name in its team's colour (white when it has no
+// team), for chat lines. Caller holds g.mu.
+func (g *bedWars) chatNameLocked(p game.PlayerHandle) string {
+	if id, ok := g.byEntity[p.EntityID()]; ok && id >= 0 && id < len(g.teams) {
+		return teamColour(g.teams[id].team) + p.Name()
+	}
+	return "§f" + p.Name()
 }
 
 // OnPlayerAttack vetoes friendly fire; enemy hits go to the server's HP
@@ -251,6 +260,7 @@ func (g *bedWars) OnPlayerDeath(ctx *game.Ctx, victim, killer game.PlayerHandle)
 	}
 	ts := g.teams[teamID]
 	bedAlive := ts.bedAlive
+	victimName := teamColour(ts.team) + victim.Name() // before an elimination drops the team
 	k := g.kitOfLocked(victim.EntityID())
 	k.onDeath()
 	killerTeam, killerKnown := -1, false
@@ -271,7 +281,11 @@ func (g *bedWars) OnPlayerDeath(ctx *game.Ctx, victim, killer game.PlayerHandle)
 		g.removeMemberLocked(victim.EntityID())
 	}
 	winner, decided := g.winnerLocked()
-	teamName := ts.team.Name
+	teamName := teamColour(ts.team) + ts.team.Name
+	killerName := ""
+	if killer != nil {
+		killerName = g.chatNameLocked(killer)
+	}
 	g.mu.Unlock()
 
 	// Loot: the killer picks up the victim's currencies.
@@ -289,9 +303,9 @@ func (g *bedWars) OnPlayerDeath(ctx *game.Ctx, victim, killer game.PlayerHandle)
 		victim.RemoveEffect(e)
 	}
 
-	msg := victim.Name() + " died."
+	msg := victimName + " §7died."
 	if killer != nil {
-		msg = victim.Name() + " was killed by " + killer.Name() + "."
+		msg = victimName + " §7was killed by " + killerName + "§7."
 	}
 	if !bedAlive {
 		msg += " §c§lFINAL KILL!"
@@ -306,7 +320,7 @@ func (g *bedWars) OnPlayerDeath(ctx *game.Ctx, victim, killer game.PlayerHandle)
 	} else {
 		victim.Teleport(spectatorPos.X, spectatorPos.Y, spectatorPos.Z)
 		victim.SendTitle("§cYOU DIED!", "§7You will not respawn.", 0, 60, 20)
-		ctx.Instance.BroadcastChat("", fmt.Sprintf("%s was eliminated (%s team).", victim.Name(), teamName))
+		ctx.Instance.BroadcastChat("", fmt.Sprintf("%s §7was eliminated (%s §7team).", victimName, teamName))
 	}
 	if decided {
 		g.finish(ctx, winner)
@@ -338,7 +352,8 @@ func (g *bedWars) OnBlockBreak(ctx *game.Ctx, p game.PlayerHandle, pos world.Pos
 			g.statsLocked(p.EntityID()).beds++
 		}
 		beds := g.arena.BedBlocks[owner]
-		teamName := ts.team.Name
+		teamName := teamColour(ts.team) + ts.team.Name
+		breakerName := g.chatNameLocked(p)
 		g.mu.Unlock()
 
 		if alreadyGone {
@@ -350,7 +365,7 @@ func (g *bedWars) OnBlockBreak(ctx *game.Ctx, p game.PlayerHandle, pos world.Pos
 			ctx.Instance.SetBlock(bp, world.Air)
 		}
 		ctx.Instance.BroadcastChat("",
-			fmt.Sprintf("%s's bed was destroyed by %s!", teamName, p.Name()))
+			fmt.Sprintf("§f§lBED DESTRUCTION > %s §7bed was destroyed by %s§7!", teamName, breakerName))
 		return true
 	}
 
@@ -608,8 +623,8 @@ func (g *bedWars) finish(ctx *game.Ctx, winner *teamState) {
 
 	if winner != nil {
 		ctx.Instance.BroadcastChat("",
-			fmt.Sprintf("*** %s team wins! Returning to hub in %ds ***",
-				winner.team.Name, int(endDelay/time.Second)))
+			fmt.Sprintf("§6*** %s%s §6team wins! Returning to hub in %ds ***",
+				teamColour(winner.team), winner.team.Name, int(endDelay/time.Second)))
 	} else {
 		ctx.Instance.BroadcastChat("", "*** Draw! Returning to hub… ***")
 	}
