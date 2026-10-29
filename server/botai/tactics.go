@@ -1,4 +1,4 @@
-package server
+package botai
 
 import (
 	"fmt"
@@ -12,7 +12,7 @@ import (
 	"minecraft-server/world"
 )
 
-// bot_tactics.go: what a bot does beyond walking and hitting — shooting an
+// tactics.go: what a bot does beyond walking and hitting — shooting an
 // enemy it can't walk to, choosing gear in the shop (game.BotPlan.Wares),
 // saving up for it at the station, and blasting a hard bed defence with TNT.
 
@@ -35,18 +35,18 @@ const (
 
 // shoot draws the bow at t and looses when drawn, aiming the arc. False when
 // it can't (no bow or arrows, out of range, no line of sight).
-func (b *bot) shoot(now uint64, t *ClientConnection) (botnav.Input, bool) {
-	c, br := b.c, &b.brain
-	if c.countItemName(itemBow) == 0 || c.countItemName(itemArrow) == 0 {
+func (b *Bot) shoot(now uint64, t Mob) (botnav.Input, bool) {
+	br := &b.brain
+	if b.body.CountItem(itemBow) == 0 || b.body.CountItem(itemArrow) == 0 {
 		b.stopDraw()
 		return botnav.Input{}, false
 	}
-	ts := t.player.Snapshot()
+	ts := t.Snapshot()
 	aim := anticheat.Vec{X: ts.X, Y: ts.Y + 1.0, Z: ts.Z}
-	from := c.eye()
+	from := b.body.Eye()
 	from.Y -= 0.1 // arrows leave at eye height − 0.1
 	reach := botBowRange
-	if br.role == roleArcher {
+	if br.role == RoleArcher {
 		reach = botArcherSight
 	}
 	if anticheat.Dist(from, aim) > reach || !b.sees(t) {
@@ -74,11 +74,10 @@ func (b *bot) shoot(now uint64, t *ClientConnection) (botnav.Input, bool) {
 	}
 	if br.drawAt == 0 {
 		if now >= br.nextShot {
-			if !c.botHold(func(st inventory.Stack) bool { n, _ := world.ItemName(st.ID); return n == itemBow }) {
+			if !b.hold(func(st inventory.Stack) bool { n, _ := world.ItemName(st.ID); return n == itemBow }) {
 				return botnav.Input{}, false
 			}
-			c.startDraw()
-			if c.using.Load() == nil {
+			if !b.body.StartDraw() {
 				return botnav.Input{}, false
 			}
 			br.drawAt = now
@@ -88,8 +87,8 @@ func (b *bot) shoot(now uint64, t *ClientConnection) (botnav.Input, bool) {
 	}
 	br.yaw, br.pitch = yaw+br.aimYaw, pitch+br.aimPitch
 	if br.drawAt != 0 && now >= br.drawAt+botDrawTicks {
-		c.player.LookAt(br.yaw, br.pitch, b.phys.OnGround)
-		c.releaseUse()
+		b.body.Look(br.yaw, br.pitch, b.phys.OnGround)
+		b.body.Release()
 		br.drawAt = 0
 		br.nextShot = now + 10 + uint64(b.rng.Intn(20))
 	}
@@ -98,15 +97,14 @@ func (b *bot) shoot(now uint64, t *ClientConnection) (botnav.Input, bool) {
 
 // friendInLine returns a player who isn't an enemy standing (inflated like
 // an arrow's hit test) on the straight line from → to, or nil.
-func (b *bot) friendInLine(from, to anticheat.Vec) *ClientConnection {
-	c := b.c
-	guide, ctx, me := c.instance.botGuide, c.instance.pluginCtx(), playerBridge{conn: c}
-	for _, o := range c.instance.Players.snapshot() {
-		if o == c || o.player == nil {
+func (b *Bot) friendInLine(from, to anticheat.Vec) Mob {
+	guide, ctx, me := b.world().Guide(), b.world().Ctx(), b.self.Handle()
+	for _, o := range b.world().Mobs() {
+		if o == b.self || !o.Valid() {
 			continue
 		}
-		s := o.player.Snapshot()
-		if s.Dead || s.Gamemode == player.Spectator || guide.BotEnemy(ctx, me, playerBridge{conn: o}) {
+		s := o.Snapshot()
+		if s.Dead || s.Gamemode == player.Spectator || guide.BotEnemy(ctx, me, o.Handle()) {
 			continue
 		}
 		const half, pad = 0.3, world.ArrowHitInflate
@@ -119,7 +117,7 @@ func (b *bot) friendInLine(from, to anticheat.Vec) *ClientConnection {
 }
 
 // sidestep walks sideways off the line to aim, away from friend f.
-func (b *bot) sidestep(f *ClientConnection, aim anticheat.Vec) botnav.Input {
+func (b *Bot) sidestep(f Mob, aim anticheat.Vec) botnav.Input {
 	p := b.phys.Pos
 	dx, dz := aim.X-p.X, aim.Z-p.Z
 	d := math.Hypot(dx, dz)
@@ -127,14 +125,14 @@ func (b *bot) sidestep(f *ClientConnection, aim anticheat.Vec) botnav.Input {
 		return botnav.Input{}
 	}
 	sx, sz := -dz/d, dx/d // perpendicular to the line
-	fs := f.player.Snapshot()
+	fs := f.Snapshot()
 	if (fs.X-p.X)*sx+(fs.Z-p.Z)*sz > 0 {
 		sx, sz = -sx, -sz // the side away from the friend
 	}
 	in := botnav.Input{DirX: sx, DirZ: sz}
-	if !botnav.Standable(b.c.instance.World.GetBlock, botnav.FeetCell(p.X+sx, p.Y, p.Z+sz)) {
+	if !botnav.Standable(b.world().Block, botnav.FeetCell(p.X+sx, p.Y, p.Z+sz)) {
 		in.DirX, in.DirZ = -sx, -sz // a ledge there: the other way
-		if !botnav.Standable(b.c.instance.World.GetBlock, botnav.FeetCell(p.X-sx, p.Y, p.Z-sz)) {
+		if !botnav.Standable(b.world().Block, botnav.FeetCell(p.X-sx, p.Y, p.Z-sz)) {
 			return botnav.Input{} // nowhere to go: wait for them to move
 		}
 	}
@@ -142,23 +140,23 @@ func (b *bot) sidestep(f *ClientConnection, aim anticheat.Vec) botnav.Input {
 }
 
 // canShoot: a bow and arrows to shoot it with.
-func (b *bot) canShoot() bool {
-	return b.c.countItemName(itemBow) > 0 && b.c.countItemName(itemArrow) > 0
+func (b *Bot) canShoot() bool {
+	return b.body.CountItem(itemBow) > 0 && b.body.CountItem(itemArrow) > 0
 }
 
 // sees reports a clear straight line from the bot's eyes to t's chest.
-func (b *bot) sees(t *ClientConnection) bool {
-	ts := t.player.Snapshot()
+func (b *Bot) sees(t Mob) bool {
+	ts := t.Snapshot()
 	chest := anticheat.Vec{X: ts.X, Y: ts.Y + 1.0, Z: ts.Z}
-	_, blocked := firstBlockOnRay(b.c.instance.World.GetBlock, b.c.eye(), chest, world.Position{Y: math.MinInt32})
+	_, blocked := firstBlockOnRay(b.world().Block, b.body.Eye(), chest, world.Position{Y: math.MinInt32})
 	return !blocked
 }
 
 // targetVelocity is t's horizontal speed (blocks/tick) since the bot last
 // looked, for leading shots.
-func (b *bot) targetVelocity(now uint64, t *ClientConnection) anticheat.Vec {
+func (b *Bot) targetVelocity(now uint64, t Mob) anticheat.Vec {
 	br := &b.brain
-	ts := t.player.Snapshot()
+	ts := t.Snapshot()
 	pos := anticheat.Vec{X: ts.X, Y: ts.Y, Z: ts.Z}
 	var v anticheat.Vec
 	if br.leadOf == t && now > br.leadAt && now-br.leadAt <= 10 {
@@ -170,9 +168,9 @@ func (b *bot) targetVelocity(now uint64, t *ClientConnection) anticheat.Vec {
 }
 
 // stopDraw lowers a bow being drawn.
-func (b *bot) stopDraw() {
+func (b *Bot) stopDraw() {
 	if b.brain.drawAt != 0 {
-		b.c.cancelUse()
+		b.body.CancelUse()
 		b.brain.drawAt = 0
 	}
 }
@@ -232,8 +230,8 @@ func wareKindFor(tool world.ToolType) string {
 // each kind's unowned tiers best first. With a hard bed defence in the way
 // the tool for it (or TNT) comes first; away from home only that and what
 // diamonds / emeralds buy count.
-func (b *bot) wishList(now uint64) [][]game.BotWare {
-	c, br := b.c, &b.brain
+func (b *Bot) wishList(now uint64) [][]game.BotWare {
+	br := &b.brain
 	kind := func(k string) []game.BotWare {
 		var out []game.BotWare
 		for _, w := range br.plan.Wares {
@@ -252,13 +250,13 @@ func (b *bot) wishList(now uint64) [][]game.BotWare {
 			groups = append(groups, g)
 		}
 	}
-	if br.role == rolePusher && c.countItemName(itemTNT) < botPusherTNT {
+	if br.role == RolePusher && b.body.CountItem(itemTNT) < botPusherTNT {
 		add(kind(game.WareTNT)) // the pusher's tool, before anything else
 	}
 	if br.hardCover != world.NoTool {
 		tool := kind(wareKindFor(br.hardCover))
 		var tnt []game.BotWare
-		if c.countItemName(itemTNT) == 0 && (br.hardBlock == world.Air || tntBreaks(br.hardBlock)) {
+		if b.body.CountItem(itemTNT) == 0 && (br.hardBlock == world.Air || TNTBreaks(br.hardBlock)) {
 			tnt = kind(game.WareTNT) // not against obsidian: TNT doesn't scratch it
 		}
 		if b.style.prefersTNT {
@@ -285,9 +283,9 @@ func (b *bot) wishList(now uint64) [][]game.BotWare {
 			}
 		}
 	}
-	if br.role == roleArcher {
+	if br.role == RoleArcher {
 		add(kind(game.WareBow))
-		if c.countItemName(itemBow) > 0 && c.countItemName(itemArrow) < botArrowStock {
+		if b.body.CountItem(itemBow) > 0 && b.body.CountItem(itemArrow) < botArrowStock {
 			add(kind(game.WareArrows))
 		}
 	}
@@ -304,10 +302,10 @@ func (b *bot) wishList(now uint64) [][]game.BotWare {
 			add([]game.BotWare{w})
 		}
 	}
-	if b.style.likesBow && br.role != roleArcher {
+	if b.style.likesBow && br.role != RoleArcher {
 		add(kind(game.WareBow))
 	}
-	if br.role != roleArcher && c.countItemName(itemBow) > 0 && c.countItemName(itemArrow) < botArrowStock {
+	if br.role != RoleArcher && b.body.CountItem(itemBow) > 0 && b.body.CountItem(itemArrow) < botArrowStock {
 		add(kind(game.WareArrows))
 	}
 	return groups
@@ -315,17 +313,17 @@ func (b *bot) wishList(now uint64) [][]game.BotWare {
 
 // affords: the bot can pay for w and still keep one pack of blocks' worth
 // when it's short of blocks.
-func (b *bot) affords(w game.BotWare, blocks int) bool {
+func (b *Bot) affords(w game.BotWare, blocks int) bool {
 	plan := b.brain.plan
 	reserve := 0
 	if w.Currency == plan.Currency && blocks < botMinBlocks {
 		reserve = plan.Price
 	}
-	return b.c.countItemName(w.Currency)-reserve >= w.Price
+	return b.body.CountItem(w.Currency)-reserve >= w.Price
 }
 
 // wantWare is the gear to buy now: the first it wants that it can pay for.
-func (b *bot) wantWare(blocks int) *game.BotWare {
+func (b *Bot) wantWare(blocks int) *game.BotWare {
 	br := &b.brain
 	if !br.plan.HasShop {
 		return nil
@@ -336,7 +334,7 @@ func (b *bot) wantWare(blocks int) *game.BotWare {
 	if base && !br.hardStuck {
 		return nil
 	}
-	now := b.c.instance.Tick()
+	now := b.world().Tick()
 	for _, g := range b.wishList(now) {
 		if base && g[0].Kind != game.WareTNT && g[0].Kind != wareKindFor(br.hardCover) {
 			continue
@@ -351,9 +349,9 @@ func (b *bot) wantWare(blocks int) *game.BotWare {
 }
 
 // buy buys w, or a pack of blocks when w is nil.
-func (b *bot) buy(w *game.BotWare) {
-	c, br := b.c, &b.brain
-	guide, ctx, me := c.instance.botGuide, c.instance.pluginCtx(), playerBridge{conn: c}
+func (b *Bot) buy(w *game.BotWare) {
+	br := &b.brain
+	guide, ctx, me := b.world().Guide(), b.world().Ctx(), b.self.Handle()
 	if w == nil {
 		guide.BotBuy(ctx, me, br.plan.BuyKey)
 		return
@@ -373,20 +371,20 @@ func (b *bot) buy(w *game.BotWare) {
 		if br.badWare == nil {
 			br.badWare = map[string]uint64{}
 		}
-		br.badWare[w.Key] = c.instance.Tick() + botWareRetry
+		br.badWare[w.Key] = b.world().Tick() + botWareRetry
 	}
 	br.planAt = 0 // what it owns changed: ask the game again
 }
 
 // saving reports whether the bot stays at the station to save up for gear
 // it wants but can't afford — decided now and then, by chance.
-func (b *bot) saving(now uint64) bool {
+func (b *Bot) saving(now uint64) bool {
 	br := &b.brain
 	if !br.plan.HasStation || !br.plan.HasShop || horiz(b.phys.Pos, cellCentre(br.plan.Home)) > botHomeRange {
 		return false
 	}
 	// A pusher without TNT waits for the gold (up to botPusherSave).
-	if br.role == rolePusher && b.c.countItemName(itemTNT) == 0 && b.offers(game.WareTNT) {
+	if br.role == RolePusher && b.body.CountItem(itemTNT) == 0 && b.offers(game.WareTNT) {
 		if br.pushSaveAt == 0 {
 			br.pushSaveAt = now
 		}
@@ -415,18 +413,18 @@ func (b *bot) saving(now uint64) bool {
 
 // blast places a TNT next to cover, on the bot's side, and runs. False when
 // the bot has none, the game doesn't light placed TNT, or there's no spot.
-func (b *bot) blast(now uint64, cover world.Position) bool {
-	c, br := b.c, &b.brain
-	if c.countItemName(itemTNT) == 0 || !c.instance.TNTAutoPrime() || !tntBreaks(c.instance.World.GetBlock(cover)) {
+func (b *Bot) blast(now uint64, cover world.Position) bool {
+	br := &b.brain
+	if b.body.CountItem(itemTNT) == 0 || !b.world().TNTAutoPrime() || !TNTBreaks(b.world().Block(cover)) {
 		return false
 	}
-	at := c.instance.World.GetBlock
-	eye := c.eye()
+	at := b.world().Block
+	eye := b.body.Eye()
 	var spot world.Position
 	bestD := math.Inf(1)
 	for _, d := range [6][3]int{{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}} {
 		p := cover.Add(d[0], d[1], d[2])
-		if !world.Replaceable(at(p)) || c.instance.blockedByPlayer(p) {
+		if !world.Replaceable(at(p)) || b.world().BlockedByPlayer(p) {
 			continue
 		}
 		if dd := anticheat.Dist(eye, blockCentre(p)); dd < bestD {
@@ -437,7 +435,7 @@ func (b *bot) blast(now uint64, cover world.Position) bool {
 		return false
 	}
 	b.lookAt(blockCentre(spot))
-	if !c.botPlaceWith(spot, func(n string) bool { return n == itemTNT }) {
+	if !b.placeWith(spot, func(n string) bool { return n == itemTNT }) {
 		return false
 	}
 	br.dig, br.route = nil, nil
@@ -445,17 +443,17 @@ func (b *bot) blast(now uint64, cover world.Position) bool {
 	return true
 }
 
-// tntBreaks reports whether a TNT going off right against blk can break it.
+// TNTBreaks reports whether a TNT going off right against blk can break it.
 // The blast (tnt.go) sends rays of up to power×1.3 that lose
 // (resistance+0.3)×0.3 per step through a block: a block resisting more
 // than that at the first step — obsidian (1200), not end stone (9) — is
 // immune however close the TNT lies.
-func tntBreaks(blk world.Block) bool {
+func TNTBreaks(blk world.Block) bool {
 	return (world.BlastResistance(blk.Name)+0.3)*0.3 < world.TNTPower*1.3
 }
 
 // flee walks away from the TNT it lit, homeward.
-func (b *bot) flee(now uint64) botnav.Input {
+func (b *Bot) flee(now uint64) botnav.Input {
 	from := b.brain.fleeFrom
 	away := func(p world.Position) bool {
 		dx, dy, dz := float64(p.X-from.X), float64(p.Y-from.Y), float64(p.Z-from.Z)
@@ -474,7 +472,7 @@ const (
 
 // precious reports whether item is what a pickup spot drops (diamonds,
 // emeralds) rather than what the bot's own station makes.
-func (b *bot) precious(item string) bool {
+func (b *Bot) precious(item string) bool {
 	for _, p := range b.brain.plan.Pickups {
 		if p.Item == item {
 			return true
@@ -484,7 +482,7 @@ func (b *bot) precious(item string) bool {
 }
 
 // offers reports whether the shop sells a ware of this kind.
-func (b *bot) offers(kind string) bool {
+func (b *Bot) offers(kind string) bool {
 	for _, w := range b.brain.plan.Wares {
 		if w.Kind == kind {
 			return true
@@ -494,7 +492,7 @@ func (b *bot) offers(kind string) bool {
 }
 
 // wantsCurrency reports whether some ware the bot doesn't own is paid in item.
-func (b *bot) wantsCurrency(item string) bool {
+func (b *Bot) wantsCurrency(item string) bool {
 	for _, w := range b.brain.plan.Wares {
 		if w.Currency == item && !w.Owned {
 			return true
@@ -513,10 +511,10 @@ func pilePos(p world.Position) anticheat.Vec {
 // pile up. Greedy bots go for any pile, the others for a big one. Once the
 // bot can afford something, the shop (wantWare) sends it home. Between
 // raids it rests (endRaid), so it still goes for the beds.
-func (b *bot) collect(now uint64, blocks int) (botnav.Input, bool) {
-	c, br := b.c, &b.brain
+func (b *Bot) collect(now uint64, blocks int) (botnav.Input, bool) {
+	br := &b.brain
 	plan := br.plan
-	if br.role == roleDefender || len(plan.Pickups) == 0 || (!br.raiding && now < br.nextRaid) {
+	if br.role == RoleDefender || len(plan.Pickups) == 0 || (!br.raiding && now < br.nextRaid) {
 		return botnav.Input{}, false
 	}
 	need := 2
@@ -531,7 +529,7 @@ func (b *bot) collect(now uint64, blocks int) (botnav.Input, bool) {
 			continue
 		}
 		at := pilePos(p.Pos)
-		n := c.instance.DroppedItemsNear(at.X, at.Y, at.Z, botPickupRadius, p.Item)
+		n := b.world().DroppedItemsNear(at.X, at.Y, at.Z, botPickupRadius, p.Item)
 		if n == 0 || (n < need && !(br.raiding && br.pickup == p.Pos)) {
 			continue
 		}
@@ -540,7 +538,7 @@ func (b *bot) collect(now uint64, blocks int) (botnav.Input, bool) {
 		if p.Item == "minecraft:emerald" {
 			weight = 3
 		}
-		score := weight*float64(n) - anticheat.Dist(c.feet(), at)/16
+		score := weight*float64(n) - anticheat.Dist(b.body.Feet(), at)/16
 		if best == nil || score > bestScore {
 			best, bestScore = p, score
 		}
@@ -551,7 +549,7 @@ func (b *bot) collect(now uint64, blocks int) (botnav.Input, bool) {
 	}
 	br.pickup, br.raiding = best.Pos, true
 	goal := atStation(best.Pos)
-	if goal(c.feetCellNow()) {
+	if goal(b.feetCell()) {
 		in := b.toward(pilePos(best.Pos), false) // into the pile
 		in.DirX, in.DirZ = in.DirX*0.3, in.DirZ*0.3
 		return in, true
@@ -567,7 +565,7 @@ func (b *bot) collect(now uint64, blocks int) (botnav.Input, bool) {
 
 // endRaid closes a raid (the pile is taken, or out of reach): the next one
 // waits botRaidRest..2×botRaidRest ticks.
-func (b *bot) endRaid(now uint64) {
+func (b *Bot) endRaid(now uint64) {
 	br := &b.brain
 	if br.raiding {
 		br.raiding = false

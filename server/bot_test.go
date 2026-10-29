@@ -8,6 +8,7 @@ import (
 
 	"minecraft-server/game"
 	"minecraft-server/player"
+	"minecraft-server/server/botai"
 	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
@@ -79,7 +80,7 @@ func botWorld() (*Instance, world.Position) {
 }
 
 // addTestBot adds a bot through the server and parks it at (x, 64, z).
-func addTestBot(t *testing.T, inst *Instance, guide *fakeGuide, diff Difficulty, x, z float64) *ClientConnection {
+func addTestBot(t *testing.T, inst *Instance, guide *fakeGuide, diff botai.Difficulty, x, z float64) *ClientConnection {
 	t.Helper()
 	inst.botGuide = guide
 	b, err := inst.Server.AddBot(inst, "red", diff)
@@ -101,11 +102,7 @@ func runTicks(inst *Instance, n int, players ...*ClientConnection) {
 			if !c.isBot() {
 				return
 			}
-			for deadline := time.Now().Add(10 * time.Second); ; {
-				far := c.bot.brain.far
-				if far == nil || len(far) > 0 || time.Now().After(deadline) {
-					break
-				}
+			for deadline := time.Now().Add(10 * time.Second); c.bot.Searching() && time.Now().Before(deadline); {
 				time.Sleep(100 * time.Microsecond)
 			}
 		})
@@ -154,7 +151,7 @@ func woolStack(t *testing.T, n int) inventory.Stack {
 func TestBotJoinsAsAPlayer(t *testing.T) {
 	inst, _ := botWorld()
 	guide := &fakeGuide{plan: game.BotPlan{Idle: true}}
-	b := addTestBot(t, inst, guide, DifficultyNormal, 0.5, 0.5)
+	b := addTestBot(t, inst, guide, botai.DifficultyNormal, 0.5, 0.5)
 	if !strings.HasPrefix(b.playerName, botPrefix) || len(b.playerName) > 16 {
 		t.Fatalf("bot name %q", b.playerName)
 	}
@@ -173,7 +170,7 @@ func TestBotJoinsAsAPlayer(t *testing.T) {
 
 func TestBotNeedsAGuide(t *testing.T) {
 	inst, _ := botWorld()
-	if _, err := inst.Server.AddBot(inst, "red", DifficultyNormal); err == nil {
+	if _, err := inst.Server.AddBot(inst, "red", botai.DifficultyNormal); err == nil {
 		t.Fatal("a bot joined an instance without a game guide")
 	}
 }
@@ -184,7 +181,7 @@ func TestBotBridgesAndBreaksTarget(t *testing.T) {
 		BlockItem: "minecraft:white_wool",
 		Targets:   []world.Position{target},
 	}}
-	b := addTestBot(t, inst, guide, DifficultyHard, 0.5, 0.5)
+	b := addTestBot(t, inst, guide, botai.DifficultyHard, 0.5, 0.5)
 	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 32))
 
 	runTicks(inst, 1200)
@@ -208,7 +205,7 @@ func TestBotBridgesAndBreaksTarget(t *testing.T) {
 func TestBotFightsNearbyEnemy(t *testing.T) {
 	inst, _ := botWorld()
 	guide := &fakeGuide{plan: game.BotPlan{}}
-	addTestBot(t, inst, guide, DifficultyHard, 0.5, 0.5)
+	addTestBot(t, inst, guide, botai.DifficultyHard, 0.5, 0.5)
 	enemy := offlineConn(inst, "Enemy", player.Survival, 2.5, 64, 0.5)
 
 	runTicks(inst, 200)
@@ -221,7 +218,7 @@ func TestBotFightsNearbyEnemy(t *testing.T) {
 func TestBotIgnoresFriends(t *testing.T) {
 	inst, _ := botWorld()
 	guide := &fakeGuide{plan: game.BotPlan{}}
-	addTestBot(t, inst, guide, DifficultyHard, 0.5, 0.5)
+	addTestBot(t, inst, guide, botai.DifficultyHard, 0.5, 0.5)
 	friend := offlineConn(inst, "Friend", player.Survival, 2.5, 64, 0.5)
 	runTicks(inst, 200)
 	drain(friend)
@@ -238,7 +235,7 @@ func TestBotBuysBlocksAtTheShop(t *testing.T) {
 		Shop: world.Position{X: 3, Y: 64, Z: 3}, HasShop: true,
 		Station: world.Position{X: -2, Y: 64, Z: -2}, HasStation: true,
 	}}
-	b := addTestBot(t, inst, guide, DifficultyNormal, -2.5, -2.5)
+	b := addTestBot(t, inst, guide, botai.DifficultyNormal, -2.5, -2.5)
 	iron, _ := world.ItemByName("minecraft:iron_ingot")
 	b.inv.Set(inventory.HotbarStart+2, inventory.Stack{ID: iron, Count: 8})
 
@@ -261,7 +258,7 @@ func TestBotBuysBlocksAtTheShop(t *testing.T) {
 
 func TestBotLeavesWithItsGame(t *testing.T) {
 	inst, _ := botWorld()
-	b := addTestBot(t, inst, &fakeGuide{plan: game.BotPlan{Idle: true}}, DifficultyEasy, 0.5, 0.5)
+	b := addTestBot(t, inst, &fakeGuide{plan: game.BotPlan{Idle: true}}, botai.DifficultyEasy, 0.5, 0.5)
 	if err := inst.Server.MovePlayer(b, inst.Server.Hub, 0, 70, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +273,7 @@ func TestBotLeavesWithItsGame(t *testing.T) {
 func TestBotFightsWithItsBestWeapon(t *testing.T) {
 	inst, _ := botWorld()
 	guide := &fakeGuide{plan: game.BotPlan{}}
-	b := addTestBot(t, inst, guide, DifficultyHard, 0.5, 0.5)
+	b := addTestBot(t, inst, guide, botai.DifficultyHard, 0.5, 0.5)
 	b.inv.Set(inventory.HotbarStart, woolStack(t, 32)) // in hand: wool from bridging
 	sword, _ := world.ItemByName("minecraft:iron_sword")
 	b.inv.Set(inventory.MainStart+5, inventory.Stack{ID: sword, Count: 1}) // in the backpack
@@ -297,7 +294,7 @@ func TestBotFightsWithItsBestWeapon(t *testing.T) {
 // bot sprint-jumps it.
 func TestBotLeapsToAnEnemy(t *testing.T) {
 	inst := gapWorld(2)
-	b := addTestBot(t, inst, &fakeGuide{plan: game.BotPlan{}}, DifficultyHard, 0.5, 0.5)
+	b := addTestBot(t, inst, &fakeGuide{plan: game.BotPlan{}}, botai.DifficultyHard, 0.5, 0.5)
 	enemy := offlineConn(inst, "Enemy", player.Survival, 9.5, 64, 0.5)
 	runTicks(inst, 300, enemy)
 	if s := b.player.Snapshot(); s.Y < 63 {
@@ -311,7 +308,7 @@ func TestBotLeapsToAnEnemy(t *testing.T) {
 // TestBotBridgesToAnEnemy: a gap too wide to leap — it bridges.
 func TestBotBridgesToAnEnemy(t *testing.T) {
 	inst := gapWorld(6)
-	b := addTestBot(t, inst, &fakeGuide{plan: game.BotPlan{BlockItem: "minecraft:white_wool"}}, DifficultyHard, 0.5, 0.5)
+	b := addTestBot(t, inst, &fakeGuide{plan: game.BotPlan{BlockItem: "minecraft:white_wool"}}, botai.DifficultyHard, 0.5, 0.5)
 	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 32))
 	enemy := offlineConn(inst, "Enemy", player.Survival, 11.5, 64, 0.5)
 	runTicks(inst, 600, enemy)
@@ -327,7 +324,7 @@ func TestBotBuildsStairsToAnEnemy(t *testing.T) {
 	for y := 64; y <= 66; y++ {
 		inst.World.SetBlock(world.Position{X: 6, Y: y, Z: 0}, world.Stone)
 	}
-	b := addTestBot(t, inst, &fakeGuide{plan: game.BotPlan{BlockItem: "minecraft:white_wool"}}, DifficultyNormal, 0.5, 0.5)
+	b := addTestBot(t, inst, &fakeGuide{plan: game.BotPlan{BlockItem: "minecraft:white_wool"}}, botai.DifficultyNormal, 0.5, 0.5)
 	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 32))
 	enemy := offlineConn(inst, "Enemy", player.Survival, 6.5, 67, 0.5)
 	runTicks(inst, 600, enemy)
@@ -339,7 +336,7 @@ func TestBotBuildsStairsToAnEnemy(t *testing.T) {
 // TestBotShootsAnUnreachableEnemy: across the void, no blocks, a bow.
 func TestBotShootsAnUnreachableEnemy(t *testing.T) {
 	inst, _ := botWorld()
-	b := addTestBot(t, inst, &fakeGuide{plan: game.BotPlan{}}, DifficultyHard, 0.5, 0.5)
+	b := addTestBot(t, inst, &fakeGuide{plan: game.BotPlan{}}, botai.DifficultyHard, 0.5, 0.5)
 	b.inv.Set(inventory.HotbarStart+3, itemOf(t, "minecraft:bow", 1))
 	b.inv.Set(inventory.MainStart, itemOf(t, "minecraft:arrow", 16))
 	enemy := offlineConn(inst, "Enemy", player.Survival, 13.5, 64, 0.5)
@@ -357,7 +354,7 @@ func TestBotShootsAnUnreachableEnemy(t *testing.T) {
 func TestBotLeavesAnUnreachableEnemy(t *testing.T) {
 	inst, _ := botWorld()
 	guide := &fakeGuide{plan: game.BotPlan{Station: world.Position{X: -2, Y: 64, Z: -2}, HasStation: true}}
-	b := addTestBot(t, inst, guide, DifficultyHard, 0.5, 0.5)
+	b := addTestBot(t, inst, guide, botai.DifficultyHard, 0.5, 0.5)
 	enemy := offlineConn(inst, "Enemy", player.Survival, 13.5, 64, 0.5)
 	runTicks(inst, 200, enemy)
 	if cell := b.feetCellNow(); !atStation(guide.plan.Station)(cell) {
@@ -378,7 +375,7 @@ func TestBotBuysGear(t *testing.T) {
 			{Key: "iron_chestplate", Kind: game.WareArmor, Tier: 2, Currency: "minecraft:gold_ingot", Price: 12},
 		},
 	}}
-	b := addTestBot(t, inst, guide, DifficultyNormal, -2.5, -2.5)
+	b := addTestBot(t, inst, guide, botai.DifficultyNormal, -2.5, -2.5)
 	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 64))
 	b.inv.Set(inventory.HotbarStart+2, itemOf(t, "minecraft:iron_ingot", 12))
 	runTicks(inst, 300)
@@ -405,7 +402,7 @@ func TestBotBlastsHardCover(t *testing.T) {
 		Home:      world.Position{X: 0, Y: 64, Z: 0},
 		Targets:   []world.Position{target},
 	}}
-	b := addTestBot(t, inst, guide, DifficultyHard, 0.5, 0.5)
+	b := addTestBot(t, inst, guide, botai.DifficultyHard, 0.5, 0.5)
 	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 32))
 	b.inv.Set(inventory.HotbarStart+4, itemOf(t, "minecraft:tnt", 1))
 	lit := false
@@ -441,17 +438,17 @@ func TestBotTeamRoles(t *testing.T) {
 	}}
 	var bots []*ClientConnection
 	for i := 0; i < 3; i++ {
-		b := addTestBot(t, inst, guide, DifficultyHard, 1.5, float64(i)-0.5)
+		b := addTestBot(t, inst, guide, botai.DifficultyHard, 1.5, float64(i)-0.5)
 		b.inv.Set(inventory.HotbarStart+1, woolStack(t, 32))
 		bots = append(bots, b)
 	}
 	runTicks(inst, 20) // roles are handed out before anyone has gone anywhere
-	roles := []botRole{bots[0].bot.brain.role, bots[1].bot.brain.role, bots[2].bot.brain.role}
-	if roles[0] != rolePusher || roles[1] != roleDefender || roles[2] != roleArcher {
+	roles := []botai.Role{bots[0].bot.Role(), bots[1].bot.Role(), bots[2].bot.Role()}
+	if roles[0] != botai.RolePusher || roles[1] != botai.RoleDefender || roles[2] != botai.RoleArcher {
 		t.Fatalf("roles %v, want pusher, defender, archer", roles)
 	}
 	runTicks(inst, 1200)
-	if left := bedCover(inst.World.GetBlock, own); len(left) != 0 {
+	if left := botai.BedCover(inst.World.GetBlock, own); len(left) != 0 {
 		t.Fatalf("bed cover still open at %v", left)
 	}
 	if got := inst.World.GetBlock(target); got != world.Air {
@@ -474,30 +471,30 @@ func TestBotTeamBrain(t *testing.T) {
 	}}
 	var bots []*ClientConnection
 	for i := 0; i < 4; i++ {
-		bots = append(bots, addTestBot(t, inst, guide, DifficultyNormal, float64(i)-1.5, 2.5))
+		bots = append(bots, addTestBot(t, inst, guide, botai.DifficultyNormal, float64(i)-1.5, 2.5))
 	}
 	runTicks(inst, 20)
-	roles := func() []botRole {
-		var out []botRole
+	roles := func() []botai.Role {
+		var out []botai.Role
 		for _, b := range bots {
-			out = append(out, b.bot.brain.role)
+			out = append(out, b.bot.Role())
 		}
 		return out
 	}
-	if r := roles(); r[0] != rolePusher || r[1] != roleDefender || r[2] != roleArcher || r[3] != roleAttacker {
+	if r := roles(); r[0] != botai.RolePusher || r[1] != botai.RoleDefender || r[2] != botai.RoleArcher || r[3] != botai.RoleAttacker {
 		t.Fatalf("calm roles %v", r)
 	}
 	// Bots 1 and 4 attack: both put the team's focus first.
-	if a, b := bots[0].bot.teamTargets(), bots[3].bot.teamTargets(); a[0] != b[0] {
+	if a, b := bots[0].bot.TeamTargets(), bots[3].bot.TeamTargets(); a[0] != b[0] {
 		t.Fatalf("attackers split: %v vs %v", a[0], b[0])
 	}
 
 	enemy := offlineConn(inst, "Enemy", player.Survival, -1.5, 64, -2.5)
 	runTicks(inst, 20, enemy)
-	if r := roles(); r[1] != roleDefender || r[2] != roleDefender {
+	if r := roles(); r[1] != botai.RoleDefender || r[2] != botai.RoleDefender {
 		t.Fatalf("roles with an enemy at the bed %v, want two defenders", r)
 	}
-	if bots[2].bot.brain.target != enemy {
+	if bots[2].bot.Target() != mobOf(enemy) {
 		t.Fatal("the second defender isn't going for the intruder")
 	}
 }
@@ -516,7 +513,7 @@ func TestBotSuggestions(t *testing.T) {
 	inst.Server.mu.Lock()
 	inst.Server.instances[inst.ID] = inst // so /bot remove lists its bots
 	inst.Server.mu.Unlock()
-	b, err := inst.Server.AddBot(inst, "red", DifficultyEasy)
+	b, err := inst.Server.AddBot(inst, "red", botai.DifficultyEasy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -553,7 +550,7 @@ func TestBotRaidsEmeraldsAndShops(t *testing.T) {
 		},
 		Pickups: []game.BotPickup{{Pos: gen, Item: "minecraft:emerald"}},
 	}}
-	b := addTestBot(t, inst, guide, DifficultyNormal, 0.5, 0.5)
+	b := addTestBot(t, inst, guide, botai.DifficultyNormal, 0.5, 0.5)
 	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 64)) // no reason to shop for blocks
 	inst.DropItem(10.5, 64, 0.5, "minecraft:emerald", 4)
 
@@ -581,7 +578,7 @@ func TestBotIgnoresUselessPiles(t *testing.T) {
 		Station: world.Position{X: -2, Y: 64, Z: 0}, HasStation: true,
 		Pickups: []game.BotPickup{{Pos: gen, Item: "minecraft:emerald"}},
 	}}
-	b := addTestBot(t, inst, guide, DifficultyNormal, 0.5, 0.5)
+	b := addTestBot(t, inst, guide, botai.DifficultyNormal, 0.5, 0.5)
 	inst.DropItem(12.5, 64, 0.5, "minecraft:emerald", 4)
 	runTicks(inst, 300)
 	if b.countItemName("minecraft:emerald") != 0 {
@@ -603,11 +600,11 @@ func TestBotFightsOnAtEnemyBase(t *testing.T) {
 				Home:    world.Position{X: 0, Y: 64, Z: -2},
 				Targets: []world.Position{target},
 			}}
-			b := addTestBot(t, inst, guide, DifficultyNormal, tc.x, -1.5)
+			b := addTestBot(t, inst, guide, botai.DifficultyNormal, tc.x, -1.5)
 			b.player.SetHealth(4)
 			enemy := offlineConn(inst, "Enemy", player.Survival, tc.x, 64, 0.5)
 			runTicks(inst, 60, enemy)
-			if retreated := b.bot.brain.retreatUntil > 0; retreated != tc.retreat {
+			if retreated := b.bot.Retreated(); retreated != tc.retreat {
 				t.Fatalf("retreated=%v, want %v", retreated, tc.retreat)
 			}
 			if !tc.retreat && enemy.player.Health() >= player.MaxHealth {
@@ -632,7 +629,7 @@ func TestBotBreaksTheBedBeforeShopping(t *testing.T) {
 		Pickups: []game.BotPickup{{Pos: world.Position{X: 2, Y: 64, Z: 2}, Item: "minecraft:emerald"}},
 		Targets: []world.Position{target},
 	}}
-	b := addTestBot(t, inst, guide, DifficultyHard, 14.5, 0.5)
+	b := addTestBot(t, inst, guide, botai.DifficultyHard, 14.5, 0.5)
 	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 32))
 	b.inv.Set(inventory.HotbarStart+2, itemOf(t, "minecraft:emerald", 8))
 	runTicks(inst, 200)
@@ -659,12 +656,12 @@ func TestArcherShootsFarEnemies(t *testing.T) {
 	guide := &fakeGuide{plan: game.BotPlan{Team: "red"}}
 	var bots []*ClientConnection
 	for i := 0; i < 3; i++ {
-		bots = append(bots, addTestBot(t, inst, guide, DifficultyHard, float64(i)-1.5, -2.5))
+		bots = append(bots, addTestBot(t, inst, guide, botai.DifficultyHard, float64(i)-1.5, -2.5))
 	}
 	runTicks(inst, 20) // the team brain hands out roles
 	var archer *ClientConnection
 	for _, b := range bots {
-		if b.bot.brain.role == roleArcher {
+		if b.bot.Role() == botai.RoleArcher {
 			archer = b
 		}
 	}
@@ -695,15 +692,15 @@ func TestBotHopsFaster(t *testing.T) {
 		}
 		station := world.Position{X: 45, Y: 64, Z: 0}
 		guide := &fakeGuide{plan: game.BotPlan{Station: station, HasStation: true}}
-		b := addTestBot(t, inst, guide, DifficultyHard, 0.5, 0.5)
-		b.bot.skill.hop = hop
+		b := addTestBot(t, inst, guide, botai.DifficultyHard, 0.5, 0.5)
+		b.bot.SetHop(hop)
 		for tick := 1; tick <= 600; tick++ {
 			runTicks(inst, 1)
-			if atStation(station)(b.feetCellNow()) && b.bot.phys.OnGround {
+			if atStation(station)(b.feetCellNow()) && b.bot.OnGround() {
 				return tick
 			}
 		}
-		t.Fatalf("hop=%v: never got there; at %+v", hop, b.bot.phys.Pos)
+		t.Fatalf("hop=%v: never got there; at %+v", hop, b.bot.Pos())
 		return 0
 	}
 	walk, hop := run(false), run(true)
@@ -730,26 +727,26 @@ func TestDefenderFortifiesThenFights(t *testing.T) {
 	}}
 	var bots []*ClientConnection
 	for i := 0; i < 2; i++ {
-		b := addTestBot(t, inst, guide, DifficultyHard, 1.5, float64(i)+1.5)
+		b := addTestBot(t, inst, guide, botai.DifficultyHard, 1.5, float64(i)+1.5)
 		b.inv.Set(inventory.HotbarStart+1, woolStack(t, 64))
 		bots = append(bots, b)
 	}
 	runTicks(inst, 20)
 	def := bots[1]
-	if def.bot.brain.role != roleDefender {
-		t.Fatalf("second bot is a %v", def.bot.brain.role)
+	if def.bot.Role() != botai.RoleDefender {
+		t.Fatalf("second bot is a %v", def.bot.Role())
 	}
 	left := false
 	for i := 0; i < 1500 && !left; i++ {
 		runTicks(inst, 1)
-		left = def.bot.phys.Pos.X > 8 // out over the void toward the enemy
+		left = def.bot.Pos().X > 8 // out over the void toward the enemy
 	}
 	at := inst.World.GetBlock
-	if n, m := len(bedCover(at, own)), len(bedOuterCover(at, own)); n != 0 || m != 0 {
-		t.Fatalf("cover still open: %d inner, %d outer %v", n, m, bedOuterCover(at, own))
+	if n, m := len(botai.BedCover(at, own)), len(botai.BedOuterCover(at, own)); n != 0 || m != 0 {
+		t.Fatalf("cover still open: %d inner, %d outer %v", n, m, botai.BedOuterCover(at, own))
 	}
 	if !left {
-		t.Fatalf("the defender stayed home; at %+v", def.bot.phys.Pos)
+		t.Fatalf("the defender stayed home; at %+v", def.bot.Pos())
 	}
 }
 
@@ -768,27 +765,27 @@ func TestBotKeepsItsRouteDownSteps(t *testing.T) {
 	}
 	station := world.Position{X: 13, Y: 64, Z: 0}
 	guide := &fakeGuide{plan: game.BotPlan{Station: station, HasStation: true}}
-	b := addTestBot(t, inst, guide, DifficultyEasy, 0.5, 0.5) // easy: no hopping
+	b := addTestBot(t, inst, guide, botai.DifficultyEasy, 0.5, 0.5) // easy: no hopping
 	b.player.MoveTo(0.5, 67, 0.5, true)
 	searches := 0
 	var lastAt uint64
 	for i := 0; i < 300; i++ {
 		runTicks(inst, 1)
-		if br := &b.bot.brain; br.route != nil && br.routeAt != lastAt {
+		if at, ok := b.bot.RouteAt(); ok && at != lastAt {
 			searches++
-			lastAt = br.routeAt
+			lastAt = at
 		}
 		if atStation(station)(b.feetCellNow()) {
 			if searches > 1 {
 				t.Fatalf("searched the route %d times on the way down", searches)
 			}
-			if len(b.bot.fallSpots()) != 0 {
-				t.Fatalf("the route's own steps down counted as falls: %v", b.bot.fallSpots())
+			if len(b.bot.FallSpots()) != 0 {
+				t.Fatalf("the route's own steps down counted as falls: %v", b.bot.FallSpots())
 			}
 			return
 		}
 	}
-	t.Fatalf("never got down; at %+v", b.bot.phys.Pos)
+	t.Fatalf("never got down; at %+v", b.bot.Pos())
 }
 
 // TestPusherTowersAndDropsTNT: the target is covered on top and at the
@@ -807,19 +804,19 @@ func TestPusherTowersAndDropsTNT(t *testing.T) {
 		Home:      world.Position{X: 0, Y: 64, Z: 0},
 		Targets:   []world.Position{target},
 	}}
-	b := addTestBot(t, inst, guide, DifficultyHard, 0.5, 0.5)
+	b := addTestBot(t, inst, guide, botai.DifficultyHard, 0.5, 0.5)
 	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 64))
 	b.inv.Set(inventory.HotbarStart+4, itemOf(t, "minecraft:tnt", 2))
 	runTicks(inst, 20)
-	if b.bot.brain.role != rolePusher {
-		t.Fatalf("a lone bot with beds to break is a %v", b.bot.brain.role)
+	if b.bot.Role() != botai.RolePusher {
+		t.Fatalf("a lone bot with beds to break is a %v", b.bot.Role())
 	}
 	var dropped *primedTNT
 	maxFeet := 0.0
 	for i := 0; i < 1500 && dropped == nil; i++ {
 		runTicks(inst, 1)
-		if b.bot.phys.Pos.X > 12 {
-			maxFeet = math.Max(maxFeet, b.bot.phys.Pos.Y)
+		if b.bot.Pos().X > 12 {
+			maxFeet = math.Max(maxFeet, b.bot.Pos().Y)
 		}
 		inst.tntMu.Lock()
 		if len(inst.tnts) > 0 {
@@ -828,7 +825,7 @@ func TestPusherTowersAndDropsTNT(t *testing.T) {
 		inst.tntMu.Unlock()
 	}
 	if dropped == nil {
-		t.Fatalf("no TNT dropped; bot at %+v", b.bot.phys.Pos)
+		t.Fatalf("no TNT dropped; bot at %+v", b.bot.Pos())
 	}
 	if dropped.y < float64(target.Y)+2 || math.Abs(dropped.x-(float64(target.X)+0.5)) > 0.6 {
 		t.Fatalf("TNT at (%.1f, %.1f, %.1f), want on top of the cover over %v", dropped.x, dropped.y, dropped.z, target)
@@ -838,7 +835,7 @@ func TestPusherTowersAndDropsTNT(t *testing.T) {
 	}
 	runTicks(inst, 600)
 	if got := inst.World.GetBlock(target); got != world.Air {
-		t.Fatalf("target still standing (%s); bot at %+v", got.Name, b.bot.phys.Pos)
+		t.Fatalf("target still standing (%s); bot at %+v", got.Name, b.bot.Pos())
 	}
 }
 
@@ -858,7 +855,7 @@ func TestPusherBuysTNTFirst(t *testing.T) {
 		},
 		Targets: []world.Position{target},
 	}}
-	b := addTestBot(t, inst, guide, DifficultyNormal, 0.5, 0.5)
+	b := addTestBot(t, inst, guide, botai.DifficultyNormal, 0.5, 0.5)
 	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 64))
 	b.inv.Set(inventory.HotbarStart+2, itemOf(t, "minecraft:gold_ingot", 8))
 	runTicks(inst, 200)
@@ -880,37 +877,37 @@ func TestBotWidensWhereItFell(t *testing.T) {
 		Home:      world.Position{X: 0, Y: 64, Z: 0},
 		Targets:   []world.Position{target},
 	}}
-	b := addTestBot(t, inst, guide, DifficultyEasy, 0.5, 0.5) // easy: no hops
+	b := addTestBot(t, inst, guide, botai.DifficultyEasy, 0.5, 0.5) // easy: no hops
 	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 64))
 	spot := world.Position{X: 7, Y: 64, Z: 0}
 	for fall := 0; fall < 2; fall++ {
 		pushed := false
 		for i := 0; i < 600 && !pushed; i++ {
 			runTicks(inst, 1)
-			if b.feetCellNow() == spot && b.bot.phys.OnGround {
-				b.bot.pushVelocity(0, 0.3, 0.6) // a hit from the side
+			if b.feetCellNow() == spot && b.bot.OnGround() {
+				b.bot.Push(0, 0.3, 0.6) // a hit from the side
 				pushed = true
 			}
 		}
 		if !pushed {
-			t.Fatalf("fall %d: never reached the spot; at %+v", fall, b.bot.phys.Pos)
+			t.Fatalf("fall %d: never reached the spot; at %+v", fall, b.bot.Pos())
 		}
 		runTicks(inst, 40) // down it goes
-		if b.bot.phys.Pos.Y > 60 {
-			t.Fatalf("fall %d: didn't fall; at %+v", fall, b.bot.phys.Pos)
+		if b.bot.Pos().Y > 60 {
+			t.Fatalf("fall %d: didn't fall; at %+v", fall, b.bot.Pos())
 		}
 		b.player.MoveTo(0.5, 64, 0.5, true) // "respawn" at home
 	}
 	// The fall is put on the last route cell it stood on: the spot or the
 	// one before.
 	n := 0
-	for p, k := range b.bot.fallSpots() {
+	for p, k := range b.bot.FallSpots() {
 		if p.Y == spot.Y && p.Z == spot.Z && abs(p.X-spot.X) <= 1 {
 			n += k
 		}
 	}
-	if n < botFallsToReinforce {
-		t.Fatalf("falls near %v: %d, want ≥ %d (spots %v)", spot, n, botFallsToReinforce, b.bot.fallSpots())
+	if n < botai.FallsToReinforce {
+		t.Fatalf("falls near %v: %d, want ≥ %d (spots %v)", spot, n, botai.FallsToReinforce, b.bot.FallSpots())
 	}
 	runTicks(inst, 600)
 	wide := 0
@@ -931,7 +928,7 @@ func TestBotWidensWhereItFell(t *testing.T) {
 				}
 			}
 		}
-		t.Fatalf("only %d side blocks around the fall spot, want the bridge widened; wool at %v; spots %v; bot at %+v", wide, placed, b.bot.fallSpots(), b.bot.phys.Pos)
+		t.Fatalf("only %d side blocks around the fall spot, want the bridge widened; wool at %v; spots %v; bot at %+v", wide, placed, b.bot.FallSpots(), b.bot.Pos())
 	}
 }
 
@@ -951,16 +948,16 @@ func TestBotDigsRoundObsidian(t *testing.T) {
 		BlockItem: "minecraft:white_wool",
 		Targets:   []world.Position{target},
 	}}
-	b := addTestBot(t, inst, guide, DifficultyHard, 0.5, 0.5)
+	b := addTestBot(t, inst, guide, botai.DifficultyHard, 0.5, 0.5)
 	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 64))
 	for i := 0; i < 2000 && inst.World.GetBlock(target) != world.Air; i++ {
 		runTicks(inst, 1)
-		if d := b.bot.brain.dig; d != nil && inst.World.GetBlock(d.pos) == obsidian {
-			t.Fatalf("started digging obsidian at %v by hand", d.pos)
+		if d, ok := b.bot.Digging(); ok && inst.World.GetBlock(d) == obsidian {
+			t.Fatalf("started digging obsidian at %v by hand", d)
 		}
 	}
 	if got := inst.World.GetBlock(target); got != world.Air {
-		t.Fatalf("target still standing (%s); bot at %+v", got.Name, b.bot.phys.Pos)
+		t.Fatalf("target still standing (%s); bot at %+v", got.Name, b.bot.Pos())
 	}
 	if inst.World.GetBlock(target.Add(-1, 0, 0)) != obsidian {
 		t.Fatal("the obsidian wall was broken")
@@ -988,7 +985,7 @@ func TestBotBuysAPickaxeForObsidian(t *testing.T) {
 		},
 		Targets: []world.Position{target},
 	}}
-	b := addTestBot(t, inst, guide, DifficultyHard, 14.5, 0.5) // at the enemy bed
+	b := addTestBot(t, inst, guide, botai.DifficultyHard, 14.5, 0.5) // at the enemy bed
 	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 32))
 	b.inv.Set(inventory.HotbarStart+2, itemOf(t, "minecraft:gold_ingot", 10))
 	for i := 0; i < 3000 && inst.World.GetBlock(target) != world.Air; i++ {
@@ -998,22 +995,7 @@ func TestBotBuysAPickaxeForObsidian(t *testing.T) {
 		t.Fatalf("bought %v, want the diamond pickaxe", guide.wares)
 	}
 	if got := inst.World.GetBlock(target); got != world.Air {
-		t.Fatalf("target still standing (%s); bot at %+v", got.Name, b.bot.phys.Pos)
-	}
-}
-
-func TestTNTBreaks(t *testing.T) {
-	for name, want := range map[string]bool{
-		"minecraft:obsidian": false, "minecraft:end_stone": true,
-		"minecraft:white_wool": true, "minecraft:oak_planks": true,
-	} {
-		b, ok := world.BlockByName(name)
-		if !ok {
-			t.Fatalf("%s not registered", name)
-		}
-		if got := tntBreaks(b); got != want {
-			t.Errorf("tntBreaks(%s) = %v, want %v", name, got, want)
-		}
+		t.Fatalf("target still standing (%s); bot at %+v", got.Name, b.bot.Pos())
 	}
 }
 
@@ -1033,16 +1015,25 @@ func TestPusherKeepsTNTOffObsidian(t *testing.T) {
 		BlockItem: "minecraft:white_wool",
 		Targets:   []world.Position{target},
 	}}
-	b := addTestBot(t, inst, guide, DifficultyHard, 0.5, 0.5)
+	b := addTestBot(t, inst, guide, botai.DifficultyHard, 0.5, 0.5)
 	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 64))
 	b.inv.Set(inventory.HotbarStart+4, itemOf(t, "minecraft:tnt", 2))
 	for i := 0; i < 2000 && inst.World.GetBlock(target) != world.Air; i++ {
 		runTicks(inst, 1)
 	}
 	if got := inst.World.GetBlock(target); got != world.Air {
-		t.Fatalf("target still standing (%s); bot at %+v", got.Name, b.bot.phys.Pos)
+		t.Fatalf("target still standing (%s); bot at %+v", got.Name, b.bot.Pos())
 	}
 	if n := b.countItemName("minecraft:tnt"); n != 2 {
 		t.Fatalf("%d TNT left, want both: obsidian isn't worth any", n)
+	}
+}
+
+// atStation is the bots' goal at a station: next to the generator, at its
+// level (botai's own rule, repeated for the tests).
+func atStation(p world.Position) func(world.Position) bool {
+	return func(c world.Position) bool {
+		dx, dz := float64(c.X-p.X), float64(c.Z-p.Z)
+		return dx*dx+dz*dz <= 1 && c.Y == p.Y
 	}
 }

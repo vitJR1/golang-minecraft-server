@@ -7,6 +7,7 @@ import (
 
 	_ "minecraft-server/games/bedwars"
 	"minecraft-server/schem"
+	"minecraft-server/server/botai"
 	"minecraft-server/templates"
 )
 
@@ -31,7 +32,7 @@ func TestBotOnDotaMap(t *testing.T) {
 	}
 	inst := s.GetInstance(name)
 	inst.Stop() // the test drives the ticks
-	b, err := s.AddBot(inst, "red", DifficultyHard)
+	b, err := s.AddBot(inst, "red", botai.DifficultyHard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,23 +45,14 @@ func TestBotOnDotaMap(t *testing.T) {
 		// A route search runs off the tick; on a live server it gets 50 ms
 		// a tick. Here, wait for it, so the result doesn't depend on how fast
 		// the machine (or the race detector) is.
-		for deadline := time.Now().Add(10 * time.Second); ; {
-			far := b.bot.brain.far
-			if far == nil || len(far) > 0 || time.Now().After(deadline) {
-				break
-			}
+		for deadline := time.Now().Add(10 * time.Second); b.bot.Searching() && time.Now().Before(deadline); {
 			time.Sleep(time.Millisecond)
 		}
 		// BOTTRACE=1 logs what the bot is up to every 5 s.
 		if os.Getenv("BOTTRACE") != "" && tick%100 == 0 {
-			br := &b.bot.brain
-			p := b.bot.phys.Pos
-			t.Logf("t=%d pos=(%.1f,%.1f,%.1f) key=%q idx=%d/%d shop=%v save=%v hard=%v dig=%v wool=%d iron=%d gold=%d dia=%d em=%d tnt=%d role=%v ware=%v flee=%v",
-				tick, p.X, p.Y, p.Z, br.routeKey, br.routeIdx, len(br.route), br.shopping, inst.Tick() < br.farmUntil, br.hardCover, br.dig,
-				b.countItemName(br.plan.BlockItem), b.countItemName("minecraft:iron_ingot"), b.countItemName("minecraft:gold_ingot"), b.countItemName("minecraft:diamond"), b.countItemName("minecraft:emerald"), b.countItemName("minecraft:tnt"), br.role,
-				b.bot.wantWare(b.countItemName(br.plan.BlockItem)), inst.Tick() < br.fleeUntil)
+			t.Logf("t=%d %s", tick, b.bot.Trace(inst.Tick()))
 		}
-		targets := len(b.bot.brain.plan.Targets)
+		targets := len(b.bot.Plan().Targets)
 		if start < 0 && targets > 0 {
 			start = targets
 		}

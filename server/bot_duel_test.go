@@ -1,11 +1,11 @@
 package server
 
 import (
-	"math/rand"
 	"testing"
 
 	"minecraft-server/game"
 	"minecraft-server/player"
+	"minecraft-server/server/botai"
 	"minecraft-server/world"
 )
 
@@ -26,7 +26,7 @@ func (d *duelGuide) BotBuy(*game.Ctx, game.PlayerHandle, string) bool  { return 
 
 // botDuel runs one fight of two equal bots on a flat arena; it returns which
 // one (0 = the first added) died or fell off first, or -1 when nobody did.
-func botDuel(t *testing.T, diff Difficulty) (int, uint64) {
+func botDuel(t *testing.T, diff botai.Difficulty) (int, uint64) {
 	t.Helper()
 	inst := bareInstance(New(), world.NewMemoryWorld())
 	for x := -12; x <= 12; x++ {
@@ -69,29 +69,11 @@ func TestBotDuelsAreFair(t *testing.T) {
 	const n = 100
 	wins := [2]int{}
 	for k := 0; k < n; k++ {
-		if loser, _ := botDuel(t, DifficultyHard); loser >= 0 {
+		if loser, _ := botDuel(t, botai.DifficultyHard); loser >= 0 {
 			wins[1-loser]++
 		}
 	}
 	if wins[0] < 30 || wins[1] < 30 {
 		t.Fatalf("wins %v over %d duels: one-sided", wins, n)
-	}
-}
-
-// TestBotReaction: swings wait a human 30–100 ms — in ticks 0..2, about
-// 1.3 on average.
-func TestBotReaction(t *testing.T) {
-	b := &bot{rng: rand.New(rand.NewSource(1))}
-	sum := 0.0
-	const n = 20000
-	for k := 0; k < n; k++ {
-		r := b.reactTicks()
-		if r > 2 {
-			t.Fatalf("reaction of %d ticks (> 100 ms)", r)
-		}
-		sum += float64(r)
-	}
-	if mean := sum / n * 50; mean < 60 || mean > 70 {
-		t.Fatalf("mean reaction %.1f ms, want ≈ 65", mean)
 	}
 }

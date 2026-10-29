@@ -103,7 +103,7 @@ func (c *ClientConnection) giveVelocity(vx, vy, vz float64) {
 		return
 	}
 	if c.isBot() {
-		c.bot.pushVelocity(vx, vy, vz) // its server-side physics applies it
+		c.bot.Push(vx, vy, vz) // its server-side physics applies it
 		return
 	}
 	im := c.ac.Velocity.Add(vx, vy, vz)

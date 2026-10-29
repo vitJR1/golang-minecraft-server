@@ -15,6 +15,7 @@ import (
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/redisc"
+	"minecraft-server/server/botai"
 	"minecraft-server/server/connlimit"
 	"minecraft-server/server/enderchest"
 	"minecraft-server/server/inventory"
@@ -635,7 +636,7 @@ type ClientConnection struct {
 
 	// bot is set when this connection is a server-driven bot (bot.go):
 	// no socket, an AI moves and acts for it.
-	bot *bot
+	bot *botai.Bot
 
 	// canFly is /fly's permission; flyGrace keeps the movement checks off
 	// until the client confirmed flight was taken away (fly.go).

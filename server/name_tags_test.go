@@ -10,6 +10,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/botai"
 	"minecraft-server/world"
 )
 
@@ -119,7 +120,7 @@ func tagPrefixes(t *testing.T, pkts []sentPacket, into map[string]string) {
 func TestBotRoleInNameTag(t *testing.T) {
 	inst, target := botWorld()
 	guide := &fakeGuide{plan: game.BotPlan{Team: "red", Targets: []world.Position{target}}}
-	b := addTestBot(t, inst, guide, DifficultyEasy, 0.5, 0.5)
+	b := addTestBot(t, inst, guide, botai.DifficultyEasy, 0.5, 0.5)
 	watcher := offlineConn(inst, "Watcher", player.Spectator, 0.5, 70, 0.5)
 	inst.JoinAndAnnounce(watcher)
 	drainPackets(t, watcher)

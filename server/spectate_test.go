@@ -6,6 +6,7 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/schem"
+	"minecraft-server/server/botai"
 	"minecraft-server/templates"
 )
 
@@ -33,7 +34,7 @@ func TestBotMatchWatcher(t *testing.T) {
 		}
 	}()
 
-	name, n, err := s.botMatch(op, "bedwars-1x1", templates.BedwarsDotaMap, DifficultyEasy)
+	name, n, err := s.botMatch(op, "bedwars-1x1", templates.BedwarsDotaMap, botai.DifficultyEasy)
 	if err != nil {
 		t.Fatal(err)
 	}

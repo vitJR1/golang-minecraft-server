@@ -1,4 +1,4 @@
-package server
+package botai
 
 import (
 	"fmt"
@@ -9,11 +9,11 @@ import (
 	"minecraft-server/world"
 )
 
-// bot_team.go: a team's bots (game.BotPlan.Team) share one brain, the
+// team.go: a team's bots (game.BotPlan.Team) share one brain, the
 // teamBrain, that decides every botTeamEvery ticks who does what:
 //
 //   - roles, by entity id among the team's living bots: the first is the
-//     pusher (bot_pusher.go) while any enemy bed stands, a warrior after; then defenders — one when there are two or more bots
+//     pusher (pusher.go) while any enemy bed stands, a warrior after; then defenders — one when there are two or more bots
 //     and the bed stands, two while an enemy is at the bed and there are
 //     three or more — who wrap the bed in two layers of blocks and then go
 //     and fight with the team; then, in a team of three or more, an archer if a bot
@@ -25,22 +25,23 @@ import (
 //
 // A lone bot attacks; with the bed gone everyone does.
 
-type botRole int
+// Role is a bot's part in its team.
+type Role int
 
 const (
-	roleAttacker botRole = iota // the warrior: fights, raids, goes for beds
-	roleDefender
-	roleArcher
-	rolePusher // the beds at any cost (bot_pusher.go)
+	RoleAttacker Role = iota // the warrior: fights, raids, goes for beds
+	RoleDefender
+	RoleArcher
+	RolePusher // the beds at any cost (pusher.go)
 )
 
-func (r botRole) String() string {
+func (r Role) String() string {
 	switch r {
-	case roleDefender:
+	case RoleDefender:
 		return "defender"
-	case roleArcher:
+	case RoleArcher:
 		return "archer"
-	case rolePusher:
+	case RolePusher:
 		return "pusher"
 	}
 	return "attacker"
@@ -57,110 +58,117 @@ const (
 // teamBrain is the shared decision-making of one team's bots.
 type teamBrain struct {
 	at       uint64
-	roles    map[int32]botRole
+	roles    map[int32]Role
 	focus    world.Position // the bed the attackers go for
 	hasFocus bool
-	intruder *ClientConnection
+	intruder Mob
 	// falls counts the team's bots' falls by the route cell they fell
-	// from (bot_reinforce.go).
+	// from (reinforce.go).
 	falls map[world.Position]int
+}
+
+// Teams are an instance's team brains, by team name. Used from the
+// instance's tick goroutine only (bots tick there). The zero value is ready.
+type Teams struct {
+	m map[string]*teamBrain
 }
 
 // teamBrainFor returns (creating) the brain of the bot's team; nil for a bot
 // without a team.
-func (b *bot) teamBrainFor() *teamBrain {
+func (b *Bot) teamBrainFor() *teamBrain {
 	team := b.brain.plan.Team
-	inst := b.c.instance
-	if team == "" || inst == nil {
+	w := b.body.World()
+	if team == "" || w == nil {
 		return nil
 	}
-	if inst.botTeams == nil {
-		inst.botTeams = map[string]*teamBrain{}
+	ts := w.Teams()
+	if ts.m == nil {
+		ts.m = map[string]*teamBrain{}
 	}
-	tb := inst.botTeams[team]
+	tb := ts.m[team]
 	if tb == nil {
-		tb = &teamBrain{roles: map[int32]botRole{}}
-		inst.botTeams[team] = tb
+		tb = &teamBrain{roles: map[int32]Role{}}
+		ts.m[team] = tb
 	}
 	return tb
 }
 
 // teamUpdate refreshes the team's decisions when they're due and applies
 // this bot's part: its role.
-func (b *bot) teamUpdate(now uint64) {
+func (b *Bot) teamUpdate(now uint64) {
 	tb := b.teamBrainFor()
 	if tb == nil {
-		b.setRole(roleAttacker)
+		b.setRole(RoleAttacker)
 		return
 	}
 	if tb.at == 0 || now >= tb.at+botTeamEvery {
-		tb.decide(now, b.c.instance, b.brain.plan.Team)
+		tb.decide(now, b.world(), b.brain.plan.Team)
 	}
-	b.setRole(tb.roles[b.c.player.EntityID])
+	b.setRole(tb.roles[b.self.ID()])
 }
 
 // setRole takes up a role and, when it changed, shows it in the name tag
 // (tab list, over the head) to everyone in the instance.
-func (b *bot) setRole(r botRole) {
+func (b *Bot) setRole(r Role) {
 	b.brain.role = r
 	if old := b.roleShown.Swap(int32(r)); old != int32(r) {
-		inst := b.c.instance
-		inst.Players.Range(func(c *ClientConnection) { c.syncNameTags(inst) })
+		b.body.RoleChanged()
 	}
 }
 
-// shownRole is the role the bot's name tag shows (read from any goroutine);
+// ShownRole is the role the bot's name tag shows (read from any goroutine);
 // false before it has one.
-func (b *bot) shownRole() (botRole, bool) {
+func (b *Bot) ShownRole() (Role, bool) {
 	r := b.roleShown.Load()
-	return botRole(r), r >= 0
+	return Role(r), r >= 0
 }
 
-// label is the role's name-tag text; code its short form for team names
+// Label is the role's name-tag text; Code its short form for team names
 // (≤16 characters with the game's group).
-func (r botRole) label() string {
+func (r Role) Label() string {
 	switch r {
-	case rolePusher:
+	case RolePusher:
 		return "§6[Pusher]"
-	case roleArcher:
+	case RoleArcher:
 		return "§b[Archer]"
-	case roleDefender:
+	case RoleDefender:
 		return "§a[Defender]"
 	}
 	return "§c[Warrior]"
 }
 
-func (r botRole) code() string { return string("wdap"[r]) }
+func (r Role) Code() string { return string("wdap"[r]) }
 
 // decide works out the team's roles, focus and intruder. Bots tick one after
 // another on the instance's tick goroutine, so reading their plans is safe.
-func (tb *teamBrain) decide(now uint64, inst *Instance, team string) {
+func (tb *teamBrain) decide(now uint64, w World, team string) {
 	tb.at = now
-	var mates []*ClientConnection
-	inst.Players.Range(func(o *ClientConnection) {
-		if o.isBot() && o.bot.ready.Load() && o.bot.brain.plan.Team == team && !o.bot.brain.plan.Idle &&
-			!o.player.Snapshot().Dead {
-			mates = append(mates, o)
+	var mates []*Bot
+	mobs := w.Mobs()
+	for _, o := range mobs {
+		if ob := o.Bot(); ob != nil && ob.ready.Load() && ob.brain.plan.Team == team && !ob.brain.plan.Idle &&
+			!o.Snapshot().Dead {
+			mates = append(mates, ob)
 		}
-	})
-	sort.Slice(mates, func(i, j int) bool { return mates[i].player.EntityID < mates[j].player.EntityID })
-	tb.roles = map[int32]botRole{}
+	}
+	sort.Slice(mates, func(i, j int) bool { return mates[i].self.ID() < mates[j].self.ID() })
+	tb.roles = map[int32]Role{}
 	tb.intruder, tb.hasFocus = nil, false
 	if len(mates) == 0 {
 		return
 	}
-	lead := mates[0].bot
+	lead := mates[0]
 
 	// An enemy at the bed?
 	bed := lead.brain.plan.Defend
 	if len(bed) > 0 {
 		centre := blockCentre(bed[0])
 		best := botBaseRadius
-		for _, o := range inst.Players.snapshot() {
-			if o.isBot() && o.bot.brain.plan.Team == team || !lead.targetValid(o) {
+		for _, o := range mobs {
+			if ob := o.Bot(); ob != nil && ob.brain.plan.Team == team || !lead.targetValid(o) {
 				continue
 			}
-			s := o.player.Snapshot()
+			s := o.Snapshot()
 			if d := anticheat.Dist(centre, anticheat.Vec{X: s.X, Y: s.Y, Z: s.Z}); d <= best {
 				tb.intruder, best = o, d
 			}
@@ -178,18 +186,18 @@ func (tb *teamBrain) decide(now uint64, inst *Instance, team string) {
 		archers = 1
 	}
 	for i, m := range mates {
-		role := roleAttacker
+		role := RoleAttacker
 		switch {
 		case i == 0:
 			if len(lead.brain.plan.Targets) > 0 {
-				role = rolePusher // a warrior once no enemy bed is left
+				role = RolePusher // a warrior once no enemy bed is left
 			}
 		case i <= defenders:
-			role = roleDefender
+			role = RoleDefender
 		case i <= defenders+archers:
-			role = roleArcher
+			role = RoleArcher
 		}
-		tb.roles[m.player.EntityID] = role
+		tb.roles[m.self.ID()] = role
 	}
 
 	// The bed to push on together: the lead's nearest it hasn't given up on.
@@ -203,7 +211,7 @@ func (tb *teamBrain) decide(now uint64, inst *Instance, team string) {
 }
 
 // teamTargets orders the plan's targets with the team's focus first.
-func (b *bot) teamTargets() []world.Position {
+func (b *Bot) teamTargets() []world.Position {
 	targets := b.brain.plan.Targets
 	tb := b.teamBrainFor()
 	if tb == nil || !tb.hasFocus || len(targets) == 0 || targets[0] == tb.focus {
@@ -226,8 +234,8 @@ func (b *bot) teamTargets() []world.Position {
 
 // teamIntruder is the enemy at the team's bed that this bot, a defender,
 // should go for — or nil.
-func (b *bot) teamIntruder() *ClientConnection {
-	if b.brain.role != roleDefender {
+func (b *Bot) teamIntruder() Mob {
+	if b.brain.role != RoleDefender {
 		return nil
 	}
 	tb := b.teamBrainFor()
@@ -270,15 +278,15 @@ func openCells(at botnav.BlockAt, cells []world.Position) []world.Position {
 	return out
 }
 
-// bedCover lists the cells round the bed blocks still to fill: on top and
+// BedCover lists the cells round the bed blocks still to fill: on top and
 // at the sides (not the bed's own other half).
-func bedCover(at botnav.BlockAt, bed []world.Position) []world.Position {
+func BedCover(at botnav.BlockAt, bed []world.Position) []world.Position {
 	return openCells(at, shellAround(bed))
 }
 
-// bedOuterCover is the second layer: the shell round the bed and its first
+// BedOuterCover is the second layer: the shell round the bed and its first
 // layer, still to fill.
-func bedOuterCover(at botnav.BlockAt, bed []world.Position) []world.Position {
+func BedOuterCover(at botnav.BlockAt, bed []world.Position) []world.Position {
 	return openCells(at, shellAround(append(append([]world.Position{}, bed...), shellAround(bed)...)))
 }
 
@@ -287,13 +295,13 @@ func bedOuterCover(at botnav.BlockAt, bed []world.Position) []world.Position {
 // built: the defender then joins the team's attack (the team brain calls it
 // back for an intruder). Out of blocks with the cover unfinished, it goes to
 // the station to earn more.
-func (b *bot) defend(now uint64, blocks int) (botnav.Input, bool) {
-	c, br := b.c, &b.brain
+func (b *Bot) defend(now uint64, blocks int) (botnav.Input, bool) {
+	br := &b.brain
 	plan := br.plan
 	if len(plan.Defend) == 0 {
 		return botnav.Input{}, false
 	}
-	at := c.instance.World.GetBlock
+	at := b.world().Block
 	// Cells it couldn't get to or fill lately are left out.
 	usable := func(cells []world.Position) []world.Position {
 		var out []world.Position
@@ -304,9 +312,9 @@ func (b *bot) defend(now uint64, blocks int) (botnav.Input, bool) {
 		}
 		return out
 	}
-	cover := usable(bedCover(at, plan.Defend))
+	cover := usable(BedCover(at, plan.Defend))
 	if len(cover) == 0 {
-		cover = usable(bedOuterCover(at, plan.Defend))
+		cover = usable(BedOuterCover(at, plan.Defend))
 	}
 	if len(cover) == 0 {
 		return botnav.Input{}, false // fortified (as far as it can)
@@ -319,11 +327,11 @@ func (b *bot) defend(now uint64, blocks int) (botnav.Input, bool) {
 	}
 	// Place what's in reach; walk up to the rest.
 	for _, p := range cover {
-		if anticheat.Dist(c.eye(), blockCentre(p)) <= botDigReach && !c.instance.blockedByPlayer(p) {
+		if anticheat.Dist(b.body.Eye(), blockCentre(p)) <= botDigReach && !b.world().BlockedByPlayer(p) {
 			b.lookAt(blockCentre(p))
 			if now >= br.nextPlace {
 				br.nextPlace = now + b.skill.placeGap
-				if !c.botPlace(p, plan.BlockItem) {
+				if !b.place(p, plan.BlockItem) {
 					b.skipCover(now, p)
 				}
 			}
@@ -353,7 +361,7 @@ func (b *bot) defend(now uint64, blocks int) (botnav.Input, bool) {
 const botCoverRetry = 600
 
 // skipCover leaves cover cell p out for a while.
-func (b *bot) skipCover(now uint64, p world.Position) {
+func (b *Bot) skipCover(now uint64, p world.Position) {
 	if b.brain.coverFail == nil {
 		b.brain.coverFail = map[world.Position]uint64{}
 	}

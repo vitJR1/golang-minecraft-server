@@ -71,7 +71,7 @@ func (i *Instance) nameTagGroups() map[string]shownTag {
 		if !c.isBot() {
 			return
 		}
-		role, ok := c.bot.shownRole()
+		role, ok := c.bot.ShownRole()
 		if !ok {
 			return
 		}
@@ -79,8 +79,8 @@ func (i *Instance) nameTagGroups() map[string]shownTag {
 		if tag.Group == "" {
 			tag.Group = "bot"
 		}
-		tag.Group += "_" + role.code()
-		tag.Prefix += role.label() + " "
+		tag.Group += "_" + role.Code()
+		tag.Prefix += role.Label() + " "
 		tags[c.playerName] = tag
 	})
 	out := map[string]shownTag{}

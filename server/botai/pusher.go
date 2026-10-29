@@ -1,4 +1,4 @@
-package server
+package botai
 
 import (
 	"minecraft-server/anticheat"
@@ -6,7 +6,7 @@ import (
 	"minecraft-server/world"
 )
 
-// bot_pusher.go: the pusher, one per team (the team brain's lead). Its job
+// pusher.go: the pusher, one per team (the team brain's lead). Its job
 // is the enemy beds, whatever it takes: it buys TNT first (and waits at the
 // forge for the gold), doesn't stop for fights unless an enemy is on top of
 // it, never falls back, doesn't raid generators. At an enemy bed covered on
@@ -27,14 +27,14 @@ const (
 // the cover is above it. False when there's nothing for TNT to do (the bed
 // is open on top, no TNT, the game doesn't light it, a ceiling) — then the
 // bed is dug as usual.
-func (b *bot) pushTNT(now uint64, bed world.Position) (botnav.Input, bool) {
-	c, br := b.c, &b.brain
-	if c.countItemName(itemTNT) == 0 || !c.instance.TNTAutoPrime() || now < br.nextPush {
+func (b *Bot) pushTNT(now uint64, bed world.Position) (botnav.Input, bool) {
+	br := &b.brain
+	if b.body.CountItem(itemTNT) == 0 || !b.world().TNTAutoPrime() || now < br.nextPush {
 		return botnav.Input{}, false
 	}
-	at := c.instance.World.GetBlock
+	at := b.world().Block
 	spot, ok := dropSpot(at, bed)
-	if !ok || !tntBreaks(at(spot.Add(0, -1, 0))) {
+	if !ok || !TNTBreaks(at(spot.Add(0, -1, 0))) {
 		// Open on top — or the cover is blast-proof (obsidian): no TNT.
 		br.towerBase = 0
 		return botnav.Input{}, false
@@ -45,11 +45,11 @@ func (b *bot) pushTNT(now uint64, bed world.Position) (botnav.Input, bool) {
 			return in, true
 		}
 	}
-	if anticheat.Dist(c.eye(), blockCentre(spot)) > botDigReach+0.5 {
+	if anticheat.Dist(b.body.Eye(), blockCentre(spot)) > botDigReach+0.5 {
 		return botnav.Input{}, false
 	}
 	b.lookAt(blockCentre(spot))
-	if !c.botPlaceWith(spot, func(n string) bool { return n == itemTNT }) {
+	if !b.placeWith(spot, func(n string) bool { return n == itemTNT }) {
 		br.nextPush = now + botPushGap
 		return botnav.Input{}, false
 	}
@@ -76,14 +76,14 @@ func dropSpot(at botnav.BlockAt, bed world.Position) (world.Position, bool) {
 // are clear of the cell they left, fill it with a block to land on. False
 // when it can't (out of blocks, a ceiling, already high enough on the
 // ground, too high).
-func (b *bot) tower(now uint64, top int) (botnav.Input, bool) {
-	c, br := b.c, &b.brain
-	at := c.instance.World.GetBlock
+func (b *Bot) tower(now uint64, top int) (botnav.Input, bool) {
+	br := &b.brain
+	at := b.world().Block
 	if b.phys.OnGround {
-		here := c.feetCellNow()
+		here := b.feetCell()
 		br.towering = false
 		if here.Y >= top || here.Y-br.towerBase >= botTowerMax && br.towerBase != 0 ||
-			c.countItemName(br.plan.BlockItem) == 0 || !botnav.HeadClear(at, here.Add(0, 2, 0)) {
+			b.body.CountItem(br.plan.BlockItem) == 0 || !botnav.HeadClear(at, here.Add(0, 2, 0)) {
 			return botnav.Input{}, false
 		}
 		if br.towerBase == 0 || here.Y < br.towerBase {
@@ -99,7 +99,7 @@ func (b *bot) tower(now uint64, top int) (botnav.Input, bool) {
 	cell := br.towerCell
 	if b.phys.Pos.Y >= float64(cell.Y)+botTowerClearing && world.Replaceable(at(cell)) && now >= br.nextPlace {
 		b.lookAt(blockCentre(cell))
-		if c.botPlace(cell, br.plan.BlockItem) {
+		if b.place(cell, br.plan.BlockItem) {
 			br.nextPlace = now + 1
 		}
 	}

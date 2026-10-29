@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 
 	"minecraft-server/player"
+	"minecraft-server/server/botai"
 	"minecraft-server/templates"
 )
 
@@ -95,7 +96,7 @@ const botMatchFill = 8
 // botMatch creates an arena of kind from template, fills every team with
 // bots of diff, starts the round and has c watch. Returns the arena name
 // and the number of bots.
-func (s *Server) botMatch(c *ClientConnection, kind, template string, diff Difficulty) (string, int, error) {
+func (s *Server) botMatch(c *ClientConnection, kind, template string, diff botai.Difficulty) (string, int, error) {
 	name, err := s.CreateArena(kind, template, "")
 	if err != nil {
 		return "", 0, err
@@ -136,11 +137,11 @@ func cmdBotMatch(c *ClientConnection, args []string) {
 			strings.Join(botMatchKinds(), ", "))
 		return
 	}
-	diff := DifficultyNormal
+	diff := botai.DifficultyNormal
 	if len(args) >= 2 {
-		d, ok := ParseDifficulty(args[1])
+		d, ok := botai.ParseDifficulty(args[1])
 		if !ok {
-			_ = c.sendSystemMessage("Difficulty is easy, normal or hard")
+			_ = c.sendSystemMessage("botai.Difficulty is easy, normal or hard")
 			return
 		}
 		diff = d

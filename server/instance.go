@@ -10,6 +10,7 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/botai"
 	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 	"sync"
@@ -251,7 +252,7 @@ type Instance struct {
 	botGuide game.BotGuide
 	// botTeams are the bot teams' shared brains, by team name
 	// (bot_team.go). Touched only on the tick goroutine.
-	botTeams map[string]*teamBrain
+	botTeams botai.Teams
 
 	// tags are the players' name-tag groups by player name (name_tags.go),
 	// guarded by tagsMu.
