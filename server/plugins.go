@@ -3,7 +3,6 @@ package server
 import (
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"minecraft-server/game"
 	"minecraft-server/server/inventory"
@@ -297,7 +296,6 @@ func pluginCommand(pc *game.Command) *Command {
 		Aliases: pc.Aliases,
 		NeedsOp: pc.NeedsOp,
 		Help:    pc.Help,
-		plugin:  pc,
 		Run: func(c *ClientConnection, args []string) {
 			if c.instance == nil {
 				return
@@ -310,30 +308,24 @@ func pluginCommand(pc *game.Command) *Command {
 			}()
 			pc.Run(c.instance.pluginCtx(), playerBridge{conn: c}, args)
 		},
+		Complete: func(c *ClientConnection, args []string) []string {
+			if pc.Complete == nil || c.instance == nil {
+				return nil
+			}
+			var out []string
+			safeHook(c.instance, "plugin complete "+pc.Name, func() {
+				out = pc.Complete(c.instance.pluginCtx(), playerBridge{conn: c}, args)
+			})
+			return out
+		},
 	}
 }
 
-// lookupCommand resolves a typed command name: built-ins first, then plugin
-// commands.
-func lookupCommand(name string) (*Command, bool) {
-	name = strings.ToLower(name)
-	if cmd, ok := commandRegistry[name]; ok {
-		return cmd, true
-	}
-	if pc, ok := game.LookupCommand(name); ok {
-		return pluginCommand(pc), true
-	}
-	return nil, false
-}
-
-// pluginCommands returns a server Command wrapper for every plugin command
-// whose name isn't taken by a built-in.
+// pluginCommands wraps every plugin command (commands.Plugins); the
+// registry drops the ones a built-in shadows.
 func pluginCommands() []*Command {
 	var out []*Command
 	for _, pc := range game.Commands() {
-		if _, shadowed := commandRegistry[strings.ToLower(pc.Name)]; shadowed {
-			continue
-		}
 		out = append(out, pluginCommand(pc))
 	}
 	return out
@@ -344,23 +336,9 @@ func pluginCommands() []*Command {
 func warnShadowedPluginCommands() {
 	for _, pc := range game.Commands() {
 		for _, key := range append([]string{pc.Name}, pc.Aliases...) {
-			if _, shadowed := commandRegistry[strings.ToLower(key)]; shadowed {
+			if commands.Builtin(key) {
 				slog.Warn("plugin command shadowed by built-in", "command", pc.Name, "name", key)
 			}
 		}
 	}
-}
-
-// pluginComplete asks a plugin command for tab-completion candidates.
-// args are the typed words after the command name; the last one is the
-// word being completed ("" when the cursor follows a space).
-func pluginComplete(c *ClientConnection, cmd *Command, args []string) []string {
-	if cmd.plugin == nil || cmd.plugin.Complete == nil || c.instance == nil {
-		return nil
-	}
-	var out []string
-	safeHook(c.instance, "plugin complete "+cmd.Name, func() {
-		out = cmd.plugin.Complete(c.instance.pluginCtx(), playerBridge{conn: c}, args)
-	})
-	return out
 }

@@ -131,6 +131,15 @@ func (s *Server) acTarget(ctx context.Context, name string) (uuid, display strin
 	return uuid, name, ok, err
 }
 
+func init() {
+	registerCommand(&Command{
+		Name:    "ac",
+		NeedsOp: true,
+		Help:    "/ac info <player> | /ac reset <player> [reason] — anticheat status + punishment log",
+		Run:     cmdAnticheat,
+	})
+}
+
 // cmdAnticheat: /ac info <player> | /ac reset <player> [reason…]
 func cmdAnticheat(c *ClientConnection, args []string) {
 	usage := "Usage: /ac info <player>  |  /ac reset <player> [reason]"

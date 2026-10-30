@@ -65,6 +65,16 @@ func (c *ClientConnection) endWatch(old *Instance) {
 	c.watch.watched.CompareAndSwap(old, nil)
 }
 
+func init() {
+	registerCommand(&Command{
+		Name:     "spectate",
+		Aliases:  []string{"watch"},
+		Help:     "/spectate [arena] — watch a running game in spectator mode",
+		Run:      cmdSpectate,
+		Complete: completeSpectate,
+	})
+}
+
 // cmdSpectate: /spectate [arena] — watch a running arena; no argument lists
 // them.
 func cmdSpectate(c *ClientConnection, args []string) {

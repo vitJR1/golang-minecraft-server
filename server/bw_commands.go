@@ -25,10 +25,11 @@ var bwCurrencies = map[string]string{
 
 func init() {
 	registerCommand(&Command{
-		Name:    "bwgive",
-		NeedsOp: true,
-		Help:    "/bwgive <iron|gold|diamond|emerald> [n] — give yourself BedWars currency (arena only)",
-		Run:     cmdBwGive,
+		Name:     "bwgive",
+		NeedsOp:  true,
+		Help:     "/bwgive <iron|gold|diamond|emerald> [n] — give yourself BedWars currency (arena only)",
+		Run:      cmdBwGive,
+		Complete: fixedArg(1, "iron", "gold", "diamond", "emerald"),
 	})
 	registerCommand(&Command{
 		Name:    "bwkill",

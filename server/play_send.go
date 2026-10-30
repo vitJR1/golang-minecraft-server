@@ -3,7 +3,9 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+
 	"minecraft-server/chunk"
+	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/registry"
@@ -412,4 +414,16 @@ func writeFullDaylight(buf *bytes.Buffer) {
 	}
 	// Block Light arrays: none.
 	protocol.WriteVarInt32ToBuffer(buf, 0)
+}
+
+// sendGameModeChange tells the client to switch gamemode. In 1.20.1 this
+// is a Game Event packet (Cb 0x20) with event_id = 3 (Change Game Mode)
+// and value = the mode index as a Float (the protocol stores it that way).
+func (c *ClientConnection) sendGameModeChange(mode player.Gamemode) error {
+	var payload []byte
+	payload = append(payload, 3) // event id: Change Game Mode
+	payload = append(payload, protocol.WriteFloat(float32(mode))...)
+	err := c.safeWrite(packetid.CbPlayGameEvent, payload)
+	c.dropFlight() // the client resets its abilities to the new gamemode's
+	return err
 }

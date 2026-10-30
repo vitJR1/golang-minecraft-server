@@ -125,16 +125,14 @@ func (s *Server) botsIn(inst *Instance) []*ClientConnection {
 	return out
 }
 
-// botSuggestions completes /bot: add <team> [difficulty] with the teams of
+// completeBot completes /bot: add <team> [difficulty] with the teams of
 // the game in c's instance (game.BotTeams), remove <name> with the bots.
-func (s *Server) botSuggestions(c *ClientConnection, parts []string, argIdx int) []string {
+func completeBot(c *ClientConnection, args []string) []string {
+	s, argIdx := c.server, len(args)
 	if argIdx == 1 {
 		return []string{"add", "match", "remove", "list", "clear"}
 	}
-	if len(parts) < 2 {
-		return nil
-	}
-	switch strings.ToLower(parts[1]) {
+	switch strings.ToLower(args[0]) {
 	case "add":
 		switch argIdx {
 		case 2:
@@ -177,6 +175,16 @@ func (s *Server) botTeamNames(inst *Instance) []string {
 
 // botMatchKinds are the arena kinds /bot match offers.
 func botMatchKinds() []string { return game.ArenaKinds() }
+
+func init() {
+	registerCommand(&Command{
+		Name:     "bot",
+		NeedsOp:  true,
+		Help:     "/bot add <team> [easy|normal|hard] | match <mode> [difficulty] | remove <name> | list | clear — AI players",
+		Run:      cmdBot,
+		Complete: completeBot,
+	})
+}
 
 // cmdBot: /bot add <team> [easy|normal|hard] | remove <name> | list | clear
 func cmdBot(c *ClientConnection, args []string) {

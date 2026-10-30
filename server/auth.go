@@ -120,16 +120,18 @@ func EnableAuth(s *Server, path string) {
 		Run:     cmdAuthLogin,
 	})
 	registerCommand(&Command{
-		Name:    "banip",
-		NeedsOp: true,
-		Help:    "/banip <player|ip> [duration] — ban IP (default 1h)",
-		Run:     cmdAuthBanIP,
+		Name:     "banip",
+		NeedsOp:  true,
+		Help:     "/banip <player|ip> [duration] — ban IP (default 1h)",
+		Run:      cmdAuthBanIP,
+		Complete: playerArg(1), // player names suggested; an IP works too
 	})
 	registerCommand(&Command{
-		Name:    "unbanip",
-		NeedsOp: true,
-		Help:    "/unbanip <player|ip> — lift an auth IP ban + reset fails",
-		Run:     cmdAuthUnbanIP,
+		Name:     "unbanip",
+		NeedsOp:  true,
+		Help:     "/unbanip <player|ip> — lift an auth IP ban + reset fails",
+		Run:      cmdAuthUnbanIP,
+		Complete: playerArg(1),
 	})
 	slog.Info("auth: enabled",
 		"credentials", credBackend,

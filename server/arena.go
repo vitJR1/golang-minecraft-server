@@ -144,6 +144,16 @@ func arenaUsage(c *ClientConnection) {
 	_ = c.sendSystemMessage("  /arena list [game]")
 }
 
+func init() {
+	registerCommand(&Command{
+		Name:     "arena",
+		NeedsOp:  true,
+		Help:     "/arena create <game> <template> [name] | /arena list [game]",
+		Run:      cmdArena,
+		Complete: completeArena,
+	})
+}
+
 // cmdArenaCreate handles /arena create <game> <template> [name].
 func cmdArenaCreate(c *ClientConnection, args []string) {
 	if len(args) < 2 || len(args) > 3 {

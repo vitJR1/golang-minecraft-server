@@ -111,6 +111,15 @@ func (c *ClientConnection) onClientAbilities(flags byte) {
 	c.flag("badpackets.abilities", fmt.Sprintf("claims flight in %v without permission", c.gamemode()))
 }
 
+func init() {
+	registerCommand(&Command{
+		Name:    "fly",
+		NeedsOp: true,
+		Help:    "/fly [player] — toggle flight (until the next gamemode change or instance move)",
+		Run:     cmdFly,
+	})
+}
+
 // cmdFly: /fly [player] — toggle flight.
 func cmdFly(c *ClientConnection, args []string) {
 	target := c
