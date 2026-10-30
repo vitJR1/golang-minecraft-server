@@ -9,6 +9,12 @@ import (
 	"minecraft-server/world"
 )
 
+// Vanilla lava numbers the tests expect (fluid.BurnStep's).
+const (
+	lavaDamage        = 4
+	fireFromLavaTicks = 300
+)
+
 // fluidWorld builds a stopped instance (manual ticking) with a flat stone
 // floor at y=63 covering [-12,12]².
 func fluidWorld(t *testing.T) *Instance {

@@ -13,12 +13,6 @@ import (
 // Update, Queue) — and what they do to players: lava burns, fire, water
 // puts it out.
 
-const (
-	lavaDamage        = 4
-	lavaDamageTicks   = 10 // vanilla: 4 damage every half second while inside
-	lavaCheckInterval = 10
-)
-
 // scheduleFluid marks pos and its six neighbours for fluid re-evaluation.
 func (i *Instance) scheduleFluid(pos world.Position) { i.fluids.Schedule(pos) }
 
@@ -36,18 +30,9 @@ type fluidBlocks struct{ i *Instance }
 func (f fluidBlocks) GetBlock(pos world.Position) world.Block    { return f.i.World.GetBlock(pos) }
 func (f fluidBlocks) SetBlock(pos world.Position, b world.Block) { f.i.SetBlock(pos, b) }
 
-// Fire tuning (vanilla): lava sets a player on fire for 15 seconds; fire
-// deals 1 damage every second; water puts it out.
-const (
-	fireFromLavaTicks = 300
-	fireDamage        = 1
-	fireDamageEvery   = 20
-	fireInvulnTicks   = 10
-)
-
 // burnTick runs every tick: players standing in lava take lava damage and
 // catch fire; burning players keep taking fire damage after they climb out
-// until the fire runs down or they touch water. Gated on the instance's
+// until the fire runs down or they touch water (the rules: fluid.BurnStep). Gated on the instance's
 // combat switch so lobbies stay safe. Creative/spectator players neither
 // burn nor take damage.
 func (i *Instance) burnTick(tick uint64) {
@@ -66,32 +51,17 @@ func (i *Instance) burnTick(tick uint64) {
 		}
 		feet := world.Position{X: floorF(s.X), Y: floorF(s.Y), Z: floorF(s.Z)}
 		head := world.Position{X: feet.X, Y: floorF(s.Y + eyeHeight), Z: feet.Z}
-		feetBlk, headBlk := i.World.GetBlock(feet).Name, i.World.GetBlock(head).Name
-		inLava := feetBlk == world.Lava.Name || headBlk == world.Lava.Name
-		inWater := feetBlk == world.Water.Name || headBlk == world.Water.Name
-
+		b := fluid.BurnStep(i.World.GetBlock(feet), i.World.GetBlock(head), c.fireTicks.Load(), tick)
+		if b.Damage > 0 {
+			c.hurtEnvironment(b.Damage, b.Invuln, tick)
+		}
 		switch {
-		case inLava:
-			if tick%lavaCheckInterval == 0 {
-				c.hurtEnvironment(lavaDamage, lavaDamageTicks, tick)
-			}
-			c.setFire(fireFromLavaTicks)
-			continue
-		case inWater:
+		case b.Ignite:
+			c.setFire(b.Fire)
+		case b.Fire <= 0:
 			c.extinguish()
-			continue
-		}
-		left := c.fireTicks.Load()
-		if left <= 0 {
-			continue
-		}
-		if left%fireDamageEvery == 0 {
-			c.hurtEnvironment(fireDamage, fireInvulnTicks, tick)
-		}
-		if left-1 <= 0 {
-			c.extinguish()
-		} else {
-			c.fireTicks.Store(left - 1)
+		default:
+			c.fireTicks.Store(b.Fire)
 		}
 	}
 }
@@ -119,7 +89,6 @@ func (c *ClientConnection) extinguish() {
 // broadcastOnFire refreshes the entity flags (fire bit 0x01 together with
 // the other flag bits, see entityFlags) for everyone in the instance.
 func (c *ClientConnection) broadcastOnFire(bool) { c.broadcastEntityFlags() }
-
 
 // hurtEnvironment applies non-player damage with its own invulnerability
 // window: red flash + hurt sound for everyone, then health sync or death.

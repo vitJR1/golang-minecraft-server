@@ -222,12 +222,12 @@ func frameMetadataPayload(ie instanceEntity) []byte {
 		// Custom name (index 2, OptChat) shown always (index 3, Boolean) —
 		// the label over a shop villager.
 		name, _ := json.Marshal(map[string]string{"text": ie.e.Name})
-		buf.WriteByte(metaCustomName)
-		protocol.WriteVarInt32ToBuffer(&buf, metaTypeOptChat)
+		buf.WriteByte(protocol.MetaCustomName)
+		protocol.WriteVarInt32ToBuffer(&buf, protocol.MetaTypeOptChat)
 		buf.WriteByte(1)
 		buf.Write(protocol.WriteString(string(name)))
-		buf.WriteByte(metaCustomNameVisible)
-		protocol.WriteVarInt32ToBuffer(&buf, metaTypeBoolean)
+		buf.WriteByte(protocol.MetaCustomNameVisible)
+		protocol.WriteVarInt32ToBuffer(&buf, protocol.MetaTypeBoolean)
 		buf.WriteByte(1)
 	}
 	if f == nil {

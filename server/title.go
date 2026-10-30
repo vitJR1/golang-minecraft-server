@@ -3,34 +3,23 @@ package server
 import (
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/title"
 )
 
-// title.go: on-screen titles ("You died!", trap alerts). Vanilla 1.20.1
-// shows a title when Set Title Text arrives; the subtitle and the animation
-// times must already be set, so sendTitle sends times → subtitle → title.
-// Texts are plain JSON chat components, like sendSystemMessage.
-//
-// Packet ids anchor on Sound Effect 0x62 / System Chat 0x64 in packet_ids.go:
-// 0x5D Set Subtitle Text, 0x5F Set Title Text, 0x60 Set Title Animation Times.
+// title.go: on-screen titles ("You died!", trap alerts) — the packet
+// rules are server/title; sendTitle sends times → subtitle → title.
 
-// Default title timing in ticks (vanilla: 10 / 70 / 20).
-const (
-	titleFadeIn  = 10
-	titleStay    = 70
-	titleFadeOut = 20
-)
-
-// sendTitle shows title (big) and subtitle (small; "" for none) to this
+// sendTitle shows text (big) and subtitle (small; "" for none) to this
 // client with the given fade-in / stay / fade-out ticks (≤0 → vanilla
 // defaults).
-func (c *ClientConnection) sendTitle(title, subtitle string, fadeIn, stay, fadeOut int) error {
-	if err := c.safeWrite(packetid.CbPlaySetTitleAnimationTimes, titleTimesPayload(fadeIn, stay, fadeOut)); err != nil {
+func (c *ClientConnection) sendTitle(text, subtitle string, fadeIn, stay, fadeOut int) error {
+	if err := c.safeWrite(packetid.CbPlaySetTitleAnimationTimes, title.TimesPayload(fadeIn, stay, fadeOut)); err != nil {
 		return err
 	}
 	if err := c.safeWrite(packetid.CbPlaySetSubtitleText, protocol.TextComponent(subtitle)); err != nil {
 		return err
 	}
-	return c.safeWrite(packetid.CbPlaySetTitleText, protocol.TextComponent(title))
+	return c.safeWrite(packetid.CbPlaySetTitleText, protocol.TextComponent(text))
 }
 
 // sendClearTitles wipes whatever title / subtitle the client is showing and
@@ -38,32 +27,12 @@ func (c *ClientConnection) sendTitle(title, subtitle string, fadeIn, stay, fadeO
 // title across server switches, so the join sequence sends this once: a
 // "YOU DIED" from another server would otherwise greet the player here.
 func (c *ClientConnection) sendClearTitles() error {
-	return c.safeWrite(packetid.CbPlayClearTitles, []byte{1})
+	return c.safeWrite(packetid.CbPlayClearTitles, title.ClearPayload)
 }
 
 // broadcastTitle shows the title to everyone in the instance.
-func (i *Instance) broadcastTitle(title, subtitle string, fadeIn, stay, fadeOut int) {
-	i.Players.Broadcast(packetid.CbPlaySetTitleAnimationTimes, titleTimesPayload(fadeIn, stay, fadeOut), -1)
+func (i *Instance) broadcastTitle(text, subtitle string, fadeIn, stay, fadeOut int) {
+	i.Players.Broadcast(packetid.CbPlaySetTitleAnimationTimes, title.TimesPayload(fadeIn, stay, fadeOut), -1)
 	i.Players.Broadcast(packetid.CbPlaySetSubtitleText, protocol.TextComponent(subtitle), -1)
-	i.Players.Broadcast(packetid.CbPlaySetTitleText, protocol.TextComponent(title), -1)
-}
-
-
-// titleTimesPayload encodes Set Title Animation Times: three Int32 tick
-// counts, vanilla defaults for non-positive values.
-func titleTimesPayload(fadeIn, stay, fadeOut int) []byte {
-	if fadeIn <= 0 {
-		fadeIn = titleFadeIn
-	}
-	if stay <= 0 {
-		stay = titleStay
-	}
-	if fadeOut <= 0 {
-		fadeOut = titleFadeOut
-	}
-	out := make([]byte, 0, 12)
-	out = append(out, protocol.WriteInt(int32(fadeIn))...)
-	out = append(out, protocol.WriteInt(int32(stay))...)
-	out = append(out, protocol.WriteInt(int32(fadeOut))...)
-	return out
+	i.Players.Broadcast(packetid.CbPlaySetTitleText, protocol.TextComponent(text), -1)
 }

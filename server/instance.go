@@ -125,7 +125,7 @@ type Instance struct {
 	// holograms are floating-text armor stands (game labels / timers).
 	// Guarded by holoMu.
 	holoMu    sync.Mutex
-	holograms []*hologram
+	holograms []*floatingText
 
 	// fluids are the block positions whose fluid state must be re-evaluated
 	// on their next due tick (fluid.go).

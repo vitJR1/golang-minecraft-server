@@ -8,6 +8,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/title"
 	"minecraft-server/world"
 )
 
@@ -62,7 +63,7 @@ func TestBroadcastTitleReachesEveryoneAndDefaultsTimes(t *testing.T) {
 			got[int32(id)] = buf.Bytes()
 		}
 		times := got[packetid.CbPlaySetTitleAnimationTimes]
-		if times == nil || binary.BigEndian.Uint32(times[4:8]) != titleStay {
+		if times == nil || binary.BigEndian.Uint32(times[4:8]) != title.Stay {
 			t.Errorf("%s: default stay expected, got %v", c.player.Name, times)
 		}
 		if got[packetid.CbPlaySetTitleText] == nil {

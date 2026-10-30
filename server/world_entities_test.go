@@ -197,10 +197,10 @@ func TestNamedEntityMetadataCarriesCustomName(t *testing.T) {
 	if eid != 7 {
 		t.Fatalf("eid %d", eid)
 	}
-	if idx, _ := buf.ReadByte(); idx != metaCustomName {
+	if idx, _ := buf.ReadByte(); idx != protocol.MetaCustomName {
 		t.Fatalf("first index %d, want custom name (2)", idx)
 	}
-	if typ, _ := protocol.ReadVarInt(buf); typ != metaTypeOptChat {
+	if typ, _ := protocol.ReadVarInt(buf); typ != protocol.MetaTypeOptChat {
 		t.Fatalf("type %d, want OptChat", typ)
 	}
 	present, _ := buf.ReadByte()
@@ -208,7 +208,7 @@ func TestNamedEntityMetadataCarriesCustomName(t *testing.T) {
 	if present != 1 || name != `{"text":"§bITEM SHOP"}` {
 		t.Errorf("name %q present=%d", name, present)
 	}
-	if idx, _ := buf.ReadByte(); idx != metaCustomNameVisible {
+	if idx, _ := buf.ReadByte(); idx != protocol.MetaCustomNameVisible {
 		t.Errorf("second index %d, want custom-name-visible (3)", idx)
 	}
 	_, _ = protocol.ReadVarInt(buf)
