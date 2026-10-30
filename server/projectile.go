@@ -9,6 +9,7 @@ import (
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/combat"
+	"minecraft-server/server/itementity"
 	"minecraft-server/world"
 )
 
@@ -292,7 +293,7 @@ func (i *Instance) collectArrow(p *projectile, c *ClientConnection) bool {
 	default:
 		return false
 	}
-	i.Players.Broadcast(packetid.CbPlayPickupItem, pickupItemPayload(p.eid, c.player.EntityID, 1), -1)
+	i.Players.Broadcast(packetid.CbPlayPickupItem, itementity.PickupPayload(p.eid, c.player.EntityID, 1), -1)
 	i.Players.Broadcast(packetid.CbPlayRemoveEntities, removeEntitiesPayload([]int32{p.eid}), -1)
 	return true
 }

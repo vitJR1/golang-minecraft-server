@@ -1,8 +1,8 @@
 package server
 
 import (
-	"minecraft-server/anticheat"
 	"minecraft-server/server/inventory"
+	"minecraft-server/server/itementity"
 	"time"
 )
 
@@ -17,13 +17,8 @@ import (
 //     with something on the cursor drops it.
 //
 // Thrown items leave from eye height along the look direction with the
-// vanilla speed, and can't be picked back up for itemThrowDelay ticks.
-
-// eyeHeight is shared with projectile.go.
-const (
-	dropSpeed = 0.3 // blocks/tick along the look direction (vanilla item toss)
-	dropLift  = 0.1 // extra upward component
-)
+// vanilla speed (itementity.Throw), and can't be picked back up for
+// itementity.ThrowDelay ticks.
 
 // dropHeld throws one unit (all=false) or the whole stack (all=true) from
 // the selected hotbar slot and syncs the slot to the client.
@@ -62,9 +57,8 @@ func (c *ClientConnection) throwStack(st inventory.Stack) {
 		return
 	}
 	s := c.player.Snapshot()
-	look := anticheat.LookDir(s.Yaw, s.Pitch)
-	vx, vy, vz := look.X*dropSpeed, look.Y*dropSpeed+dropLift, look.Z*dropSpeed
-	c.instance.ThrowStack(st, s.X, s.Y+eyeHeight-0.3, s.Z, vx, vy, vz)
+	x, y, z, vx, vy, vz := itementity.Throw(s.X, s.Y, s.Z, s.Yaw, s.Pitch)
+	c.instance.ThrowStack(st, x, y, z, vx, vy, vz)
 }
 
 // dropCursor throws whatever the client is carrying on its cursor (window

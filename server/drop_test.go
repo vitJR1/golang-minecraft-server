@@ -17,7 +17,7 @@ func itemsIn(inst *Instance) map[int32]int {
 	defer inst.itemsMu.Unlock()
 	out := map[int32]int{}
 	for _, it := range inst.items {
-		out[it.stack.ID] += int(it.stack.Count)
+		out[it.Stack.ID] += int(it.Stack.Count)
 	}
 	return out
 }
@@ -138,14 +138,14 @@ func TestThrownItemFliesForwardAndSlides(t *testing.T) {
 	inst.itemsMu.Lock()
 	it := inst.items[0]
 	inst.itemsMu.Unlock()
-	if !it.onGround || it.y != 64 {
-		t.Errorf("item should rest on the floor: y=%v onGround=%v", it.y, it.onGround)
+	if !it.OnGround || it.Y != 64 {
+		t.Errorf("item should rest on the floor: y=%v onGround=%v", it.Y, it.OnGround)
 	}
-	if it.z < 1.5 {
-		t.Errorf("item should have travelled along +Z, got z=%v", it.z)
+	if it.Z < 1.5 {
+		t.Errorf("item should have travelled along +Z, got z=%v", it.Z)
 	}
-	if it.vx != 0 || it.vz != 0 {
-		t.Errorf("item should have stopped sliding, got v=(%v,%v)", it.vx, it.vz)
+	if it.VX != 0 || it.VZ != 0 {
+		t.Errorf("item should have stopped sliding, got v=(%v,%v)", it.VX, it.VZ)
 	}
 }
 

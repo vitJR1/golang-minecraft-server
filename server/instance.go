@@ -14,6 +14,7 @@ import (
 	"minecraft-server/server/combat"
 	"minecraft-server/server/fluid"
 	"minecraft-server/server/inventory"
+	"minecraft-server/server/itementity"
 	"minecraft-server/world"
 	"sync"
 	"sync/atomic"
@@ -114,7 +115,7 @@ type Instance struct {
 	// instance, simulated on the tick loop (fall, pickup, despawn). Guarded by
 	// itemsMu.
 	itemsMu sync.Mutex
-	items   []*itemEntity
+	items   []*itementity.Entity
 
 	// tnts are primed TNT entities counting down to their explosion
 	// (tnt.go). Guarded by tntMu.

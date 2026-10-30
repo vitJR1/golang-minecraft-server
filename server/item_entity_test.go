@@ -5,6 +5,7 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/server/inventory"
+	"minecraft-server/server/itementity"
 	"minecraft-server/world"
 )
 
@@ -40,8 +41,8 @@ func countOf(inst *Instance, itemID int32) (n, entities int) {
 	inst.itemsMu.Lock()
 	defer inst.itemsMu.Unlock()
 	for _, it := range inst.items {
-		if it.stack.ID == itemID {
-			n += int(it.stack.Count)
+		if it.Stack.ID == itemID {
+			n += int(it.Stack.Count)
 			entities++
 		}
 	}
@@ -72,8 +73,8 @@ func TestDropItemFallsAndRests(t *testing.T) {
 		inst.itemTick(uint64(i))
 	}
 	it := inst.items[0]
-	if !it.onGround || it.y != 70 {
-		t.Errorf("item should rest on the floor at y=70: onGround=%v y=%v", it.onGround, it.y)
+	if !it.OnGround || it.Y != 70 {
+		t.Errorf("item should rest on the floor at y=70: onGround=%v y=%v", it.OnGround, it.Y)
 	}
 }
 
@@ -113,13 +114,13 @@ func TestItemPickedUpByNearbyPlayer(t *testing.T) {
 	inst.DropItem(0.5, 70, 0.5, "minecraft:iron_ingot", 3)
 
 	// Within the pickup delay nothing happens.
-	for i := 0; i < itemPickupDelay-1; i++ {
+	for i := 0; i < itementity.PickupDelay-1; i++ {
 		inst.itemTick(uint64(i))
 	}
 	if len(inst.items) != 1 {
 		t.Fatal("item collected before the pickup delay elapsed")
 	}
-	inst.itemTick(itemPickupDelay)
+	inst.itemTick(itementity.PickupDelay)
 	if len(inst.items) != 0 {
 		t.Fatalf("item should be collected, %d left", len(inst.items))
 	}
@@ -142,7 +143,7 @@ func TestItemNotPickedUpFarOrSpectatorOrDead(t *testing.T) {
 	spec := itemConn(s, inst, 2, 0.5, 70, 0.5)
 	spec.player.SetGamemode(player.Spectator)
 	inst.DropItem(0.5, 70, 0.5, "minecraft:iron_ingot", 1)
-	for i := 0; i <= itemPickupDelay+1; i++ {
+	for i := 0; i <= itementity.PickupDelay+1; i++ {
 		inst.itemTick(uint64(i))
 	}
 	if len(inst.items) != 1 {
@@ -163,7 +164,7 @@ func TestItemPickupLeavesOverflowOnGround(t *testing.T) {
 	}
 	c.inv.Set(inventory.HotbarStart, inventory.Stack{ID: iron, Count: inventory.MaxStack - 2})
 	inst.DropItem(0.5, 70, 0.5, "minecraft:iron_ingot", 5)
-	for i := 0; i <= itemPickupDelay+1; i++ {
+	for i := 0; i <= itementity.PickupDelay+1; i++ {
 		inst.itemTick(uint64(i))
 	}
 	if n, ents := countOf(inst, iron); n != 3 || ents != 1 {
@@ -174,32 +175,10 @@ func TestItemPickupLeavesOverflowOnGround(t *testing.T) {
 func TestItemDespawns(t *testing.T) {
 	inst := bareInstance(New(), floorWorld())
 	inst.DropItem(0.5, 70, 0.5, "minecraft:iron_ingot", 1)
-	for i := 0; i < itemDespawnTicks; i++ {
+	for i := 0; i < itementity.DespawnTicks; i++ {
 		inst.itemTick(uint64(i))
 	}
 	if len(inst.items) != 0 {
-		t.Errorf("item should despawn after %d ticks", itemDespawnTicks)
-	}
-}
-
-func TestItemPayloads(t *testing.T) {
-	it := &itemEntity{eid: 9, stack: inventory.Stack{ID: 1, Count: 3}, x: 1, y: 2, z: 3}
-	it.uuid = entityUUID(it.eid)
-	spawn := spawnItemPayload(it)
-	// eid(1) + uuid(16) + type(1) + 3 doubles(24) + 3 angles + data(1) + 3 shorts(6)
-	if len(spawn) != 1+16+1+24+3+1+6 {
-		t.Errorf("spawn payload length %d", len(spawn))
-	}
-	if spawn[17] != byte(itemEntityTypeID) {
-		t.Errorf("entity type byte = %d, want %d", spawn[17], itemEntityTypeID)
-	}
-	meta := itemMetadataPayload(it)
-	// eid, index 8, type 7, present, item id, count, TAG_End, 0xFF
-	want := []byte{9, 8, 7, 1, 1, 3, 0, 0xFF}
-	if string(meta) != string(want) {
-		t.Errorf("metadata = % x, want % x", meta, want)
-	}
-	if p := pickupItemPayload(9, 4, 3); string(p) != string([]byte{9, 4, 3}) {
-		t.Errorf("pickup payload = % x", p)
+		t.Errorf("item should despawn after %d ticks", itementity.DespawnTicks)
 	}
 }
