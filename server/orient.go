@@ -3,6 +3,7 @@ package server
 import (
 	"math"
 
+	"minecraft-server/server/fluid"
 	"minecraft-server/world"
 )
 
@@ -94,7 +95,7 @@ func (i *Instance) orientLadder(blk world.Block, pos world.Position, face int, y
 		// The ladder faces away from its wall: the wall is behind it.
 		dx, dz := step(opposite(facing))
 		wall := i.World.GetBlock(world.Position{X: pos.X + dx, Y: pos.Y, Z: pos.Z + dz})
-		if _, _, fluid := fluidOf(wall); wall == world.Air || fluid {
+		if _, _, isFluid := fluid.Of(wall); wall == world.Air || isFluid {
 			continue
 		}
 		blk.StateID = world.ResolveStateID(blk.Name, map[string]string{"facing": facing, "waterlogged": "false"})

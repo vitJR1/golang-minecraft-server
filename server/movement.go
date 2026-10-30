@@ -8,6 +8,7 @@ import (
 
 	"minecraft-server/anticheat"
 	"minecraft-server/player"
+	"minecraft-server/server/fluid"
 	"minecraft-server/world"
 )
 
@@ -190,7 +191,7 @@ func (i *Instance) blocksUnder(feet anticheat.Vec, fn func(world.Block)) {
 func (i *Instance) motionExempt(feet anticheat.Vec, sneaking bool) bool {
 	box := playerBoxAt(feet, sneaking, 0).Expand(0.3)
 	return i.anyBlock(box, func(b world.Block) bool {
-		if _, _, fluid := fluidOf(b); fluid {
+		if _, _, isFluid := fluid.Of(b); isFluid {
 			return true
 		}
 		switch n := strings.TrimPrefix(b.Name, "minecraft:"); {

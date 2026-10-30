@@ -5,6 +5,7 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/server/combat"
+	"minecraft-server/server/fluid"
 	"minecraft-server/world"
 )
 
@@ -32,11 +33,11 @@ func runFluid(inst *Instance, ticks uint64) {
 
 func levelAt(inst *Instance, x, y, z int) int {
 	b := inst.World.GetBlock(world.Position{X: x, Y: y, Z: z})
-	k, lvl, ok := fluidOf(b)
+	k, lvl, ok := fluid.Of(b)
 	if !ok {
 		return -1
 	}
-	if k == fluidLava {
+	if k == fluid.Lava {
 		return 100 + lvl
 	}
 	return lvl
@@ -72,14 +73,14 @@ func TestWaterFallsAndDrains(t *testing.T) {
 	// (Later it does reach x=4 the long way round through the z=±1 rows,
 	// exactly like vanilla.)
 	runFluid(inst, 20)
-	if got := levelAt(inst, 3, 63, 0); got != fluidFalling {
+	if got := levelAt(inst, 3, 63, 0); got != fluid.Falling {
 		t.Errorf("water over the hole should fall (level 8), got %d", got)
 	}
 	if got := levelAt(inst, 4, 64, 0); got != -1 {
 		t.Errorf("flowing water over a hole must not spread past it directly, got %d", got)
 	}
 	runFluid(inst, 180)
-	if got := levelAt(inst, 3, 61, 0); got != fluidFalling {
+	if got := levelAt(inst, 3, 61, 0); got != fluid.Falling {
 		t.Errorf("falling column should reach the bottom, got %d", got)
 	}
 	if got := levelAt(inst, 4, 61, 0); got != 1 {

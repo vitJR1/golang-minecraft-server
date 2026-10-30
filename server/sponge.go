@@ -1,6 +1,9 @@
 package server
 
-import "minecraft-server/world"
+import (
+	"minecraft-server/server/fluid"
+	"minecraft-server/world"
+)
 
 // sponge.go: a placed sponge soaks up water like vanilla — every water
 // block reachable through water within spongeRadius (Chebyshev) of it, up
@@ -21,7 +24,7 @@ func (i *Instance) absorbWater(pos world.Position) int {
 	for len(queue) > 0 && len(removed) < spongeMaxBlocks {
 		cur := queue[0]
 		queue = queue[1:]
-		for _, n := range neighbours6(cur) {
+		for _, n := range fluid.Neighbours6(cur) {
 			if visited[n] {
 				continue
 			}

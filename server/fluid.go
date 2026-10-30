@@ -2,211 +2,41 @@ package server
 
 import (
 	"bytes"
-
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/combat"
+	"minecraft-server/server/fluid"
 	"minecraft-server/server/sound"
 	"minecraft-server/world"
 )
 
-// fluid.go: vanilla-style fluid flow and lava damage, driven from the
-// instance tick loop.
-//
-// Fluids are ordinary blocks whose state encodes the "level" property:
-// 0 = source, 1..7 = flowing (1 right next to the source, thinner each
-// step), 8..15 = falling (a full column below another fluid block). Water
-// updates every 5 ticks and thins by 1 per block (reach 7); lava every 30
-// ticks, thinning by 2 (reach 3, like the overworld).
-//
-// Nothing flows on its own at map load: a fluid block is re-evaluated only
-// when it or one of its six neighbours changes (Instance.SetBlock /
-// SetBlocks schedule it). Each evaluation does what vanilla's
-// FlowingFluid.tick does — derive the block's correct level from its
-// neighbours (draining when the source is gone, turning into a new source
-// between two sources), then spread: down into air as falling fluid, and
-// sideways (sources always; flowing fluid only when it can't fall) into air
-// or thinner fluid of the same kind. Water and lava don't interact.
-
-// fluidKind holds one fluid's tuning.
-type fluidKind struct {
-	name     string
-	minState int32 // state id of level 0
-	interval uint64
-	dropOff  int
-}
-
-var (
-	fluidWater = &fluidKind{name: world.Water.Name, minState: world.Water.StateID, interval: 5, dropOff: 1}
-	fluidLava  = &fluidKind{name: world.Lava.Name, minState: world.Lava.StateID, interval: 30, dropOff: 2}
-	fluidKinds = []*fluidKind{fluidWater, fluidLava}
-)
+// fluid.go: fluids in an instance — the flow model is server/fluid (Of,
+// Update, Queue) — and what they do to players: lava burns, fire, water
+// puts it out.
 
 const (
-	fluidMaxLevel     = 7 // thinnest flowing level
-	fluidFalling      = 8 // level used for a falling column
 	lavaDamage        = 4
 	lavaDamageTicks   = 10 // vanilla: 4 damage every half second while inside
 	lavaCheckInterval = 10
 )
 
-// fluidOf identifies a fluid block: its kind and level.
-func fluidOf(b world.Block) (*fluidKind, int, bool) {
-	for _, k := range fluidKinds {
-		if b.Name == k.name {
-			lvl := int(b.StateID - k.minState)
-			if lvl < 0 || lvl > 15 {
-				lvl = 0
-			}
-			return k, lvl, true
-		}
-	}
-	return nil, 0, false
-}
-
-func (k *fluidKind) block(level int) world.Block {
-	return world.Block{StateID: k.minState + int32(level), Name: k.name}
-}
-
-// spreadLevel is the level a block contributes to its side neighbours:
-// sources and falling columns count as full.
-func spreadLevel(level int) int {
-	if level >= fluidFalling {
-		return 0
-	}
-	return level
-}
-
 // scheduleFluid marks pos and its six neighbours for fluid re-evaluation.
-func (i *Instance) scheduleFluid(pos world.Position) {
-	i.fluidMu.Lock()
-	if i.fluidPending == nil {
-		i.fluidPending = map[world.Position]struct{}{}
-	}
-	i.fluidPending[pos] = struct{}{}
-	for _, n := range neighbours6(pos) {
-		i.fluidPending[n] = struct{}{}
-	}
-	i.fluidMu.Unlock()
-}
-
-func neighbours6(p world.Position) [6]world.Position {
-	return [6]world.Position{
-		{X: p.X, Y: p.Y - 1, Z: p.Z}, {X: p.X, Y: p.Y + 1, Z: p.Z},
-		{X: p.X - 1, Y: p.Y, Z: p.Z}, {X: p.X + 1, Y: p.Y, Z: p.Z},
-		{X: p.X, Y: p.Y, Z: p.Z - 1}, {X: p.X, Y: p.Y, Z: p.Z + 1},
-	}
-}
-
-func sides4(p world.Position) [4]world.Position {
-	return [4]world.Position{
-		{X: p.X - 1, Y: p.Y, Z: p.Z}, {X: p.X + 1, Y: p.Y, Z: p.Z},
-		{X: p.X, Y: p.Y, Z: p.Z - 1}, {X: p.X, Y: p.Y, Z: p.Z + 1},
-	}
-}
+func (i *Instance) scheduleFluid(pos world.Position) { i.fluids.Schedule(pos) }
 
 // fluidTick re-evaluates every pending fluid block whose kind is due this
-// tick. Pending non-fluid positions are dropped (they were scheduled as
-// neighbours of a change and turned out not to hold fluid).
+// tick.
 func (i *Instance) fluidTick(tick uint64) {
-	i.fluidMu.Lock()
-	if len(i.fluidPending) == 0 {
-		i.fluidMu.Unlock()
-		return
-	}
-	due := make([]world.Position, 0, len(i.fluidPending))
-	for pos := range i.fluidPending {
-		k, _, ok := fluidOf(i.World.GetBlock(pos))
-		switch {
-		case !ok:
-			delete(i.fluidPending, pos)
-		case tick%k.interval == 0:
-			due = append(due, pos)
-			delete(i.fluidPending, pos)
-		}
-	}
-	i.fluidMu.Unlock()
-	for _, pos := range due {
-		i.updateFluid(pos)
+	for _, pos := range i.fluids.Due(tick, i.World.GetBlock) {
+		fluid.Update(fluidBlocks{i}, pos)
 	}
 }
 
-// updateFluid is one vanilla fluid tick for the block at pos.
-func (i *Instance) updateFluid(pos world.Position) {
-	cur := i.World.GetBlock(pos)
-	k, level, ok := fluidOf(cur)
-	if !ok {
-		return
-	}
-	below := world.Position{X: pos.X, Y: pos.Y - 1, Z: pos.Z}
-	belowBlk := i.World.GetBlock(below)
-	_, belowLevel, belowIsFluid := fluidOf(belowBlk)
-	belowSame := belowIsFluid && belowBlk.Name == k.name
+// fluidBlocks is an instance as the world fluids flow in.
+type fluidBlocks struct{ i *Instance }
 
-	// 1. Derive the level this block should have from its neighbours.
-	if level != 0 {
-		want := -1
-		aboveBlk := i.World.GetBlock(world.Position{X: pos.X, Y: pos.Y + 1, Z: pos.Z})
-		if aboveBlk.Name == k.name {
-			want = fluidFalling
-		} else {
-			sources := 0
-			for _, n := range sides4(pos) {
-				nb := i.World.GetBlock(n)
-				if nb.Name != k.name {
-					continue
-				}
-				_, nl, _ := fluidOf(nb)
-				if nl == 0 {
-					sources++
-				}
-				if l := spreadLevel(nl) + k.dropOff; l <= fluidMaxLevel && (want < 0 || l < want) {
-					want = l
-				}
-			}
-			// Infinite water: two adjacent sources over solid ground (or a
-			// source) make a new source. Lava never does.
-			if k == fluidWater && sources >= 2 && (belowSame && belowLevel == 0 || (!belowIsFluid && belowBlk != world.Air)) {
-				want = 0
-			}
-		}
-		if want < 0 {
-			i.SetBlock(pos, world.Air) // nothing feeds it any more
-			return
-		}
-		if want != level {
-			i.SetBlock(pos, k.block(want))
-			level = want
-		}
-	}
-
-	// 2. Spread. Down first.
-	if belowBlk == world.Air || (belowSame && belowLevel != 0 && belowLevel != fluidFalling) {
-		i.SetBlock(below, k.block(fluidFalling))
-	}
-	// Sideways: sources always; flowing fluid only when it can't fall.
-	hole := belowBlk == world.Air || belowSame
-	if level != 0 && hole {
-		return
-	}
-	next := spreadLevel(level) + k.dropOff
-	if next > fluidMaxLevel {
-		return
-	}
-	for _, n := range sides4(pos) {
-		nb := i.World.GetBlock(n)
-		if nb == world.Air {
-			i.SetBlock(n, k.block(next))
-			continue
-		}
-		if nb.Name == k.name {
-			if _, nl, _ := fluidOf(nb); nl != 0 && nl < fluidFalling && nl > next {
-				i.SetBlock(n, k.block(next))
-			}
-		}
-	}
-}
+func (f fluidBlocks) GetBlock(pos world.Position) world.Block    { return f.i.World.GetBlock(pos) }
+func (f fluidBlocks) SetBlock(pos world.Position, b world.Block) { f.i.SetBlock(pos, b) }
 
 // Fire tuning (vanilla): lava sets a player on fire for 15 seconds; fire
 // deals 1 damage every second; water puts it out.
@@ -239,8 +69,8 @@ func (i *Instance) burnTick(tick uint64) {
 		feet := world.Position{X: floorF(s.X), Y: floorF(s.Y), Z: floorF(s.Z)}
 		head := world.Position{X: feet.X, Y: floorF(s.Y + eyeHeight), Z: feet.Z}
 		feetBlk, headBlk := i.World.GetBlock(feet).Name, i.World.GetBlock(head).Name
-		inLava := feetBlk == fluidLava.name || headBlk == fluidLava.name
-		inWater := feetBlk == fluidWater.name || headBlk == fluidWater.name
+		inLava := feetBlk == world.Lava.Name || headBlk == world.Lava.Name
+		inWater := feetBlk == world.Water.Name || headBlk == world.Water.Name
 
 		switch {
 		case inLava:

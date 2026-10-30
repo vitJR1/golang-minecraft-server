@@ -11,6 +11,7 @@ import (
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/botai"
 	"minecraft-server/server/combat"
+	"minecraft-server/server/fluid"
 	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 	"sync"
@@ -126,10 +127,9 @@ type Instance struct {
 	holoMu    sync.Mutex
 	holograms []*hologram
 
-	// fluidPending holds block positions whose fluid state must be
-	// re-evaluated on the next due tick (fluid.go). Guarded by fluidMu.
-	fluidMu      sync.Mutex
-	fluidPending map[world.Position]struct{}
+	// fluids are the block positions whose fluid state must be re-evaluated
+	// on their next due tick (fluid.go).
+	fluids fluid.Queue
 
 	// joinMu serializes registration + visibility announcements per
 	// instance, so one player's join can't observe another mid-join inside

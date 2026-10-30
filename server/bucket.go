@@ -1,9 +1,8 @@
 package server
 
 import (
-	"math"
-
 	"minecraft-server/player"
+	"minecraft-server/server/fluid"
 	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
@@ -23,38 +22,18 @@ import (
 // Both go through the OnBlockPlace / OnBlockBreak veto chains, so the hub
 // and lobbies stay dry and BedWars' map protection still applies.
 
-const (
-	bucketEmpty = "minecraft:bucket"
-	bucketWater = "minecraft:water_bucket"
-	bucketLava  = "minecraft:lava_bucket"
-
-	bucketReach = 5.0 // blocks (creative reach; survival's 4.5 is close enough)
-	bucketStep  = 0.05
-)
-
-// bucketFluid maps a filled bucket item to the fluid it holds.
-func bucketFluid(item string) (*fluidKind, bool) {
-	switch item {
-	case bucketWater:
-		return fluidWater, true
-	case bucketLava:
-		return fluidLava, true
-	}
-	return nil, false
-}
-
 // useBucket handles a Use Item with a bucket in hand. Returns false when the
 // held item isn't a bucket at all.
 func (c *ClientConnection) useBucket(held string) bool {
-	if held != bucketEmpty {
-		if _, ok := bucketFluid(held); !ok {
+	if held != fluid.BucketEmpty {
+		if _, ok := fluid.BucketKind(held); !ok {
 			return false
 		}
 	}
 	if c.player == nil || c.instance == nil {
 		return true
 	}
-	if held == bucketEmpty {
+	if held == fluid.BucketEmpty {
 		c.scoopFluid()
 	} else {
 		c.emptyBucket(held)
@@ -65,25 +44,27 @@ func (c *ClientConnection) useBucket(held string) bool {
 // emptyBucket places the bucket's fluid source in front of the first solid
 // block the player looks at.
 func (c *ClientConnection) emptyBucket(held string) {
-	kind, _ := bucketFluid(held)
-	target, ok := c.rayToPlacement()
+	kind, _ := fluid.BucketKind(held)
+	ox, oy, oz, dx, dy, dz := c.lookRay()
+	target, ok := fluid.RayToPlacement(c.instance.World.GetBlock, ox, oy, oz, dx, dy, dz)
 	if !ok {
 		return
 	}
-	src := kind.block(0)
+	src := kind.Block(0)
 	if !c.instance.allowBlockPlace(c, target, src) {
 		_ = c.sendBlockUpdate(target, c.instance.World.GetBlock(target))
 		return
 	}
 	c.instance.SetBlock(target, src)
 	if c.gamemode() != player.Creative {
-		c.swapHeld(bucketEmpty)
+		c.swapHeld(fluid.BucketEmpty)
 	}
 }
 
 // scoopFluid picks up the first fluid source the player looks at.
 func (c *ClientConnection) scoopFluid() {
-	pos, kind, ok := c.rayToFluidSource()
+	ox, oy, oz, dx, dy, dz := c.lookRay()
+	pos, kind, ok := fluid.RayToSource(c.instance.World.GetBlock, ox, oy, oz, dx, dy, dz)
 	if !ok {
 		return
 	}
@@ -93,11 +74,7 @@ func (c *ClientConnection) scoopFluid() {
 	}
 	c.instance.SetBlock(pos, world.Air)
 	if c.gamemode() != player.Creative {
-		filled := bucketWater
-		if kind == fluidLava {
-			filled = bucketLava
-		}
-		c.swapHeld(filled)
+		c.swapHeld(fluid.BucketFor(kind))
 	}
 }
 
@@ -118,47 +95,6 @@ func (c *ClientConnection) swapHeld(item string) {
 // lookRay returns the eye position and the unit look vector.
 func (c *ClientConnection) lookRay() (ox, oy, oz, dx, dy, dz float64) {
 	s := c.player.Snapshot()
-	yaw := float64(s.Yaw) * math.Pi / 180
-	pitch := float64(s.Pitch) * math.Pi / 180
-	dx = -math.Sin(yaw) * math.Cos(pitch)
-	dz = math.Cos(yaw) * math.Cos(pitch)
-	dy = -math.Sin(pitch)
+	dx, dy, dz = fluid.LookDir(s.Yaw, s.Pitch)
 	return s.X, s.Y + eyeHeight, s.Z, dx, dy, dz
-}
-
-// rayToPlacement walks the look ray through air and fluids until it meets a
-// solid block, returning the last block position the ray occupied before
-// the hit. false when nothing solid is within reach.
-func (c *ClientConnection) rayToPlacement() (world.Position, bool) {
-	ox, oy, oz, dx, dy, dz := c.lookRay()
-	last := world.Position{X: floorF(ox), Y: floorF(oy), Z: floorF(oz)}
-	for d := 0.0; d <= bucketReach; d += bucketStep {
-		pos := world.Position{X: floorF(ox + dx*d), Y: floorF(oy + dy*d), Z: floorF(oz + dz*d)}
-		b := c.instance.World.GetBlock(pos)
-		if _, _, fluid := fluidOf(b); b != world.Air && !fluid {
-			return last, true
-		}
-		last = pos
-	}
-	return world.Position{}, false
-}
-
-// rayToFluidSource walks the look ray until it meets a fluid source block.
-func (c *ClientConnection) rayToFluidSource() (world.Position, *fluidKind, bool) {
-	ox, oy, oz, dx, dy, dz := c.lookRay()
-	for d := 0.0; d <= bucketReach; d += bucketStep {
-		pos := world.Position{X: floorF(ox + dx*d), Y: floorF(oy + dy*d), Z: floorF(oz + dz*d)}
-		b := c.instance.World.GetBlock(pos)
-		if b == world.Air {
-			continue
-		}
-		kind, level, fluid := fluidOf(b)
-		if !fluid {
-			return world.Position{}, nil, false // a solid block is in the way
-		}
-		if level == 0 {
-			return pos, kind, true
-		}
-	}
-	return world.Position{}, nil, false
 }
