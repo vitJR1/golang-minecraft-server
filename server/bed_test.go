@@ -6,6 +6,7 @@ import (
 
 	"minecraft-server/game"
 	"minecraft-server/player"
+	"minecraft-server/server/conn"
 	"minecraft-server/world"
 )
 
@@ -35,8 +36,7 @@ func TestPlaceBedTwoBlocks(t *testing.T) {
 	c := &ClientConnection{
 		instance: inst,
 		player:   player.New(1, "P", [16]byte{}),
-		outbound: make(chan outboundMsg, 16),
-		done:     make(chan struct{}),
+		link:     conn.NewQueued(16),
 	}
 	c.player.LookAt(0, 0, false) // facing south (+Z)
 

@@ -46,8 +46,10 @@ func play(t *testing.T, c *ClientConnection, id int32, payload []byte) {
 
 // drain throws away everything queued for the client.
 func drain(c *ClientConnection) {
-	for len(c.outbound) > 0 {
-		<-c.outbound
+	for {
+		if _, ok := c.link.TakeFrame(); !ok {
+			return
+		}
 	}
 }
 

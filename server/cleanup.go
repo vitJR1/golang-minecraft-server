@@ -2,30 +2,15 @@ package server
 
 import (
 	"log/slog"
-	"sync/atomic"
 	"time"
 )
 
+// cleanup closes the connection once: the transport stops taking writes and
+// gets a second to flush what's queued (a kick's Disconnect, a status Pong),
+// the player leaves its queue and instance, then the socket closes.
 func (c *ClientConnection) cleanup() {
-	if !atomic.CompareAndSwapInt32(&c.closed, 0, 1) {
+	if c.link == nil || !c.link.Shutdown(time.Second) {
 		return
-	}
-
-	// Close the outbound channel under sendMu so a concurrent safeWrite
-	// either fails the isClosed check (taking sendMu after us) or already
-	// completed its push (held sendMu before us). Either way no send to
-	// closed channel.
-	c.sendMu.Lock()
-	close(c.outbound)
-	c.sendMu.Unlock()
-
-	// Give the writer a moment to drain pending frames (Pong from status
-	// handlers, Disconnect messages from kicks) before we tear the socket
-	// down. 1s is generous for net.Pipe and TCP localhost; bound it so a
-	// stuck client can't keep cleanup hanging.
-	select {
-	case <-c.writerDone:
-	case <-time.After(time.Second):
 	}
 
 	// Drop from any matchmaker queue we might be sitting in.
@@ -42,10 +27,9 @@ func (c *ClientConnection) cleanup() {
 	}
 
 	addr := "bot"
-	if c.conn != nil { // bots have no socket
-		addr = c.conn.RemoteAddr().String()
-		c.conn.Close()
+	if a := c.link.RemoteAddr(); a != nil { // bots have no socket
+		addr = a.String()
 	}
-	close(c.done)
+	c.link.Finish()
 	slog.Info("connection closed", "addr", addr, "player", c.playerName)
 }

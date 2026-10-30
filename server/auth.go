@@ -166,8 +166,8 @@ func promptAuth(c *ClientConnection) {
 	if authStore == nil {
 		return
 	}
-	if c.conn != nil {
-		authStore.svc.IPs.Remember(c.playerName, clientIP(c.conn.RemoteAddr()))
+	if c.link.RemoteAddr() != nil {
+		authStore.svc.IPs.Remember(c.playerName, clientIP(c.link.RemoteAddr()))
 	}
 	c.authed.Store(false)
 	if authStore.svc.Registered(c.playerName) {
@@ -200,7 +200,7 @@ func (p *authPlugin) timeoutWatch(c *ClientConnection) {
 	defer tick.Stop()
 	for {
 		select {
-		case <-c.done:
+		case <-c.link.Done():
 			return
 		case <-tick.C:
 		}
@@ -398,7 +398,7 @@ func cmdAuthRegister(c *ClientConnection, args []string) {
 
 	c.authed.Store(true)
 	pushCountdownClear(c)
-	authStore.svc.IPs.ClearFails(clientIP(c.conn.RemoteAddr()))
+	authStore.svc.IPs.ClearFails(clientIP(c.link.RemoteAddr()))
 	_ = c.sendSystemMessage("Registered. Welcome aboard.")
 	slog.Info("auth: registered", "player", c.playerName)
 	teleportToHub(c)
@@ -426,7 +426,7 @@ func cmdAuthLogin(c *ClientConnection, args []string) {
 		_ = c.sendSystemMessage("No account — use /register <password> <password>.")
 		return
 	case errors.Is(err, auth.ErrWrongPassword):
-		addr := c.conn.RemoteAddr()
+		addr := c.link.RemoteAddr()
 		banned := authStore.svc.IPs.RecordFail(clientIP(addr), cfg.AuthMaxAttempts(), cfg.AuthBanDuration())
 		if banned {
 			slog.Warn("auth: IP banned for repeated failures",
@@ -448,7 +448,7 @@ func cmdAuthLogin(c *ClientConnection, args []string) {
 
 	c.authed.Store(true)
 	pushCountdownClear(c)
-	authStore.svc.IPs.ClearFails(clientIP(c.conn.RemoteAddr()))
+	authStore.svc.IPs.ClearFails(clientIP(c.link.RemoteAddr()))
 	_ = c.sendSystemMessage("Logged in. Welcome to the hub.")
 	slog.Info("auth: login ok", "player", c.playerName)
 	teleportToHub(c)

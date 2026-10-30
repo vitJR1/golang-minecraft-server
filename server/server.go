@@ -16,12 +16,15 @@ import (
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/redisc"
 	"minecraft-server/server/botai"
+	"minecraft-server/server/chat"
+	"minecraft-server/server/conn"
 	"minecraft-server/server/connlimit"
 	"minecraft-server/server/enchant"
 	"minecraft-server/server/enderchest"
 	"minecraft-server/server/inventory"
 	"minecraft-server/server/moderation"
 	"minecraft-server/server/scoreboard"
+	"minecraft-server/server/visibility"
 	"minecraft-server/store"
 	"minecraft-server/templates"
 	"minecraft-server/world"
@@ -43,20 +46,6 @@ func init() {
 	}
 	publicKey = pub
 	private = priv
-}
-
-// outboundQueueSize bounds the per-connection pending-frame channel. Set
-// high enough that bursty broadcasts (e.g. 100 players × 20Hz movement) fit
-// without dropping, low enough that a stuck client is detected quickly.
-const outboundQueueSize = 256
-
-// outboundMsg is what the writer goroutine reads from the channel. A frame
-// is bytes ready for conn.Write. A swap message means "flush whatever is
-// buffered, then start writing to this new conn" — used for the encryption
-// handshake, where the conn under us changes mid-stream.
-type outboundMsg struct {
-	frame    []byte
-	swapConn net.Conn
 }
 
 // Server holds process-wide shared state across all instances: the op
@@ -374,7 +363,7 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 	// 2. Wipe c's tab list. Respawn doesn't do this, and the next
 	//    JoinAndAnnounce will rebuild it for the new instance.
 	if len(oldUUIDs) > 0 {
-		_ = c.safeWrite(packetid.CbPlayPlayerInfoRemove, playerInfoRemovePayload(oldUUIDs))
+		_ = c.safeWrite(packetid.CbPlayPlayerInfoRemove, visibility.InfoRemovePayload(oldUUIDs))
 	}
 
 	// 2b. Landing in the hub or a lobby means the game is over for this
@@ -490,7 +479,7 @@ func (s *Server) connectionsFromIP(ip string) []*ClientConnection {
 	var out []*ClientConnection
 	for _, i := range instances {
 		i.Players.Range(func(c *ClientConnection) {
-			if clientIP(c.conn.RemoteAddr()) == ip {
+			if clientIP(c.link.RemoteAddr()) == ip {
 				out = append(out, c)
 			}
 		})
@@ -506,71 +495,46 @@ func (c *ClientConnection) Instance() *Instance { return c.instance }
 // sendSystemMessage delivers a SystemChat line to a single player. Used by
 // command responses and other server → one-player notifications.
 func (c *ClientConnection) sendSystemMessage(text string) error {
-	return c.safeWrite(packetid.CbPlaySystemChat, buildSystemChatPayload(text))
+	return c.safeWrite(packetid.CbPlaySystemChat, chat.SystemPayload(text))
 }
 
 // HandleConn drives a single client connection through its state machine.
 // Call in a goroutine per accepted net.Conn.
-func (s *Server) HandleConn(conn net.Conn) {
+func (s *Server) HandleConn(sock net.Conn) {
 	// Connection-flood gate: reject before allocating any per-connection
 	// state or goroutines. A rejected socket is closed silently — at this
 	// point we don't even know the protocol state to say goodbye in.
-	release, reason := s.connLimit.Acquire(clientIP(conn.RemoteAddr()))
+	release, reason := s.connLimit.Acquire(clientIP(sock.RemoteAddr()))
 	if release == nil {
 		s.connsRejected.Add(1)
 		slog.Warn("connection rejected",
-			"addr", conn.RemoteAddr().String(), "reason", reason)
-		_ = conn.Close()
+			"addr", sock.RemoteAddr().String(), "reason", reason)
+		_ = sock.Close()
 		return
 	}
 	defer release()
 
-	client := &ClientConnection{
-		server:               s,
-		conn:                 conn,
-		state:                StateHandshake,
-		compressionThreshold: protocol.CompressionDisabled,
-		outbound:             make(chan outboundMsg, outboundQueueSize),
-		done:                 make(chan struct{}),
-		writerDone:           make(chan struct{}),
-	}
+	client := &ClientConnection{server: s, state: StateHandshake}
+	client.link = conn.New(sock, client.handleWriteError)
 	// Default: auth plugin disabled → no gate. EnableAuth flips this to
 	// false in handler_login so the player has to /register or /login.
 	client.authed.Store(true)
-	slog.Info("new connection", "addr", conn.RemoteAddr().String())
+	slog.Info("new connection", "addr", sock.RemoteAddr().String())
 	defer client.cleanup()
 
-	go client.writerLoop()
+	client.link.Serve()
 	go client.keepAlive()
 	client.readLoop()
 }
 
 type ClientConnection struct {
-	// sendMu is held briefly during (build frame + push to outbound) so
-	// concurrent safeWrite calls can't interleave with each other or with
-	// enableCompression's threshold flip, which would reorder frames on the
-	// wire. The mutex is short-lived: no syscalls, just memory work.
-	sendMu sync.Mutex
-
 	server *Server
 
-	// conn is the active socket. The read side is touched only by readLoop
-	// (and by handler_login which runs in the readLoop goroutine, so swaps
-	// during encryption-enable are safe). The write side is owned by
-	// writerLoop, which maintains its own current-conn pointer updated via
-	// outboundMsg.swapConn — writes never read this field directly.
-	conn net.Conn
+	// link is the transport (server/conn): socket, framing, compression,
+	// the outbound queue and its writer, encryption, close, keep-alive.
+	link *conn.Conn
 
 	state State
-
-	// compressionThreshold is protocol.CompressionDisabled until the server
-	// sends Set Compression. After that, both reads and writes use the
-	// compressed framing. Guarded by sendMu when writers touch it.
-	compressionThreshold int
-
-	// outbound is the pending-write queue. Producers (safeWrite, broadcast)
-	// push frames; writerLoop drains and writes them. Closed by cleanup.
-	outbound chan outboundMsg
 
 	// playerName is captured from Login Start so logs and ban-check have a
 	// name to print before the full Player exists.
@@ -585,16 +549,6 @@ type ClientConnection struct {
 	// cross-instance teleport. Single writer (handler_login), readers are
 	// the broadcast paths and command handlers.
 	instance *Instance
-
-	closed int32 // atomic flag (use isClosed/cleanup)
-	done   chan struct{}
-
-	// keepAlivePendingID is the ID of the in-flight Cb KeepAlive the client
-	// has not yet echoed, or 0 if none. keepAlivePendingSentNanos records
-	// when it went on the wire (UnixNano). Both written by the keepAlive
-	// goroutine and read+CAS'd by the SbPlayKeepAlive handler.
-	keepAlivePendingID        atomic.Int64
-	keepAlivePendingSentNanos atomic.Int64
 
 	// menu holds whichever hub navigation menu (if any) is currently open
 	// on this client (nil = no menu). Written from handler_play +
@@ -683,12 +637,6 @@ type ClientConnection struct {
 
 	// watch: the instance this player only watches (spectate.go).
 	watch watchState
-
-	// writerDone is closed by writerLoop on exit. cleanup waits on it
-	// (with a timeout) so any in-flight frames — particularly the Pong that
-	// status handlers fire right before cleanup — actually make it on the
-	// wire before conn.Close cuts the pipe.
-	writerDone chan struct{}
 }
 
 func (c *ClientConnection) readLoop() {
@@ -698,14 +646,11 @@ func (c *ClientConnection) readLoop() {
 		if c.isClosed() {
 			return
 		}
-		c.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-
-		packet, err := protocol.ReadPacket(c.conn, c.compressionThreshold)
+		packet, err := c.link.Read(30 * time.Second)
 		if err != nil {
 			c.handleReadError(err)
 			return
 		}
-		c.conn.SetReadDeadline(time.Time{})
 
 		if err := c.processPacket(packet); err != nil {
 			slog.Error("process packet failed",
@@ -715,75 +660,6 @@ func (c *ClientConnection) readLoop() {
 			if c.state != StatePlay {
 				return
 			}
-		}
-	}
-}
-
-// writerLoop owns the write side of the connection. It batches whatever is
-// queued at the moment of a wake-up into one writev syscall via
-// net.Buffers, then waits for the next message. This is the main reason
-// for the queue: avoid one syscall per broadcast recipient.
-func (c *ClientConnection) writerLoop() {
-	defer close(c.writerDone)
-	currentConn := c.conn
-	var pending net.Buffers
-
-	flush := func() error {
-		if len(pending) == 0 {
-			return nil
-		}
-		_ = currentConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-		_, err := pending.WriteTo(currentConn)
-		_ = currentConn.SetWriteDeadline(time.Time{})
-		pending = pending[:0]
-		return err
-	}
-
-	for {
-		// Block waiting for the first message.
-		msg, ok := <-c.outbound
-		if !ok {
-			_ = flush()
-			return
-		}
-		if msg.swapConn != nil {
-			if err := flush(); err != nil {
-				c.handleWriteError(err)
-				return
-			}
-			currentConn = msg.swapConn
-		} else {
-			pending = append(pending, msg.frame)
-		}
-
-		// Drain whatever else is queued without blocking. Bound the batch
-		// so a single writev doesn't hold the cipher state forever and we
-		// give the scheduler a chance to interleave.
-	drain:
-		for len(pending) < outboundQueueSize {
-			select {
-			case msg, ok := <-c.outbound:
-				if !ok {
-					_ = flush()
-					return
-				}
-				if msg.swapConn != nil {
-					if err := flush(); err != nil {
-						c.handleWriteError(err)
-						return
-					}
-					currentConn = msg.swapConn
-				} else {
-					pending = append(pending, msg.frame)
-				}
-			default:
-				break drain
-			}
-		}
-
-		if err := flush(); err != nil {
-			c.handleWriteError(err)
-			return
 		}
 	}
 }
@@ -906,31 +782,16 @@ func (c *ClientConnection) sendPlayPackets() error {
 	return nil
 }
 
-// safeWrite queues a packet for the writer goroutine. Returns immediately;
-// transport errors surface on the next call (after the writer notices and
-// closes the connection). If the queue is full, kicks the client — slow
-// consumers must not block the broadcaster.
+// safeWrite queues a packet on the connection (conn.Conn.Write). Returns
+// immediately; transport errors surface on the next call. If the queue is
+// full, kicks the client — slow consumers must not block the broadcaster.
 func (c *ClientConnection) safeWrite(packetID int32, payload []byte) error {
-	c.sendMu.Lock()
-	if c.isClosed() {
-		c.sendMu.Unlock()
-		return fmt.Errorf("connection closed")
-	}
-	frame, err := protocol.BuildFrame(packetID, payload, c.compressionThreshold)
-	if err != nil {
-		c.sendMu.Unlock()
-		return fmt.Errorf("build frame: %w", err)
-	}
-	select {
-	case c.outbound <- outboundMsg{frame: frame}:
-		c.sendMu.Unlock()
-		return nil
-	default:
-		c.sendMu.Unlock()
+	err := c.link.Write(packetID, payload)
+	if errors.Is(err, conn.ErrQueueFull) {
 		if c.server != nil {
 			c.server.queueFullKicks.Add(1)
 		}
 		go c.cleanup() // queue full — kick
-		return fmt.Errorf("send queue full")
 	}
+	return err
 }

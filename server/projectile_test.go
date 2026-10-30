@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"minecraft-server/player"
+	"minecraft-server/server/conn"
 	"minecraft-server/server/projectile"
 	"minecraft-server/world"
 )
@@ -54,8 +55,7 @@ func TestEnderPearlTeleportsThrower(t *testing.T) {
 		server:   s,
 		instance: inst,
 		player:   player.New(1, "Thrower", [16]byte{}),
-		outbound: make(chan outboundMsg, 16),
-		done:     make(chan struct{}),
+		link:     conn.NewQueued(16),
 	}
 	p := &projectileEntity{Flight: projectile.Flight{EID: 7, X: 1.5, Y: 70.5, Z: 0, VX: 1}, item: "minecraft:ender_pearl", thrower: thrower}
 	inst.projectiles = []*projectileEntity{p}

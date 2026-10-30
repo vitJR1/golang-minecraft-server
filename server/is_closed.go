@@ -1,7 +1,4 @@
 package server
 
-import "sync/atomic"
-
-func (c *ClientConnection) isClosed() bool {
-	return atomic.LoadInt32(&c.closed) == 1
-}
+// isClosed reports whether the connection is closing or closed.
+func (c *ClientConnection) isClosed() bool { return c.link != nil && c.link.Closed() }

@@ -2,7 +2,6 @@ package server
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math"
@@ -10,11 +9,13 @@ import (
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/botai"
+	"minecraft-server/server/chat"
 	"minecraft-server/server/chest"
 	"minecraft-server/server/combat"
 	"minecraft-server/server/fluid"
 	"minecraft-server/server/inventory"
 	"minecraft-server/server/itementity"
+	"minecraft-server/server/visibility"
 	"minecraft-server/world"
 	"sync"
 	"sync/atomic"
@@ -381,7 +382,7 @@ func (i *Instance) JoinAndAnnounce(c *ClientConnection) {
 	others := i.Players.snapshot()
 
 	// 1. Newcomer gets the full tab list (everyone in THIS instance).
-	if payload := playerInfoAddPayload(others); payload != nil {
+	if payload := visibility.InfoAddPayload(tabEntries(others)); payload != nil {
 		_ = c.safeWrite(packetid.CbPlayPlayerInfoUpdate, payload)
 	}
 
@@ -390,14 +391,14 @@ func (i *Instance) JoinAndAnnounce(c *ClientConnection) {
 		if other == c {
 			continue
 		}
-		_ = c.safeWrite(packetid.CbPlaySpawnPlayer, spawnPlayerPayload(other.player))
+		_ = c.safeWrite(packetid.CbPlaySpawnPlayer, visibility.SpawnPlayerPayload(other.player.Snapshot()))
 	}
 
 	c.sendOthersEquipment()
 
 	// 3. Everyone else in the instance learns about the newcomer.
-	addNewcomer := playerInfoAddPayload([]*ClientConnection{c})
-	spawnNewcomer := spawnPlayerPayload(c.player)
+	addNewcomer := visibility.InfoAddPayload(tabEntries([]*ClientConnection{c}))
+	spawnNewcomer := visibility.SpawnPlayerPayload(c.player.Snapshot())
 	i.Players.Broadcast(packetid.CbPlayPlayerInfoUpdate, addNewcomer, c.player.EntityID)
 	i.Players.Broadcast(packetid.CbPlaySpawnPlayer, spawnNewcomer, c.player.EntityID)
 	i.Players.Broadcast(packetid.CbPlaySetEquipment, c.equipmentPayload(), c.player.EntityID)
@@ -431,12 +432,12 @@ func (i *Instance) LeaveAndAnnounce(c *ClientConnection) {
 
 	i.Players.Broadcast(
 		packetid.CbPlayRemoveEntities,
-		removeEntitiesPayload([]int32{c.player.EntityID}),
+		visibility.RemoveEntitiesPayload([]int32{c.player.EntityID}),
 		c.player.EntityID,
 	)
 	i.Players.Broadcast(
 		packetid.CbPlayPlayerInfoRemove,
-		playerInfoRemovePayload([][16]byte{c.player.UUID}),
+		visibility.InfoRemovePayload([][16]byte{c.player.UUID}),
 		c.player.EntityID,
 	)
 	i.Players.Remove(c.player.EntityID)
@@ -476,19 +477,5 @@ func (i *Instance) SetBlock(p world.Position, b world.Block) {
 // BroadcastChat sends a chat line to every player in this instance. Format
 // is "<sender> message"; an empty sender renders as a plain server line.
 func (i *Instance) BroadcastChat(sender, message string) {
-	var line string
-	if sender == "" {
-		line = message
-	} else {
-		line = fmt.Sprintf("<%s> %s", sender, message)
-	}
-	i.Players.Broadcast(packetid.CbPlaySystemChat, buildSystemChatPayload(line), -1)
-}
-
-// buildSystemChatPayload assembles a System Chat (Cb 0x64) body: JSON chat
-// component string + overlay bool. encoding/json handles escaping so we
-// can pass arbitrary text without breaking the wire format.
-func buildSystemChatPayload(text string) []byte {
-	encoded, _ := json.Marshal(map[string]string{"text": text})
-	return append(protocol.WriteString(string(encoded)), 0)
+	i.Players.Broadcast(packetid.CbPlaySystemChat, chat.SystemPayload(chat.Line(sender, message)), -1)
 }

@@ -2,6 +2,7 @@ package server
 
 import (
 	"testing"
+	"time"
 
 	"minecraft-server/game"
 	"minecraft-server/player"
@@ -27,9 +28,12 @@ func TestBotMatchWatcher(t *testing.T) {
 	go func() { // the watcher's client reads everything (a whole map of chunks)
 		for {
 			select {
-			case <-op.outbound:
 			case <-stop:
 				return
+			default:
+			}
+			if _, ok := op.link.TakeFrame(); !ok {
+				time.Sleep(100 * time.Microsecond)
 			}
 		}
 	}()

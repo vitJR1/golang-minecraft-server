@@ -8,6 +8,7 @@ import (
 	"minecraft-server/server/combat"
 	"minecraft-server/server/itementity"
 	"minecraft-server/server/projectile"
+	"minecraft-server/server/visibility"
 	"minecraft-server/world"
 )
 
@@ -136,7 +137,7 @@ func (i *Instance) stepProjectiles() []*projectileEntity {
 				kept = append(kept, p)
 				continue
 			}
-			i.Players.Broadcast(packetid.CbPlayRemoveEntities, removeEntitiesPayload([]int32{p.EID}), -1)
+			i.Players.Broadcast(packetid.CbPlayRemoveEntities, visibility.RemoveEntitiesPayload([]int32{p.EID}), -1)
 			continue
 		}
 
@@ -155,7 +156,7 @@ func (i *Instance) stepProjectiles() []*projectileEntity {
 		if p.item == "minecraft:arrow" {
 			if v := i.arrowHitPlayer(p, nx, ny, nz); v != nil {
 				p.hitPlayer = v
-				i.Players.Broadcast(packetid.CbPlayRemoveEntities, removeEntitiesPayload([]int32{p.EID}), -1)
+				i.Players.Broadcast(packetid.CbPlayRemoveEntities, visibility.RemoveEntitiesPayload([]int32{p.EID}), -1)
 				landed = append(landed, p)
 				continue
 			}
@@ -185,7 +186,7 @@ func (i *Instance) stepProjectiles() []*projectileEntity {
 
 		// Impact (or expired, or stopped by the hook): despawn now, act
 		// after the lock is released.
-		i.Players.Broadcast(packetid.CbPlayRemoveEntities, removeEntitiesPayload([]int32{p.EID}), -1)
+		i.Players.Broadcast(packetid.CbPlayRemoveEntities, visibility.RemoveEntitiesPayload([]int32{p.EID}), -1)
 		landed = append(landed, p)
 	}
 	// Zero out the drained tail so removed projectiles can be GC'd.
@@ -215,7 +216,7 @@ func (i *Instance) collectArrow(p *projectileEntity, c *ClientConnection) bool {
 		return false
 	}
 	i.Players.Broadcast(packetid.CbPlayPickupItem, itementity.PickupPayload(p.EID, c.player.EntityID, 1), -1)
-	i.Players.Broadcast(packetid.CbPlayRemoveEntities, removeEntitiesPayload([]int32{p.EID}), -1)
+	i.Players.Broadcast(packetid.CbPlayRemoveEntities, visibility.RemoveEntitiesPayload([]int32{p.EID}), -1)
 	return true
 }
 

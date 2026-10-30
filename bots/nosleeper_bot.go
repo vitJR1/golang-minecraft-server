@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"minecraft-server/server"
+	"minecraft-server/server/chat"
 )
 
 // DefaultBadwordsPath is where NewNosleeperBot looks for the bad-words
@@ -89,19 +90,19 @@ func (b *NosleeperBot) LoadBadwords(path string) error {
 	return nil
 }
 
-func (b *NosleeperBot) Check(c *server.ClientConnection, message string) server.ChatVerdict {
+func (b *NosleeperBot) Check(c *server.ClientConnection, message string) chat.Verdict {
 	n := b.countBadwords(message)
 	switch {
 	case n == 0:
-		return server.ChatVerdict{Allow: true}
+		return chat.Verdict{Allow: true}
 	case n > CensorMax: // 4+ → жёсткий мьют
 		b.announceMute(c)
-		return server.ChatVerdict{
+		return chat.Verdict{
 			Allow:   false,
 			MuteFor: MuteDuration,
 		}
 	default: // 1..CensorMax → замена всего предложения
-		return server.ChatVerdict{
+		return chat.Verdict{
 			Allow:   true,
 			Rewrite: b.rewriteMessage(message),
 		}

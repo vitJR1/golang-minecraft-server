@@ -14,6 +14,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"net"
 	"time"
 )
 
@@ -38,7 +39,7 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 	// anything expensive (Mojang auth, ban-list lookup) so spammers
 	// get bounced fast.
 	if authStore != nil {
-		if until, allowed := authStore.CheckIPAllowed(c.conn.RemoteAddr()); !allowed {
+		if until, allowed := authStore.CheckIPAllowed(c.link.RemoteAddr()); !allowed {
 			slog.Info("auth: IP banned, rejecting",
 				"player", c.playerName, "until", until)
 			msg := []byte(`{"text":"IP banned (auth failures) until ` +
@@ -135,36 +136,11 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 // above this size go through zlib; smaller packets pass uncompressed.
 const CompressionThreshold = 256
 
-// enableCompression queues Set Compression (Cb 0x03) and flips the
-// connection's threshold under one critical section. Holding sendMu around
-// both the push and the threshold update means any concurrent safeWrite
-// either: (a) builds + pushes its frame with the old threshold *before*
-// Set Compression goes into the queue, or (b) builds + pushes with the new
-// threshold *after*. The queue is FIFO, so wire order matches build order.
+// enableCompression queues Set Compression (Cb 0x03) and switches the
+// connection to compressed framing (conn.Conn.EnableCompression: the switch
+// can't reorder frames).
 func (c *ClientConnection) enableCompression() error {
-	c.sendMu.Lock()
-	defer c.sendMu.Unlock()
-
-	if c.isClosed() {
-		return fmt.Errorf("connection closed")
-	}
-	// Built with the *current* threshold (CompressionDisabled), so this packet
-	// goes on the wire uncompressed — the client decodes it before switching.
-	frame, err := protocol.BuildFrame(
-		packetid.CbLoginSetCompr,
-		protocol.WriteVarInt32(CompressionThreshold),
-		c.compressionThreshold,
-	)
-	if err != nil {
-		return fmt.Errorf("build Set Compression: %w", err)
-	}
-	select {
-	case c.outbound <- outboundMsg{frame: frame}:
-	default:
-		return fmt.Errorf("send queue full")
-	}
-	c.compressionThreshold = CompressionThreshold
-	return nil
+	return c.link.EnableCompression(packetid.CbLoginSetCompr, protocol.WriteVarInt32(CompressionThreshold), CompressionThreshold)
 }
 
 // runOfflineLogin skips Mojang verification: derives a v3 UUID from the
@@ -281,7 +257,7 @@ func (c *ClientConnection) sendEncryptionRequest(verifyToken []byte) error {
 func (c *ClientConnection) recvAndVerifyEncryptionResponse(verifyToken []byte) ([]byte, error) {
 	// Encryption Response arrives before Set Compression, so this read is
 	// always uncompressed regardless of the connection's current threshold.
-	id, data, err := protocol.ReadPacketSplit(c.conn, protocol.CompressionDisabled)
+	id, data, err := c.link.ReadSplit()
 	if err != nil {
 		if c.isClosed() {
 			return nil, nil
@@ -323,25 +299,12 @@ func (c *ClientConnection) enableEncryption(sharedSecret []byte) error {
 	}
 	enc := encryption.NewCFB8Encrypt(block, sharedSecret)
 	dec := encryption.NewCFB8Decrypt(block, sharedSecret)
-	encrypted := encryption.WrapEncryptedConn(c.conn, enc, dec)
-
-	// Read side runs in this goroutine (readLoop calls down through
-	// handler_login), so swapping c.conn here is safe — the next ReadPacket
-	// call uses the wrapped conn.
-	c.conn = encrypted
-
-	// Write side runs in writerLoop. Sending the swap via the channel
-	// guarantees pending plaintext frames are flushed *before* the cipher
-	// state begins.
-	c.sendMu.Lock()
-	defer c.sendMu.Unlock()
-	if c.isClosed() {
-		return fmt.Errorf("connection closed")
-	}
-	select {
-	case c.outbound <- outboundMsg{swapConn: encrypted}:
-	default:
-		return fmt.Errorf("send queue full")
+	// The read side switches at once (this runs on the read loop), the
+	// write side once the plaintext frames queued before it are flushed.
+	if err := c.link.Encrypt(func(raw net.Conn) net.Conn {
+		return encryption.WrapEncryptedConn(raw, enc, dec)
+	}); err != nil {
+		return err
 	}
 	slog.Debug("encrypted connection established", "player", c.playerName)
 	return nil

@@ -12,6 +12,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/server/botai"
+	"minecraft-server/server/conn"
 )
 
 // bot.go: server-side players driven by an AI instead of a client (/bot).
@@ -71,23 +72,12 @@ func (s *Server) AddBot(inst *Instance, team string, diff botai.Difficulty) (*Cl
 	var uuid [16]byte
 	copy(uuid[:], uuidBytes)
 
-	c := &ClientConnection{
-		server:               s,
-		state:                StatePlay,
-		playerName:           name,
-		compressionThreshold: protocol.CompressionDisabled,
-		outbound:             make(chan outboundMsg, outboundQueueSize),
-		done:                 make(chan struct{}),
-		writerDone:           make(chan struct{}),
-	}
+	c := &ClientConnection{server: s, state: StatePlay, playerName: name}
+	c.link = conn.New(nil, nil)
+	c.link.Discard() // the "client": nothing reads what the server sends
 	c.authed.Store(true)
 	c.player = player.New(s.nextEntityID.Add(1), name, uuid)
 	c.bot = botai.New(botBody{c}, diff, rng)
-	go func() { // the "client": nothing reads what the server sends
-		for range c.outbound {
-		}
-		close(c.writerDone)
-	}()
 
 	sp := inst.SpawnPoint
 	c.player.MoveTo(sp.X, sp.Y, sp.Z, false)

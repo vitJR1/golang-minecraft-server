@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/visibility"
 )
 
 // resyncView wipes everything the client currently sees and rebuilds it from
@@ -54,14 +55,14 @@ func (c *ClientConnection) resyncView() error {
 	_ = c.sendWorldEntities()
 	// 5. Rebuild the tab list + the other players' entities for this client.
 	others := c.instance.Players.snapshot()
-	if payload := playerInfoAddPayload(others); payload != nil {
+	if payload := visibility.InfoAddPayload(tabEntries(others)); payload != nil {
 		_ = c.safeWrite(packetid.CbPlayPlayerInfoUpdate, payload)
 	}
 	for _, other := range others {
 		if other == c {
 			continue
 		}
-		_ = c.safeWrite(packetid.CbPlaySpawnPlayer, spawnPlayerPayload(other.player))
+		_ = c.safeWrite(packetid.CbPlaySpawnPlayer, visibility.SpawnPlayerPayload(other.player.Snapshot()))
 	}
 	c.sendOthersEquipment()
 	// 6. Make sure everyone else sees this player at the current position

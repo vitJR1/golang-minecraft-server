@@ -3,6 +3,7 @@ package server
 import (
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/hologram"
+	"minecraft-server/server/visibility"
 )
 
 // hologram.go keeps an instance's floating text (server/hologram) and
@@ -72,7 +73,7 @@ func (h *floatingText) Remove() {
 	}
 	i.holoMu.Unlock()
 	if found {
-		i.Players.Broadcast(packetid.CbPlayRemoveEntities, removeEntitiesPayload([]int32{h.EID}), -1)
+		i.Players.Broadcast(packetid.CbPlayRemoveEntities, visibility.RemoveEntitiesPayload([]int32{h.EID}), -1)
 	}
 }
 

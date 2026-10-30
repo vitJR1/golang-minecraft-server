@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/conn"
 	"testing"
 	"time"
 )
@@ -14,12 +15,12 @@ import (
 // tests) are mid-loop.
 func withKeepAliveTiming(t *testing.T, interval, timeout time.Duration) {
 	t.Helper()
-	origI, origT := KeepAliveInterval(), KeepAliveTimeout()
-	SetKeepAliveInterval(interval)
-	SetKeepAliveTimeout(timeout)
+	origI, origT := conn.KeepAliveInterval(), conn.KeepAliveTimeout()
+	conn.SetKeepAliveInterval(interval)
+	conn.SetKeepAliveTimeout(timeout)
 	t.Cleanup(func() {
-		SetKeepAliveInterval(origI)
-		SetKeepAliveTimeout(origT)
+		conn.SetKeepAliveInterval(origI)
+		conn.SetKeepAliveTimeout(origT)
 	})
 }
 
@@ -47,7 +48,7 @@ func TestKeepAliveKicksUnresponsiveClient(t *testing.T) {
 		}
 	}()
 	// Now the outstanding keep-alive (never echoed) ages past the ceiling.
-	SetKeepAliveTimeout(90 * time.Millisecond)
+	conn.SetKeepAliveTimeout(90 * time.Millisecond)
 
 	// Interval=30ms, timeout=90ms → first KA goes out at ~30ms, then on the
 	// next ticks it sees the pending ID > timeout and kicks. Allow generous
@@ -106,8 +107,8 @@ func TestKeepAliveAckKeepsClientAlive(t *testing.T) {
 	// it, then arm a timeout the echo round trip can't trip (it takes tens
 	// of milliseconds under the race detector). From here every keep-alive
 	// is answered by the drainer above.
-	findConn(t, s, "Healthy").keepAlivePendingID.Store(0)
-	SetKeepAliveTimeout(400 * time.Millisecond)
+	findConn(t, s, "Healthy").link.KeepAlive.Clear()
+	conn.SetKeepAliveTimeout(400 * time.Millisecond)
 
 	// Sit through ~7 intervals — if ack logic is broken (acks not clearing
 	// the pending id) the 400 ms timeout kicks the player before this.
@@ -118,20 +119,4 @@ func TestKeepAliveAckKeepsClientAlive(t *testing.T) {
 
 	_ = cli.conn.Close()
 	<-done
-}
-
-// TestKeepAliveStaleAckIgnored: an ack with the wrong ID must NOT clear
-// the pending state — otherwise a misbehaving client could keep itself
-// alive forever by spamming bogus IDs.
-func TestKeepAliveStaleAckIgnored(t *testing.T) {
-	c := &ClientConnection{}
-	c.keepAlivePendingID.Store(42)
-	c.onKeepAliveResponse(99) // wrong ID
-	if c.keepAlivePendingID.Load() != 42 {
-		t.Errorf("stale ack cleared pending: got %d, want 42", c.keepAlivePendingID.Load())
-	}
-	c.onKeepAliveResponse(42) // correct ID
-	if c.keepAlivePendingID.Load() != 0 {
-		t.Errorf("matching ack did not clear: got %d, want 0", c.keepAlivePendingID.Load())
-	}
 }

@@ -8,6 +8,7 @@ import (
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/chest"
+	"minecraft-server/server/conn"
 	"minecraft-server/server/enderchest"
 	"minecraft-server/server/inventory"
 	"minecraft-server/world"
@@ -147,8 +148,7 @@ func enderTestConn(s *Server, inst *Instance, name string, uuid [16]byte) *Clien
 		server:   s,
 		instance: inst,
 		player:   player.New(1, name, uuid),
-		outbound: make(chan outboundMsg, 64),
-		done:     make(chan struct{}),
+		link:     conn.NewQueued(64),
 	}
 }
 

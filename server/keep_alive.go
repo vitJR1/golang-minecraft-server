@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
-	"sync/atomic"
+	"minecraft-server/server/conn"
 	"time"
 )
 
@@ -15,75 +15,34 @@ import (
 //
 // Defaults match vanilla: 20s between sends, 30s ceiling before kicking
 // a non-responding client.
-var (
-	keepAliveIntervalNanos atomic.Int64
-	keepAliveTimeoutNanos  atomic.Int64
-)
-
-func init() {
-	keepAliveIntervalNanos.Store(int64(20 * time.Second))
-	keepAliveTimeoutNanos.Store(int64(30 * time.Second))
-}
-
-// KeepAliveInterval returns the current send cadence.
-func KeepAliveInterval() time.Duration {
-	return time.Duration(keepAliveIntervalNanos.Load())
-}
-
-// SetKeepAliveInterval changes the send cadence. New value takes effect on
-// the next tick of every running keepAlive goroutine.
-func SetKeepAliveInterval(d time.Duration) {
-	keepAliveIntervalNanos.Store(int64(d))
-}
-
-// KeepAliveTimeout returns the current ack ceiling.
-func KeepAliveTimeout() time.Duration {
-	return time.Duration(keepAliveTimeoutNanos.Load())
-}
-
-// SetKeepAliveTimeout changes the ack ceiling. New value takes effect
-// immediately for any client already waiting on a response.
-func SetKeepAliveTimeout(d time.Duration) {
-	keepAliveTimeoutNanos.Store(int64(d))
-}
-
 func (c *ClientConnection) keepAlive() {
-	// Use time.After per loop so live updates to KeepAliveInterval take
+	// Use time.After per loop so live updates to conn.KeepAliveInterval take
 	// effect on the next iteration. A fixed Ticker would lock the goroutine
 	// into the value it had at start time.
 	for {
 		select {
-		case <-c.done:
+		case <-c.link.Done():
 			return
-		case <-time.After(KeepAliveInterval()):
+		case <-time.After(conn.KeepAliveInterval()):
 		}
 
 		if c.state != StatePlay || c.isClosed() {
 			continue
 		}
 
-		// If a previous keep-alive is still outstanding, the client either
-		// lagged past KeepAliveTimeout (→ kick) or just hasn't replied
-		// within the current window (→ skip this tick and let it land
-		// before sending another).
-		if prevID := c.keepAlivePendingID.Load(); prevID != 0 {
-			sentNanos := c.keepAlivePendingSentNanos.Load()
-			age := time.Since(time.Unix(0, sentNanos))
-			if age > KeepAliveTimeout() {
-				slog.Warn("keep-alive timeout",
-					"player", c.playerName, "id", prevID, "age", age)
-				go c.cleanup()
-				return
-			}
+		// A previous keep-alive still outstanding: the client either lagged
+		// past the timeout (→ kick) or just hasn't replied within the
+		// current window (→ skip this tick and let it land first).
+		id, timedOut, age := c.link.KeepAlive.Next(time.Now())
+		if timedOut {
+			slog.Warn("keep-alive timeout",
+				"player", c.playerName, "id", c.link.KeepAlive.Pending(), "age", age)
+			go c.cleanup()
+			return
+		}
+		if id == 0 {
 			continue
 		}
-
-		id := time.Now().UnixNano()
-		// Stamp the pending state BEFORE the write hits the wire so a fast
-		// client can't reply before the handler sees a pending ID.
-		c.keepAlivePendingSentNanos.Store(id)
-		c.keepAlivePendingID.Store(id)
-
 		if err := c.safeWrite(packetid.CbPlayKeepAlive, protocol.WriteLong(id)); err != nil {
 			slog.Warn("keep-alive write failed", "player", c.playerName, "err", err)
 			return
@@ -96,5 +55,5 @@ func (c *ClientConnection) keepAlive() {
 // re-sends (a late reply means a timeout kick), so that's a forged echo — the
 // caller flags it, and the real outstanding ID stays put.
 func (c *ClientConnection) onKeepAliveResponse(id int64) bool {
-	return c.keepAlivePendingID.CompareAndSwap(id, 0)
+	return c.link.KeepAlive.Answer(id)
 }

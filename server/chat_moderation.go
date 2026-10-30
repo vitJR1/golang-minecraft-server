@@ -1,6 +1,9 @@
 package server
 
-import "time"
+import (
+	"minecraft-server/server/chat"
+	"time"
+)
 
 // ChatModerator is the interception point for a custom chat bot. The
 // server invokes Check on every Sb Chat Message that survived the mute
@@ -12,7 +15,7 @@ import "time"
 //
 // Implementations are called from the offending player's readLoop
 // goroutine — keep Check fast. Spawn a goroutine if you need to call
-// out to a slow classifier; in that case return ChatVerdict{Allow:true}
+// out to a slow classifier; in that case return chat.Verdict{Allow: true}
 // synchronously and apply punishment asynchronously via srv.Mutes / etc.
 //
 // The bot has full access to the Server through the methods it needs:
@@ -25,25 +28,7 @@ type ChatModerator interface {
 	// a cleaned-up version of the text, or Allow=false to drop the line
 	// entirely (the sender sees nothing back — emit a system message
 	// yourself if you want feedback).
-	Check(c *ClientConnection, message string) ChatVerdict
-}
-
-// ChatVerdict is the return value from ChatModerator.Check.
-//
-// Examples:
-//
-//	allow as-is:        ChatVerdict{Allow: true}
-//	rewrite (censor):   ChatVerdict{Allow: true, Rewrite: "****"}
-//	drop silently:      ChatVerdict{Allow: false}
-//	drop + auto-mute:   ChatVerdict{Allow: false, MuteFor: 5*time.Minute}
-//
-// MuteFor, if non-zero, makes the server install a mute on the sender of
-// that duration before returning. This is a convenience for the common
-// "second strike = mute" pattern.
-type ChatVerdict struct {
-	Allow   bool
-	Rewrite string
-	MuteFor time.Duration
+	Check(c *ClientConnection, message string) chat.Verdict
 }
 
 // applyChatModerator is the glue called from handler_play's chat path. If
@@ -59,11 +44,5 @@ func (s *Server) applyChatModerator(c *ClientConnection, message string) (string
 	if verdict.MuteFor > 0 {
 		s.Mutes.Mute(c.playerName, time.Now().Add(verdict.MuteFor))
 	}
-	if !verdict.Allow {
-		return "", false
-	}
-	if verdict.Rewrite != "" {
-		return verdict.Rewrite, true
-	}
-	return message, true
+	return verdict.Apply(message)
 }

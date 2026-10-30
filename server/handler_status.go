@@ -94,7 +94,7 @@ func promoOnlySample() []map[string]any {
 func (c *ClientConnection) handleStatus(packet *bytes.Buffer, packetID int) error {
 	switch packetID {
 	case packetid.SbStatusRequest:
-		slog.Debug("status request", "addr", c.conn.RemoteAddr().String())
+		slog.Debug("status request", "addr", c.link.RemoteAddr().String())
 		resp := map[string]any{
 			"version": map[string]any{
 				"name":     "1.20.1",
@@ -130,7 +130,7 @@ func (c *ClientConnection) handleStatus(packet *bytes.Buffer, packetID int) erro
 		return c.safeWrite(packetid.CbStatusResponse, protocol.WriteString(string(data)))
 
 	case packetid.SbStatusPing:
-		slog.Debug("status ping", "addr", c.conn.RemoteAddr().String())
+		slog.Debug("status ping", "addr", c.link.RemoteAddr().String())
 		payload := make([]byte, 8)
 		if _, err := packet.Read(payload); err != nil {
 			return fmt.Errorf("reading ping payload: %w", err)

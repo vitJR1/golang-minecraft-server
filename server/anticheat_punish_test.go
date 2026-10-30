@@ -235,7 +235,7 @@ func TestAcInfoListsRecords(t *testing.T) {
 	drain(admin)
 
 	s.RunCommand(admin, "ac info Shown")
-	if n := len(admin.outbound); n < 3 { // header + record + its reason
+	if n := admin.link.Queued(); n < 3 { // header + record + its reason
 		t.Fatalf("/ac info sent %d messages", n)
 	}
 }

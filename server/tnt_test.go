@@ -8,6 +8,7 @@ import (
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/combat"
+	"minecraft-server/server/conn"
 	"minecraft-server/server/explosion"
 	"minecraft-server/server/inventory"
 	"minecraft-server/server/sound"
@@ -33,10 +34,7 @@ func tntConn(inst *Instance, name string, mode player.Gamemode, x, y, z float64)
 		server:   inst.Server,
 		instance: inst,
 		player:   player.New(inst.Server.nextEntityID.Add(1), name, [16]byte{byte(len(name))}),
-		outbound: make(chan outboundMsg, 256),
-		done:     make(chan struct{}),
-		// Plain frames so the test can parse what was sent.
-		compressionThreshold: protocol.CompressionDisabled,
+		link:     conn.NewQueued(256), // plain frames (no compression) the test can parse
 	}
 	c.player.SetGamemode(mode)
 	c.player.MoveTo(x, y, z, true)
@@ -192,12 +190,12 @@ func TestTNTExplosionHurtsSurvivalNotCreative(t *testing.T) {
 func lastPacket(t *testing.T, c *ClientConnection, want int32) []byte {
 	t.Helper()
 	var got []byte
-	for len(c.outbound) > 0 {
-		msg := <-c.outbound
-		if len(msg.frame) == 0 {
-			continue
+	for {
+		frame, ok := c.link.TakeFrame()
+		if !ok {
+			break
 		}
-		buf := bytes.NewBuffer(msg.frame)
+		buf := bytes.NewBuffer(frame)
 		if _, err := protocol.ReadVarInt(buf); err != nil { // frame length
 			t.Fatal(err)
 		}
@@ -320,12 +318,12 @@ func TestExplosionBehindWoolWallWithArmor(t *testing.T) {
 	// Every packet queued for the player must frame-parse; the explosion
 	// body must round-trip its fields.
 	var explosions int
-	for len(c.outbound) > 0 {
-		msg := <-c.outbound
-		if len(msg.frame) == 0 {
-			continue
+	for {
+		frame, ok := c.link.TakeFrame()
+		if !ok {
+			break
 		}
-		buf := bytes.NewBuffer(msg.frame)
+		buf := bytes.NewBuffer(frame)
 		n, err := protocol.ReadVarInt(buf)
 		if err != nil || n != buf.Len() {
 			t.Fatalf("bad frame: len %d err %v body %d", n, err, buf.Len())

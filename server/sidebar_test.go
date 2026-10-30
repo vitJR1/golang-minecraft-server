@@ -21,12 +21,12 @@ type sentPacket struct {
 func drainPackets(t *testing.T, c *ClientConnection) []sentPacket {
 	t.Helper()
 	var out []sentPacket
-	for len(c.outbound) > 0 {
-		msg := <-c.outbound
-		if len(msg.frame) == 0 {
-			continue
+	for {
+		frame, ok := c.link.TakeFrame()
+		if !ok {
+			break
 		}
-		buf := bytes.NewBuffer(msg.frame)
+		buf := bytes.NewBuffer(frame)
 		if _, err := protocol.ReadVarInt(buf); err != nil {
 			t.Fatal(err)
 		}

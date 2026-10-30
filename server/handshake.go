@@ -40,10 +40,10 @@ func (c *ClientConnection) handleHandshake(packet *bytes.Buffer, packetID int) e
 	switch nextState {
 	case 1:
 		c.state = StateStatus
-		slog.Debug("state → status", "addr", c.conn.RemoteAddr().String())
+		slog.Debug("state → status", "addr", c.link.RemoteAddr().String())
 	case 2:
 		c.state = StateLogin
-		slog.Debug("state → login", "addr", c.conn.RemoteAddr().String())
+		slog.Debug("state → login", "addr", c.link.RemoteAddr().String())
 	default:
 		return fmt.Errorf("invalid handshake nextState: %d", nextState)
 	}

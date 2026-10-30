@@ -5,6 +5,7 @@ import (
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/inventory"
 	"minecraft-server/server/itementity"
+	"minecraft-server/server/visibility"
 	"minecraft-server/world"
 )
 
@@ -169,7 +170,7 @@ func (i *Instance) itemTick(uint64) {
 		}
 	}
 	if len(removed) > 0 {
-		out = append(out, outPkt{packetid.CbPlayRemoveEntities, removeEntitiesPayload(removed)})
+		out = append(out, outPkt{packetid.CbPlayRemoveEntities, visibility.RemoveEntitiesPayload(removed)})
 	}
 	i.itemsMu.Unlock()
 

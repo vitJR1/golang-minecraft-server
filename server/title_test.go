@@ -20,9 +20,12 @@ func TestSendTitleSendsTimesSubtitleThenTitle(t *testing.T) {
 	}
 	var ids []int32
 	var bodies [][]byte
-	for len(c.outbound) > 0 {
-		msg := <-c.outbound
-		buf := bytes.NewBuffer(msg.frame)
+	for {
+		frame, ok := c.link.TakeFrame()
+		if !ok {
+			break
+		}
+		buf := bytes.NewBuffer(frame)
 		_, _ = protocol.ReadVarInt(buf)
 		id, _ := protocol.ReadVarInt(buf)
 		ids = append(ids, int32(id))
@@ -56,8 +59,12 @@ func TestBroadcastTitleReachesEveryoneAndDefaultsTimes(t *testing.T) {
 	for _, c := range []*ClientConnection{a, b} {
 		// Read the queue once: lastPacket drains everything it scans.
 		got := map[int32][]byte{}
-		for len(c.outbound) > 0 {
-			buf := bytes.NewBuffer((<-c.outbound).frame)
+		for {
+			frame, ok := c.link.TakeFrame()
+			if !ok {
+				break
+			}
+			buf := bytes.NewBuffer(frame)
 			_, _ = protocol.ReadVarInt(buf)
 			id, _ := protocol.ReadVarInt(buf)
 			got[int32(id)] = buf.Bytes()

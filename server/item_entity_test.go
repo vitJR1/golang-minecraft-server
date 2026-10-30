@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"minecraft-server/player"
+	"minecraft-server/server/conn"
 	"minecraft-server/server/inventory"
 	"minecraft-server/server/itementity"
 	"minecraft-server/world"
@@ -16,8 +17,7 @@ func itemConn(s *Server, inst *Instance, eid int32, x, y, z float64) *ClientConn
 		server:   s,
 		instance: inst,
 		player:   player.New(eid, "P", [16]byte{}),
-		outbound: make(chan outboundMsg, 64),
-		done:     make(chan struct{}),
+		link:     conn.NewQueued(64),
 	}
 	c.player.MoveTo(x, y, z, true)
 	inst.Players.Add(c)

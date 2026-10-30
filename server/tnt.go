@@ -7,6 +7,7 @@ import (
 	"minecraft-server/server/combat"
 	"minecraft-server/server/explosion"
 	"minecraft-server/server/sound"
+	"minecraft-server/server/visibility"
 	"minecraft-server/world"
 )
 
@@ -114,7 +115,7 @@ func (i *Instance) tntTick(uint64) {
 	i.tntMu.Unlock()
 
 	if len(removed) > 0 {
-		i.Players.Broadcast(packetid.CbPlayRemoveEntities, removeEntitiesPayload(removed), -1)
+		i.Players.Broadcast(packetid.CbPlayRemoveEntities, visibility.RemoveEntitiesPayload(removed), -1)
 	}
 	for _, t := range exploding {
 		x, y, z := t.Centre()
