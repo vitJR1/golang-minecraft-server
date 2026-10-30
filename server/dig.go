@@ -102,7 +102,7 @@ func (c *ClientConnection) breakBlock(pos world.Position, harvest bool) {
 		return
 	}
 	c.instance.SetBlock(pos, world.Air)
-	if partner, ok := bedPartner(pos, blk); ok {
+	if partner, ok := world.BedPartner(pos, blk); ok {
 		c.instance.SetBlock(partner, world.Air)
 	}
 	if !harvest {
@@ -123,34 +123,6 @@ func (c *ClientConnection) breakBlock(pos world.Position, harvest bool) {
 		}
 		c.damageHeldTool(wear)
 	}
-}
-
-// bedPartner returns the other half of a bed block, derived from its state
-// (facing + part), and whether blk is a bed at all.
-func bedPartner(pos world.Position, blk world.Block) (world.Position, bool) {
-	base, isBed := bedFromItem(blk.Name)
-	if !isBed {
-		return pos, false
-	}
-	offset := blk.StateID - (base.StateID - bedDefaultOffset)
-	facing, part := offset/4, offset%4
-	var dx, dz int
-	switch facing {
-	case 0:
-		dz = -1 // north
-	case 1:
-		dz = 1 // south
-	case 2:
-		dx = -1 // west
-	case 3:
-		dx = 1 // east
-	default:
-		return pos, false
-	}
-	if part == bedHeadOffset || part == 0 { // head (occupied or not)
-		dx, dz = -dx, -dz
-	}
-	return world.Position{X: pos.X + dx, Y: pos.Y, Z: pos.Z + dz}, true
 }
 
 // gamemode is the player's current gamemode (Survival when unknown).

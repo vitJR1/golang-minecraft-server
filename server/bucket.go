@@ -1,6 +1,7 @@
 package server
 
 import (
+	"minecraft-server/anticheat"
 	"minecraft-server/player"
 	"minecraft-server/server/fluid"
 	"minecraft-server/server/inventory"
@@ -95,6 +96,6 @@ func (c *ClientConnection) swapHeld(item string) {
 // lookRay returns the eye position and the unit look vector.
 func (c *ClientConnection) lookRay() (ox, oy, oz, dx, dy, dz float64) {
 	s := c.player.Snapshot()
-	dx, dy, dz = fluid.LookDir(s.Yaw, s.Pitch)
-	return s.X, s.Y + eyeHeight, s.Z, dx, dy, dz
+	look := anticheat.LookDir(s.Yaw, s.Pitch)
+	return s.X, s.Y + eyeHeight, s.Z, look.X, look.Y, look.Z
 }

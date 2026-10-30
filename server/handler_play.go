@@ -302,7 +302,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		}
 
 		// Beds are two blocks (foot + head with a facing) — handled specially.
-		if bed, ok := bedFromItem(held); ok {
+		if bed, ok := world.BedFromItem(held); ok {
 			c.placeBed(placePos, bed)
 			break
 		}

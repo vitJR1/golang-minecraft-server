@@ -29,12 +29,6 @@ func BucketKind(item string) (*Kind, bool) {
 	return nil, false
 }
 
-// LookDir is the unit look vector of a yaw / pitch (degrees).
-func LookDir(yaw, pitch float32) (dx, dy, dz float64) {
-	y := float64(yaw) * math.Pi / 180
-	p := float64(pitch) * math.Pi / 180
-	return -math.Sin(y) * math.Cos(p), -math.Sin(p), math.Cos(y) * math.Cos(p)
-}
 
 // RayToPlacement walks the ray from (ox,oy,oz) along (dx,dy,dz) through air
 // and fluids until it meets a solid block, returning the last block position

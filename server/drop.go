@@ -1,7 +1,7 @@
 package server
 
 import (
-	"math"
+	"minecraft-server/anticheat"
 	"minecraft-server/server/inventory"
 	"time"
 )
@@ -62,11 +62,8 @@ func (c *ClientConnection) throwStack(st inventory.Stack) {
 		return
 	}
 	s := c.player.Snapshot()
-	yaw := float64(s.Yaw) * math.Pi / 180
-	pitch := float64(s.Pitch) * math.Pi / 180
-	vx := -math.Sin(yaw) * math.Cos(pitch) * dropSpeed
-	vz := math.Cos(yaw) * math.Cos(pitch) * dropSpeed
-	vy := -math.Sin(pitch)*dropSpeed + dropLift
+	look := anticheat.LookDir(s.Yaw, s.Pitch)
+	vx, vy, vz := look.X*dropSpeed, look.Y*dropSpeed+dropLift, look.Z*dropSpeed
 	c.instance.ThrowStack(st, s.X, s.Y+eyeHeight-0.3, s.Z, vx, vy, vz)
 }
 

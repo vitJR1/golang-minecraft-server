@@ -21,7 +21,7 @@ func TestBedFacing(t *testing.T) {
 		{270, 3, 1, 0},  // east
 	}
 	for _, tc := range cases {
-		idx, dx, dz := bedFacing(tc.yaw)
+		idx, dx, dz := world.BedFacing(tc.yaw)
 		if idx != tc.idx || dx != tc.dx || dz != tc.dz {
 			t.Errorf("yaw %v: got idx=%d (%d,%d), want idx=%d (%d,%d)",
 				tc.yaw, idx, dx, dz, tc.idx, tc.dx, tc.dz)
@@ -65,10 +65,10 @@ func TestPlaceBedTwoBlocks(t *testing.T) {
 }
 
 func TestBedFromItem(t *testing.T) {
-	if b, ok := bedFromItem("minecraft:red_bed"); !ok || b != world.RedBed {
+	if b, ok := world.BedFromItem("minecraft:red_bed"); !ok || b != world.RedBed {
 		t.Errorf("red_bed: %+v ok=%v", b, ok)
 	}
-	if _, ok := bedFromItem("minecraft:stone"); ok {
+	if _, ok := world.BedFromItem("minecraft:stone"); ok {
 		t.Error("stone is not a bed")
 	}
 }

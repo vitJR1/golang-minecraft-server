@@ -144,3 +144,11 @@ func SegmentHitsBox(ax, ay, az, bx, by, bz, minX, minY, minZ, maxX, maxY, maxZ f
 	}
 	return tmin, true
 }
+
+// LookDir is the unit look vector of a yaw / pitch in degrees (yaw 0 = +Z
+// south, pitch down = +).
+func LookDir(yaw, pitch float32) Vec {
+	y := float64(yaw) * math.Pi / 180
+	p := float64(pitch) * math.Pi / 180
+	return Vec{X: -math.Sin(y) * math.Cos(p), Y: -math.Sin(p), Z: math.Cos(y) * math.Cos(p)}
+}

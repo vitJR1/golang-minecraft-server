@@ -1,8 +1,7 @@
 package server
 
 import (
-	"math"
-
+	"minecraft-server/anticheat"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/combat"
 	"minecraft-server/world"
@@ -28,11 +27,7 @@ func (i *Instance) launchProjectile(thrower *ClientConnection, item string, spee
 		}
 	}
 	s := thrower.player.Snapshot()
-	yaw := float64(s.Yaw) * math.Pi / 180
-	pitch := float64(s.Pitch) * math.Pi / 180
-	dx := -math.Sin(yaw) * math.Cos(pitch)
-	dy := -math.Sin(pitch)
-	dz := math.Cos(yaw) * math.Cos(pitch)
+	look := anticheat.LookDir(s.Yaw, s.Pitch)
 
 	p := &projectile{
 		eid:      i.Server.nextEntityID.Add(1),
@@ -41,9 +36,9 @@ func (i *Instance) launchProjectile(thrower *ClientConnection, item string, spee
 		x:        s.X,
 		y:        s.Y + eyeHeight,
 		z:        s.Z,
-		vx:       dx * speed,
-		vy:       dy * speed,
-		vz:       dz * speed,
+		vx:       look.X * speed,
+		vy:       look.Y * speed,
+		vz:       look.Z * speed,
 		thrower:  thrower,
 		onTick:   onTick,
 		onImpact: onImpact,

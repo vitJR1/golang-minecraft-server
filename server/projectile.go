@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"math"
 
+	"minecraft-server/anticheat"
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
@@ -136,17 +137,12 @@ func (c *ClientConnection) launch(p *projectile, speed float64) bool {
 	}
 	s := c.player.Snapshot()
 
-	// Look direction (Minecraft yaw 0 = +Z south, pitch down = +).
-	yaw := float64(s.Yaw) * math.Pi / 180
-	pitch := float64(s.Pitch) * math.Pi / 180
-	dx := -math.Sin(yaw) * math.Cos(pitch)
-	dy := -math.Sin(pitch)
-	dz := math.Cos(yaw) * math.Cos(pitch)
+	look := anticheat.LookDir(s.Yaw, s.Pitch)
 
 	p.eid = c.server.nextEntityID.Add(1)
 	p.uuid = entityUUID(p.eid)
 	p.x, p.y, p.z = s.X, s.Y+eyeHeight-0.1, s.Z // vanilla: eye height − 0.1
-	p.vx, p.vy, p.vz = dx*speed, dy*speed, dz*speed
+	p.vx, p.vy, p.vz = look.X*speed, look.Y*speed, look.Z*speed
 	p.thrower = c
 
 	c.instance.projMu.Lock()
