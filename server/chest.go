@@ -1,9 +1,6 @@
 package server
 
 import (
-	"bytes"
-
-	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/chest"
 	"minecraft-server/server/enderchest"
@@ -50,14 +47,6 @@ func (c *ClientConnection) openChestStore(store chest.Store) {
 // chest slots from `slots`, then the player's real inventory (main + hotbar
 // mirror from c.inv), then the cursor.
 func (c *ClientConnection) sendChestInventory(slots [inventory.ChestSlots]inventory.Stack) error {
-	var buf bytes.Buffer
-	buf.WriteByte(menuWindowID)
-	protocol.WriteVarInt32ToBuffer(&buf, 0) // state id
-	protocol.WriteVarInt32ToBuffer(&buf, int32(inventory.ChestSlots+36))
-	for s := 0; s < inventory.ChestSlots; s++ {
-		inventory.WriteSlot(&buf, slots[s])
-	}
-	c.writeInventoryMirror(&buf)
-	inventory.WriteSlot(&buf, c.cursor)
-	return c.safeWrite(packetid.CbPlaySetContainerContent, buf.Bytes())
+	window := append(slots[:], c.inv.Mirror()...)
+	return c.safeWrite(packetid.CbPlaySetContainerContent, inventory.ContentsPayload(menuWindowID, window, c.cursor))
 }

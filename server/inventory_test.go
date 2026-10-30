@@ -229,7 +229,9 @@ func TestMenuWindowMirrorsRealInventory(t *testing.T) {
 	c.inv.Set(inventory.HotbarStart+4, inventory.Stack{ID: iron, Count: 9})
 
 	var buf bytes.Buffer
-	c.writeInventoryMirror(&buf)
+	for _, st := range c.inv.Mirror() {
+		inventory.WriteSlot(&buf, st)
+	}
 	// 36 wire slots: parse them back and check the two stacks are present
 	// at the expected positions (main index 2, hotbar index 4 → 27+4).
 	for i := 0; i < 36; i++ {

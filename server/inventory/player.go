@@ -76,3 +76,92 @@ var GiveOrder = func() []int16 {
 	}
 	return order
 }()
+
+// Mirror is the 36 player-inventory slots a container window shows below its
+// own (main 9..35, then the hotbar 36..44).
+func (p *Player) Mirror() []Stack {
+	return append([]Stack(nil), p.Slots[MainStart:HotbarStart+9]...)
+}
+
+// Give adds st (with all its display / enchantment data): first topping up
+// stacks of the same kind, then filling empty slots, both in GiveOrder
+// (hotbar first), up to MaxStackFor. It returns the units that did not fit
+// and the slots it changed.
+func (p *Player) Give(st Stack) (left int, changed []int16) {
+	if st.Empty() {
+		return 0, nil
+	}
+	remaining := int(st.Count)
+	limit := MaxStackFor(st.ID)
+	for pass := 0; pass < 2 && remaining > 0; pass++ {
+		for _, slot := range GiveOrder {
+			if remaining == 0 {
+				break
+			}
+			cur := p.Get(slot)
+			if pass == 0 {
+				if cur.Empty() || !cur.SameKind(st) || int(cur.Count) >= limit {
+					continue
+				}
+			} else {
+				if !cur.Empty() {
+					continue
+				}
+				cur = st
+				cur.Count = 0
+			}
+			add := min(limit-int(cur.Count), remaining)
+			cur.Count += byte(add)
+			remaining -= add
+			p.Set(slot, cur)
+			changed = append(changed, slot)
+		}
+	}
+	return remaining, changed
+}
+
+// Count sums the units of itemID across the main inventory + hotbar.
+func (p *Player) Count(itemID int32) int {
+	n := 0
+	for _, slot := range GiveOrder {
+		if st := p.Get(slot); !st.Empty() && st.ID == itemID {
+			n += int(st.Count)
+		}
+	}
+	return n
+}
+
+// Take removes count units of itemID, main inventory first so the hotbar
+// keeps its stacks longest. It removes nothing and returns false when there
+// are fewer than count; changed are the slots it emptied or shrank.
+func (p *Player) Take(itemID int32, count int) (ok bool, changed []int16) {
+	if count <= 0 {
+		return true, nil
+	}
+	if p.Count(itemID) < count {
+		return false, nil
+	}
+	remaining := count
+	for idx := len(GiveOrder) - 1; idx >= 0 && remaining > 0; idx-- {
+		slot := GiveOrder[idx]
+		st := p.Get(slot)
+		if st.Empty() || st.ID != itemID {
+			continue
+		}
+		take := min(int(st.Count), remaining)
+		p.Set(slot, WithCount(st, int(st.Count)-take))
+		remaining -= take
+		changed = append(changed, slot)
+	}
+	return true, changed
+}
+
+// TakeOne removes one unit from slot; false when the slot is empty.
+func (p *Player) TakeOne(slot int16) bool {
+	st := p.Get(slot)
+	if st.Empty() {
+		return false
+	}
+	p.Set(slot, WithCount(st, int(st.Count)-1))
+	return true
+}

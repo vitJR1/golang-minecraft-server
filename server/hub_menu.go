@@ -237,12 +237,7 @@ func giveArenaSelector(c *ClientConnection) {
 func giveHotbarItem(c *ClientConnection, slot int16, itemID int32, name string) {
 	st := inventory.Stack{ID: itemID, Count: 1, Name: name}
 	c.inv.Set(slot, st)
-	var buf bytes.Buffer
-	buf.WriteByte(0)                        // window id 0 = player inventory
-	protocol.WriteVarInt32ToBuffer(&buf, 0) // state id
-	buf.Write(protocol.WriteShort(slot))
-	inventory.WriteSlot(&buf, st)
-	if err := c.safeWrite(packetid.CbPlaySetContainerSlot, buf.Bytes()); err != nil {
+	if err := c.sendSetSlot(0, slot, st); err != nil {
 		slog.Warn("give hotbar item failed",
 			"player", c.playerName, "item", name, "err", err)
 	}
@@ -462,19 +457,13 @@ func (c *ClientConnection) sendOpenScreen(title string, rows int) error {
 func (c *ClientConnection) sendChestContents(rows int, entries map[int16]menuEntry) error {
 	chestSlots := int16(rows * 9)
 
-	var buf bytes.Buffer
-	buf.WriteByte(menuWindowID)
-	protocol.WriteVarInt32ToBuffer(&buf, 0) // state id
-	protocol.WriteVarInt32ToBuffer(&buf, int32(chestSlots+36))
+	window := make([]inventory.Stack, chestSlots, int(chestSlots)+36)
 	for s := int16(0); s < chestSlots; s++ {
 		if e, ok := entries[s]; ok {
-			inventory.WriteSlot(&buf, e.stack())
-		} else {
-			buf.Write(protocol.WriteEmptySlot())
+			window[s] = e.stack()
 		}
 	}
-	c.writeInventoryMirror(&buf)
-	buf.Write(protocol.WriteEmptySlot()) // carried item (cursor)
-
-	return c.safeWrite(packetid.CbPlaySetContainerContent, buf.Bytes())
+	window = append(window, c.inv.Mirror()...)
+	// No carried item: the menu's icons can't be picked up.
+	return c.safeWrite(packetid.CbPlaySetContainerContent, inventory.ContentsPayload(menuWindowID, window, inventory.Stack{}))
 }
