@@ -828,8 +828,8 @@ func TestPusherTowersAndDropsTNT(t *testing.T) {
 	if dropped == nil {
 		t.Fatalf("no TNT dropped; bot at %+v", b.bot.Pos())
 	}
-	if dropped.y < float64(target.Y)+2 || math.Abs(dropped.x-(float64(target.X)+0.5)) > 0.6 {
-		t.Fatalf("TNT at (%.1f, %.1f, %.1f), want on top of the cover over %v", dropped.x, dropped.y, dropped.z, target)
+	if dropped.Y < float64(target.Y)+2 || math.Abs(dropped.X-(float64(target.X)+0.5)) > 0.6 {
+		t.Fatalf("TNT at (%.1f, %.1f, %.1f), want on top of the cover over %v", dropped.X, dropped.Y, dropped.Z, target)
 	}
 	if maxFeet < float64(target.Y)+2 {
 		t.Fatalf("didn't tower up (feet reached %.2f)", maxFeet)

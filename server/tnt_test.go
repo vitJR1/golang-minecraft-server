@@ -8,6 +8,7 @@ import (
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/combat"
+	"minecraft-server/server/explosion"
 	"minecraft-server/server/inventory"
 	"minecraft-server/server/sound"
 	"minecraft-server/world"
@@ -48,16 +49,16 @@ func TestPrimeTNTReplacesBlockWithEntity(t *testing.T) {
 	pos := world.Position{X: 0, Y: 64, Z: 0}
 	inst.World.SetBlock(pos, world.TNT)
 
-	if !inst.primeTNT(pos, tntFuseTicks, nil) {
+	if !inst.primeTNT(pos, explosion.FuseTicks, nil) {
 		t.Fatal("primeTNT should accept a TNT block")
 	}
 	if inst.World.GetBlock(pos) != world.Air {
 		t.Error("primed TNT block should be removed")
 	}
-	if len(inst.tnts) != 1 || inst.tnts[0].fuse != tntFuseTicks {
+	if len(inst.tnts) != 1 || inst.tnts[0].Fuse != explosion.FuseTicks {
 		t.Fatalf("tnts = %+v", inst.tnts)
 	}
-	if tt := inst.tnts[0]; tt.x != 0.5 || tt.z != 0.5 || tt.y != 64 || tt.vy != 0.2 {
+	if tt := inst.tnts[0]; tt.X != 0.5 || tt.Z != 0.5 || tt.Y != 64 || tt.VY != 0.2 {
 		t.Errorf("spawn pose: %+v", tt)
 	}
 	// Not TNT → refused.
@@ -68,16 +69,16 @@ func TestPrimeTNTReplacesBlockWithEntity(t *testing.T) {
 
 func TestTNTFallsAndRestsOnGround(t *testing.T) {
 	inst := bareInstance(New(), tntWorld())
-	tt := &primedTNT{x: 0.5, y: 68, z: 0.5, fuse: 1000}
+	tt := &primedTNT{TNT: explosion.TNT{X: 0.5, Y: 68, Z: 0.5, Fuse: 1000}}
 	inst.tnts = []*primedTNT{tt}
 	for n := 0; n < 60; n++ {
 		inst.tntTick(uint64(n))
 	}
-	if !tt.onGround || tt.y != 64 {
+	if !tt.OnGround || tt.Y != 64 {
 		t.Errorf("TNT should rest on the stone floor at y=64: %+v", tt)
 	}
-	if tt.fuse != 1000-60 {
-		t.Errorf("fuse should count down: %d", tt.fuse)
+	if tt.Fuse != 1000-60 {
+		t.Errorf("fuse should count down: %d", tt.Fuse)
 	}
 }
 
@@ -93,7 +94,7 @@ func TestTNTExplosionBreaksBlocksButNotObsidian(t *testing.T) {
 	inst.World.SetBlock(bedrock, world.Bedrock)
 	inst.World.SetBlock(farStone, world.Stone)
 
-	inst.tnts = []*primedTNT{{x: 0.5, y: 64, z: 0.5, fuse: 1, onGround: true}}
+	inst.tnts = []*primedTNT{{TNT: explosion.TNT{X: 0.5, Y: 64, Z: 0.5, Fuse: 1, OnGround: true}}}
 	inst.tntTick(1)
 
 	if len(inst.tnts) != 0 {
@@ -121,7 +122,7 @@ func TestTNTChainReaction(t *testing.T) {
 	second := world.Position{X: 2, Y: 64, Z: 0}
 	inst.World.SetBlock(second, world.TNT)
 
-	inst.tnts = []*primedTNT{{x: 0.5, y: 64, z: 0.5, fuse: 1, onGround: true}}
+	inst.tnts = []*primedTNT{{TNT: explosion.TNT{X: 0.5, Y: 64, Z: 0.5, Fuse: 1, OnGround: true}}}
 	inst.tntTick(1)
 
 	if inst.World.GetBlock(second) != world.Air {
@@ -130,7 +131,7 @@ func TestTNTChainReaction(t *testing.T) {
 	if len(inst.tnts) != 1 {
 		t.Fatalf("second TNT should be primed, tnts = %+v", inst.tnts)
 	}
-	if f := inst.tnts[0].fuse; f < tntFuseTicks/8 || f >= tntFuseTicks/8+tntFuseTicks/4 {
+	if f := inst.tnts[0].Fuse; f < explosion.FuseTicks/8 || f >= explosion.FuseTicks/8+explosion.FuseTicks/4 {
 		t.Errorf("chain fuse %d outside vanilla 10..29", f)
 	}
 }
@@ -278,19 +279,6 @@ func TestFlintAndSteelIgnitesTNT(t *testing.T) {
 	inst.World.SetBlock(pos, world.TNT)
 	if c.tryIgniteTNT(pos, "minecraft:stone") {
 		t.Error("stone in hand must not ignite TNT")
-	}
-}
-
-func TestExplosionRecordsAreRelativeOffsets(t *testing.T) {
-	recs := explosionRecords(0.5, 64.06, 0.5, []world.Position{{X: 1, Y: 64, Z: 0}, {X: -3, Y: 63, Z: 2}})
-	want := []explosionRecord{{1, 0, 0}, {-3, -1, 2}}
-	if len(recs) != len(want) {
-		t.Fatalf("records = %v", recs)
-	}
-	for i := range want {
-		if recs[i] != want[i] {
-			t.Errorf("record %d = %v, want %v", i, recs[i], want[i])
-		}
 	}
 }
 
