@@ -1,9 +1,7 @@
 package server
 
 import (
-	"bytes"
 	"minecraft-server/player"
-	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/combat"
 	"minecraft-server/server/fluid"
@@ -122,17 +120,6 @@ func (c *ClientConnection) extinguish() {
 // the other flag bits, see entityFlags) for everyone in the instance.
 func (c *ClientConnection) broadcastOnFire(bool) { c.broadcastEntityFlags() }
 
-// entityFlagsPayload builds Set Entity Metadata with just the index-0 byte
-// (on fire / sneaking / sprinting / … bitmask).
-func entityFlagsPayload(eid int32, flags byte) []byte {
-	var buf bytes.Buffer
-	protocol.WriteVarInt32ToBuffer(&buf, eid)
-	buf.WriteByte(0)                        // index 0: entity flags
-	protocol.WriteVarInt32ToBuffer(&buf, 0) // type: Byte
-	buf.WriteByte(flags)
-	buf.WriteByte(0xFF)
-	return buf.Bytes()
-}
 
 // hurtEnvironment applies non-player damage with its own invulnerability
 // window: red flash + hurt sound for everyone, then health sync or death.

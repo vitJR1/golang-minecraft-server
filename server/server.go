@@ -20,6 +20,7 @@ import (
 	"minecraft-server/server/enderchest"
 	"minecraft-server/server/inventory"
 	"minecraft-server/server/moderation"
+	"minecraft-server/server/scoreboard"
 	"minecraft-server/store"
 	"minecraft-server/templates"
 	"minecraft-server/world"
@@ -674,10 +675,10 @@ type ClientConnection struct {
 	// sidebar is the scoreboard sidebar this client shows (nil = none);
 	// sidebarMu guards it. See sidebar.go.
 	sidebarMu sidebarMutex
-	sidebar   *sidebarState
+	sidebar   *scoreboard.Sidebar
 	// nameTags are the name-tag groups the client has (name_tags.go),
 	// under sidebarMu.
-	nameTags map[string]shownTag
+	nameTags scoreboard.Tags
 
 	// watch: the instance this player only watches (spectate.go).
 	watch watchState

@@ -470,3 +470,15 @@ func (c *ClientConnection) damageHeldTool(n int) {
 // unbreakingSpares rolls the Unbreaking chance: a level-lvl item skips
 // lvl/(lvl+1) of its wear.
 func unbreakingSpares(lvl int) bool { return rand.Intn(lvl+1) > 0 }
+
+// entityFlagsPayload builds Set Entity Metadata with just the index-0 byte
+// (on fire / sneaking / sprinting / … bitmask).
+func entityFlagsPayload(eid int32, flags byte) []byte {
+	var buf bytes.Buffer
+	protocol.WriteVarInt32ToBuffer(&buf, eid)
+	buf.WriteByte(0)                        // index 0: entity flags
+	protocol.WriteVarInt32ToBuffer(&buf, 0) // type: Byte
+	buf.WriteByte(flags)
+	buf.WriteByte(0xFF)
+	return buf.Bytes()
+}

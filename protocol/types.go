@@ -6,6 +6,7 @@ package protocol
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -344,4 +345,12 @@ func ReadBool(buf *bytes.Buffer) (bool, error) {
 func VelocityShort(v float64) int16 {
 	s := min(math.MaxInt16, max(math.MinInt16, math.Round(v*8000)))
 	return int16(s)
+}
+
+// TextComponent encodes a plain-text chat component ({"text": …}) as a
+// protocol String: titles, scoreboard names and prefixes, custom names.
+// Legacy § colour codes inside the text render as-is on 1.20.1.
+func TextComponent(text string) []byte {
+	encoded, _ := json.Marshal(map[string]string{"text": text})
+	return WriteString(string(encoded))
 }
