@@ -1,11 +1,10 @@
 package server
 
 import (
-	"bytes"
 	"math"
 
-	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/effect"
 )
 
 // absorption.go: the Absorption effect's yellow hearts. The pool lives on
@@ -16,23 +15,13 @@ import (
 // own client as well as to everyone else (it shows in their HUD only, but
 // keeping all clients in step is free).
 
-// absorptionPerLevel is the pool each Absorption level grants (4 = two hearts).
-const absorptionPerLevel float32 = 4
-
-// playerMetaAbsorption is the Player metadata index of "Additional Hearts".
-const playerMetaAbsorption byte = 15
-
 // grantAbsorption tops the pool up to the level's size (never shrinks an
 // existing larger pool) and syncs it.
 func (c *ClientConnection) grantAbsorption(level int) {
 	if c.player == nil || level < 1 {
 		return
 	}
-	pool := absorptionPerLevel * float32(level)
-	if cur := c.player.Absorption(); cur > pool {
-		pool = cur
-	}
-	c.player.SetAbsorption(pool)
+	c.player.SetAbsorption(effect.AbsorptionPool(level, c.player.Absorption()))
 	c.syncAbsorption(false)
 }
 
@@ -50,22 +39,10 @@ func (c *ClientConnection) syncAbsorption(force bool) {
 		return
 	}
 	c.sentAbsorption.Store(bits)
-	payload := absorptionMetadataPayload(c.player.EntityID, cur)
+	payload := effect.AbsorptionPayload(c.player.EntityID, cur)
 	if c.instance != nil {
 		c.instance.Players.Broadcast(packetid.CbPlaySetEntityMetadata, payload, -1)
 	} else {
 		_ = c.safeWrite(packetid.CbPlaySetEntityMetadata, payload)
 	}
-}
-
-// absorptionMetadataPayload builds Set Entity Metadata with the single
-// Player field index 15 (type 3 = Float) = absorption.
-func absorptionMetadataPayload(eid int32, absorption float32) []byte {
-	var buf bytes.Buffer
-	protocol.WriteVarInt32ToBuffer(&buf, eid)
-	buf.WriteByte(playerMetaAbsorption)
-	protocol.WriteVarInt32ToBuffer(&buf, 3) // type: Float
-	buf.Write(protocol.WriteFloat(absorption))
-	buf.WriteByte(0xFF)
-	return buf.Bytes()
 }

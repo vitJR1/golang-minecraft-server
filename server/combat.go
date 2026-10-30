@@ -5,6 +5,8 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/combat"
+	"minecraft-server/server/effect"
+	"minecraft-server/server/enchant"
 	"minecraft-server/server/sound"
 	"minecraft-server/world"
 )
@@ -50,7 +52,7 @@ func (c *ClientConnection) handleAttack(victim *ClientConnection) {
 	base := cfg.BaseDamage
 	if c.instance.WeaponDamage() {
 		base = world.AttackDamage(c.heldItemName())
-		if lvl := c.heldEnchant(EnchantSharpness); lvl > 0 {
+		if lvl := c.heldEnchant(enchant.Sharpness); lvl > 0 {
 			base += 0.5*float32(lvl) + 0.5
 		}
 	}
@@ -118,7 +120,7 @@ func (c *ClientConnection) applyKnockback(cfg combat.Config, aSnap, vSnap player
 		// a client that keeps its sprint flag up (KeepSprint) gains nothing.
 		c.ac.Sprinting.Store(false)
 	}
-	strength += 0.5 * float32(c.heldEnchant(EnchantKnockback)) // knockback stick
+	strength += 0.5 * float32(c.heldEnchant(enchant.Knockback)) // knockback stick
 	vx, vz := combat.KnockbackHoriz(aSnap.X, aSnap.Z, vSnap.X, vSnap.Z, strength)
 	c.instance.Players.Broadcast(packetid.CbPlayEntityVelocity,
 		combat.EntityVelocityPayload(vSnap.EntityID, vx, float64(cfg.VerticalKnockback), vz), -1)
@@ -130,7 +132,7 @@ func (c *ClientConnection) applyKnockback(cfg combat.Config, aSnap, vSnap player
 // is going on — sneaking, Blindness, eating or drawing a bow.
 func (c *ClientConnection) sprintHit() bool {
 	return c.ac.Sprinting.Load() && !c.ac.Sneaking.Load() &&
-		c.effectLevel(EffectBlindness) == 0 && c.using.Load() == nil
+		c.effectLevel(effect.Blindness) == 0 && c.using.Load() == nil
 }
 
 // die resolves a lethal blow on c. killer may be nil (environmental death).

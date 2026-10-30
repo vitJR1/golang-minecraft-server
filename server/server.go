@@ -17,6 +17,7 @@ import (
 	"minecraft-server/redisc"
 	"minecraft-server/server/botai"
 	"minecraft-server/server/connlimit"
+	"minecraft-server/server/enchant"
 	"minecraft-server/server/enderchest"
 	"minecraft-server/server/inventory"
 	"minecraft-server/server/moderation"
@@ -122,7 +123,7 @@ type Server struct {
 	// Enchantments / Effects supply dig and durability modifiers
 	// (modifiers.go). Defaults read item NBT and the /effect table; swap for
 	// a richer implementation.
-	Enchantments Enchantments
+	Enchantments enchant.Source
 	Effects      Effects
 	effects      *effectTable
 
@@ -179,7 +180,7 @@ func New() *Server {
 		startTime:    time.Now(),
 	}
 	s.effects = newEffectTable()
-	s.Enchantments = nbtEnchantments{}
+	s.Enchantments = enchant.NBT{}
 	s.Effects = s.effects
 	s.Hub = NewInstance("hub", s, world.NewMemoryWorld())
 	// The hub is a safe lobby — no PvP. Game instances keep the default

@@ -6,6 +6,8 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/consume"
+	"minecraft-server/server/effect"
 	"minecraft-server/server/inventory"
 	"minecraft-server/server/projectile"
 	"minecraft-server/world"
@@ -20,20 +22,20 @@ func TestGoldenAppleEffectsAfterEating(t *testing.T) {
 	inst.tickCount.Store(100)
 
 	c.startUse("minecraft:golden_apple")
-	for tick := uint64(101); tick < 100+consumeTicks; tick++ {
+	for tick := uint64(101); tick < 100+consume.Ticks; tick++ {
 		inst.consumeTick(tick)
 	}
 	if c.player.Health() != 10 {
 		t.Fatal("nothing should happen before the eat time is up")
 	}
-	inst.consumeTick(100 + consumeTicks)
+	inst.consumeTick(100 + consume.Ticks)
 	if h := c.player.Health(); h != 10 {
 		t.Errorf("health right after the apple: %v, want 10 (vanilla heals via Regeneration, not directly)", h)
 	}
-	if c.effectLevel(EffectRegeneration) != 2 {
+	if c.effectLevel(effect.Regeneration) != 2 {
 		t.Error("golden apple should grant Regeneration II")
 	}
-	if c.effectLevel(EffectAbsorption) != 1 {
+	if c.effectLevel(effect.Absorption) != 1 {
 		t.Error("golden apple should grant Absorption I")
 	}
 	if a := c.player.Absorption(); a != 4 {
@@ -55,7 +57,7 @@ func TestEatingCancelledBySlotChange(t *testing.T) {
 	c.inv.Set(inventory.HotbarStart, inventory.Stack{ID: apple, Count: 1})
 	c.startUse("minecraft:golden_apple")
 	c.heldSlot.Store(3)
-	for tick := uint64(1); tick <= consumeTicks+5; tick++ {
+	for tick := uint64(1); tick <= consume.Ticks+5; tick++ {
 		inst.consumeTick(tick)
 	}
 	if c.player.Health() != 10 || c.inv.Get(inventory.HotbarStart).Count != 1 {
@@ -69,15 +71,15 @@ func TestPotionAppliesEffectAndLeavesBottle(t *testing.T) {
 	potion, _ := world.ItemByName("minecraft:potion")
 	c.inv.Set(inventory.HotbarStart, inventory.Stack{ID: potion, Count: 1, Potion: "minecraft:strong_swiftness"})
 	c.startUse("minecraft:potion")
-	inst.consumeTick(consumeTicks)
-	if c.effectLevel(EffectSpeed) != 2 {
-		t.Errorf("strong swiftness should give Speed II, got %d", c.effectLevel(EffectSpeed))
+	inst.consumeTick(consume.Ticks)
+	if c.effectLevel(effect.Speed) != 2 {
+		t.Errorf("strong swiftness should give Speed II, got %d", c.effectLevel(effect.Speed))
 	}
 	bottle, _ := world.ItemByName("minecraft:glass_bottle")
 	if st := c.inv.Get(inventory.HotbarStart); st.ID != bottle {
 		t.Errorf("drinking should leave a glass bottle, got %+v", st)
 	}
-	if _, _, d, ok := potionEffect("minecraft:invisibility"); !ok || d != 3*time.Minute {
+	if _, _, d, ok := effect.FromPotion("minecraft:invisibility"); !ok || d != 3*time.Minute {
 		t.Error("invisibility potion mapping")
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/consume"
 	"minecraft-server/server/enderchest"
 	"minecraft-server/server/inventory"
 	"minecraft-server/server/projectile"
@@ -571,7 +572,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 				break
 			}
 			switch {
-			case isConsumable(name):
+			case consume.Consumable(name):
 				// Eating/drinking takes time: the consume tick finishes it.
 				c.startUse(name)
 			case name == "minecraft:bow":

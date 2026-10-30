@@ -2,47 +2,24 @@ package server
 
 import (
 	"bytes"
-	"math/rand"
-	"sort"
-	"sync"
 	"time"
 
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/attributes"
+	"minecraft-server/server/effect"
+	"minecraft-server/server/enchant"
 	"minecraft-server/server/inventory"
 	"minecraft-server/server/sound"
 	"minecraft-server/world"
 )
 
-// modifiers.go: the pluggable sources of dig/durability modifiers, with one
-// simple implementation each —
-//
-//   - Enchantments reads a tool's levels. The shipped nbtEnchantments takes
-//     them from the item's own NBT ("Enchantments" list), which is what a
-//     creative-given or /give'd enchanted item carries. Efficiency speeds
-//     digging up, Unbreaking spares durability, Aqua Affinity (helmet)
-//     cancels the underwater penalty.
-//   - Effects reads a player's potion effects. The shipped effectTable keeps
-//     timed effects per connection, granted by /effect and shown on the
-//     client through Entity Effect packets. Haste and Mining Fatigue feed
-//     the dig formula.
-//
-// Swap either on the Server (Server.Enchantments / Server.Effects) for a
-// richer implementation; the dig code only talks to the interfaces.
-
-// Enchantment ids this server understands.
-const (
-	EnchantEfficiency   = "minecraft:efficiency"
-	EnchantUnbreaking   = "minecraft:unbreaking"
-	EnchantAquaAffinity = "minecraft:aqua_affinity"
-	EnchantSharpness    = "minecraft:sharpness"
-	EnchantProtection   = "minecraft:protection"
-	EnchantKnockback    = "minecraft:knockback"
-	EnchantPower        = "minecraft:power"
-	EnchantPunch        = "minecraft:punch"
-	EnchantInfinity     = "minecraft:infinity"
-)
+// modifiers.go: the pluggable sources of dig / durability / combat
+// modifiers — enchantments (server/enchant: Server.Enchantments, default
+// enchant.NBT) and potion effects (server/effect: Server.Effects, default
+// effectTable, timed effects per connection granted by /effect and games and
+// shown through Entity Effect packets) — and what effects do to a player.
 
 // enchantOf returns the level of enchantment on st via the server's
 // Enchantments source (0 without a server).
@@ -58,209 +35,66 @@ func (c *ClientConnection) heldEnchant(enchantment string) int {
 	return c.enchantOf(c.inv.Held(c.heldSlot.Load()), enchantment)
 }
 
-// Enchantments answers "what level of enchantment e does this stack have".
-type Enchantments interface {
-	Level(st inventory.Stack, enchantment string) int
-}
-
-// nbtEnchantments is the default Enchantments: levels parsed from item NBT.
-type nbtEnchantments struct{}
-
-func (nbtEnchantments) Level(st inventory.Stack, enchantment string) int {
-	return st.EnchantLevel(enchantment)
-}
-
-// Effect is a potion effect id with its vanilla numeric registry id (the
-// Entity Effect packet wants the number).
-type Effect struct {
-	Name string
-	ID   int32
-}
-
-var (
-	EffectSpeed         = Effect{"speed", 1}
-	EffectSlowness      = Effect{"slowness", 2}
-	EffectHaste         = Effect{"haste", 3}
-	EffectMiningFatigue = Effect{"mining_fatigue", 4}
-	EffectJumpBoost     = Effect{"jump_boost", 8}
-	EffectRegeneration  = Effect{"regeneration", 10}
-	EffectInvisibility  = Effect{"invisibility", 14}
-	EffectBlindness     = Effect{"blindness", 15}
-	EffectAbsorption    = Effect{"absorption", 22}
-
-	// knownEffects is what /effect and games can grant. Jump boost /
-	// blindness are applied by the client itself once it has the Entity
-	// Effect packet; speed / slowness need the movement_speed attribute
-	// synced as well (attributes.go); haste / mining fatigue feed the dig
-	// formula, regeneration heals on effectsTick, invisibility flips the
-	// entity flag, absorption fills the player's yellow-heart pool (4 HP
-	// per level, synced through player metadata — see absorption.go).
-	knownEffects = map[string]Effect{
-		EffectSpeed.Name:         EffectSpeed,
-		EffectSlowness.Name:      EffectSlowness,
-		EffectHaste.Name:         EffectHaste,
-		EffectMiningFatigue.Name: EffectMiningFatigue,
-		EffectJumpBoost.Name:     EffectJumpBoost,
-		EffectRegeneration.Name:  EffectRegeneration,
-		EffectInvisibility.Name:  EffectInvisibility,
-		EffectBlindness.Name:     EffectBlindness,
-		EffectAbsorption.Name:    EffectAbsorption,
-	}
-)
-
-// effectNames lists the known effect names, sorted — for /effect help and
-// tab-completion.
-func effectNames() []string {
-	names := make([]string, 0, len(knownEffects))
-	for n := range knownEffects {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	return names
-}
-
-// ActiveEffect is one effect currently on a player, as games see it.
-type ActiveEffect struct {
-	Effect    Effect
-	Level     int // amplifier+1
-	Remaining time.Duration
-}
-
-// Effects answers "what amplifier+1 of effect does this player have now"
+// Effects answers "what amplifier+1 of e does this player have now"
 // (0 = none, 1 = level I, …).
 type Effects interface {
-	Level(c *ClientConnection, effect Effect) int
+	Level(c *ClientConnection, e effect.Effect) int
 }
 
-// activeEffect is one timed effect on a player.
-type activeEffect struct {
-	level   int // amplifier+1
-	expires time.Time
-}
-
-// effectTable is the default Effects: a per-connection map of timed
-// effects. Expired entries read as 0 and are dropped lazily.
+// effectTable is the default Effects: the per-connection timed effects
+// (effect.Table) and what granting / ending them shows the player.
 type effectTable struct {
-	mu      sync.Mutex
-	players map[*ClientConnection]map[string]activeEffect
+	effect.Table[*ClientConnection]
 }
 
-func newEffectTable() *effectTable {
-	return &effectTable{players: map[*ClientConnection]map[string]activeEffect{}}
-}
+func newEffectTable() *effectTable { return &effectTable{} }
 
-func (t *effectTable) Level(c *ClientConnection, effect Effect) int {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	ae, ok := t.players[c][effect.Name]
-	if !ok {
-		return 0
-	}
-	if time.Now().After(ae.expires) {
-		delete(t.players[c], effect.Name)
-		return 0
-	}
-	return ae.level
-}
-
-// apply grants effect at level (amplifier+1) for d, telling the client.
-func (t *effectTable) apply(c *ClientConnection, effect Effect, level int, d time.Duration) {
-	t.mu.Lock()
-	if t.players[c] == nil {
-		t.players[c] = map[string]activeEffect{}
-	}
-	t.players[c][effect.Name] = activeEffect{level: level, expires: time.Now().Add(d)}
-	t.mu.Unlock()
+// apply grants e at level (amplifier+1) for d, telling the client.
+func (t *effectTable) apply(c *ClientConnection, e effect.Effect, level int, d time.Duration) {
+	t.Apply(c, e, level, d)
 	if c.player != nil {
-		_ = c.safeWrite(packetid.CbPlayEntityEffect, entityEffectPayload(c.player.EntityID, effect, level, d))
+		_ = c.safeWrite(packetid.CbPlayEntityEffect, effect.EntityPayload(c.player.EntityID, e, level, d))
 	}
-	if effect == EffectInvisibility {
+	if e == effect.Invisibility {
 		c.broadcastEntityFlags()
 	}
-	if effect == EffectAbsorption {
+	if e == effect.Absorption {
 		c.grantAbsorption(level)
 	}
-	if affectsMovementSpeed(effect) {
+	if attributes.AffectsMovementSpeed(e) {
 		_ = c.sendMovementAttributes() // the client won't speed up on the effect alone
 	}
 }
 
-// active returns the player's unexpired effects, sorted by name.
-func (t *effectTable) active(c *ClientConnection) []ActiveEffect {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	now := time.Now()
-	out := make([]ActiveEffect, 0, len(t.players[c]))
-	for name, ae := range t.players[c] {
-		if !now.Before(ae.expires) {
-			continue
-		}
-		out = append(out, ActiveEffect{Effect: knownEffects[name], Level: ae.level, Remaining: ae.expires.Sub(now)})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Effect.Name < out[j].Effect.Name })
-	return out
-}
-
 // sweep drops every expired effect, telling each client (and, for
-// invisibility, everyone) — the lazy expiry in Level isn't enough for
-// effects whose end must be visible.
+// invisibility, everyone).
 func (t *effectTable) sweep() {
-	now := time.Now()
-	t.mu.Lock()
-	expired := map[*ClientConnection][]Effect{}
-	for c, effects := range t.players {
-		for name, ae := range effects {
-			if !now.Before(ae.expires) {
-				delete(effects, name)
-				expired[c] = append(expired[c], knownEffects[name])
-			}
-		}
-		if len(effects) == 0 {
-			delete(t.players, c)
-		}
-	}
-	t.mu.Unlock()
-	for c, list := range expired {
+	for c, list := range t.Sweep() {
 		c.sendEffectsRemoved(list)
 	}
 }
 
-// remove clears one effect (or all, when effect is nil) and tells the client.
-func (t *effectTable) remove(c *ClientConnection, effect *Effect) {
-	t.mu.Lock()
-	var cleared []Effect
-	if effect == nil {
-		for name := range t.players[c] {
-			cleared = append(cleared, knownEffects[name])
-		}
-		delete(t.players, c)
-	} else if _, ok := t.players[c][effect.Name]; ok {
-		delete(t.players[c], effect.Name)
-		cleared = append(cleared, *effect)
-	}
-	t.mu.Unlock()
-	c.sendEffectsRemoved(cleared)
+// remove clears one effect (or all, when e is nil) and tells the client.
+func (t *effectTable) remove(c *ClientConnection, e *effect.Effect) {
+	c.sendEffectsRemoved(t.Remove(c, e))
 }
 
 // sendEffectsRemoved tells the client these effects ended and refreshes the
 // entity flags if invisibility was among them.
-func (c *ClientConnection) sendEffectsRemoved(list []Effect) {
+func (c *ClientConnection) sendEffectsRemoved(list []effect.Effect) {
 	if c.player == nil {
 		return
 	}
 	invisible, movement, absorption := false, false, false
 	for _, e := range list {
-		var buf bytes.Buffer
-		protocol.WriteVarInt32ToBuffer(&buf, c.player.EntityID)
-		protocol.WriteVarInt32ToBuffer(&buf, e.ID)
-		_ = c.safeWrite(packetid.CbPlayRemoveEntityEffect, buf.Bytes())
-		if e == EffectInvisibility {
+		_ = c.safeWrite(packetid.CbPlayRemoveEntityEffect, effect.RemovePayload(c.player.EntityID, e))
+		if e == effect.Invisibility {
 			invisible = true
 		}
-		if affectsMovementSpeed(e) {
+		if attributes.AffectsMovementSpeed(e) {
 			movement = true
 		}
-		if e == EffectAbsorption {
+		if e == effect.Absorption {
 			absorption = true
 		}
 	}
@@ -280,7 +114,7 @@ func (c *ClientConnection) sendEffectsRemoved(list []Effect) {
 // --- per-connection effect API (games bridge these) -------------------------
 
 // applyEffect grants e at level (1 = I) for d. No-op without a server.
-func (c *ClientConnection) applyEffect(e Effect, level int, d time.Duration) {
+func (c *ClientConnection) applyEffect(e effect.Effect, level int, d time.Duration) {
 	if c.server == nil || c.server.effects == nil || level < 1 {
 		return
 	}
@@ -288,7 +122,7 @@ func (c *ClientConnection) applyEffect(e Effect, level int, d time.Duration) {
 }
 
 // removeEffect ends e now (no-op when absent).
-func (c *ClientConnection) removeEffect(e Effect) {
+func (c *ClientConnection) removeEffect(e effect.Effect) {
 	if c.server == nil || c.server.effects == nil {
 		return
 	}
@@ -304,15 +138,15 @@ func (c *ClientConnection) clearEffects() {
 }
 
 // activeEffects lists the player's current effects.
-func (c *ClientConnection) activeEffects() []ActiveEffect {
+func (c *ClientConnection) activeEffects() []effect.Active {
 	if c.server == nil || c.server.effects == nil {
 		return nil
 	}
-	return c.server.effects.active(c)
+	return c.server.effects.Active(c)
 }
 
 // effectLevel is the player's level of e (0 = none).
-func (c *ClientConnection) effectLevel(e Effect) int {
+func (c *ClientConnection) effectLevel(e effect.Effect) int {
 	if c.server == nil || c.server.Effects == nil {
 		return 0
 	}
@@ -326,7 +160,7 @@ func (c *ClientConnection) resendEffects() {
 		return
 	}
 	for _, ae := range c.activeEffects() {
-		_ = c.safeWrite(packetid.CbPlayEntityEffect, entityEffectPayload(c.player.EntityID, ae.Effect, ae.Level, ae.Remaining))
+		_ = c.safeWrite(packetid.CbPlayEntityEffect, effect.EntityPayload(c.player.EntityID, ae.Effect, ae.Level, ae.Remaining))
 	}
 	_ = c.sendMovementAttributes() // Respawn reset the attribute too
 	c.syncAbsorption(true)         // …and the yellow hearts (player metadata)
@@ -347,15 +181,11 @@ func (i *Instance) effectsTick(tick uint64) {
 		if p == nil || p.IsDead() {
 			continue
 		}
-		lvl := c.effectLevel(EffectRegeneration)
+		lvl := c.effectLevel(effect.Regeneration)
 		if lvl <= 0 {
 			continue
 		}
-		interval := uint64(50) >> uint(min(lvl-1, 5))
-		if interval < 1 {
-			interval = 1
-		}
-		if tick%interval != 0 {
+		if tick%effect.RegenInterval(lvl) != 0 {
 			continue
 		}
 		if h := p.Health(); h < player.MaxHealth {
@@ -372,7 +202,7 @@ func (c *ClientConnection) entityFlags() byte {
 	if c.fireTicks.Load() > 0 {
 		flags |= 0x01
 	}
-	if c.effectLevel(EffectInvisibility) > 0 {
+	if c.effectLevel(effect.Invisibility) > 0 {
 		flags |= 0x20
 	}
 	return flags
@@ -388,26 +218,6 @@ func (c *ClientConnection) broadcastEntityFlags() {
 	c.instance.Players.Broadcast(packetid.CbPlaySetEntityMetadata, entityFlagsPayload(c.player.EntityID, c.entityFlags()), -1)
 }
 
-// forget drops a disconnected player's effects.
-func (t *effectTable) forget(c *ClientConnection) {
-	t.mu.Lock()
-	delete(t.players, c)
-	t.mu.Unlock()
-}
-
-// entityEffectPayload builds Entity Effect (1.20.1): entity id, effect id,
-// amplifier, duration ticks, flags (show particles + icon), no factor data.
-func entityEffectPayload(eid int32, effect Effect, level int, d time.Duration) []byte {
-	var buf bytes.Buffer
-	protocol.WriteVarInt32ToBuffer(&buf, eid)
-	protocol.WriteVarInt32ToBuffer(&buf, effect.ID)
-	buf.WriteByte(byte(level - 1))
-	protocol.WriteVarInt32ToBuffer(&buf, int32(d/(50*time.Millisecond)))
-	buf.WriteByte(0x02 | 0x04)
-	buf.WriteByte(0) // has factor data: false
-	return buf.Bytes()
-}
-
 // --- dig-side glue ---------------------------------------------------------
 
 // digContext gathers the modifiers for this player's current dig.
@@ -416,10 +226,10 @@ func (c *ClientConnection) digContext() world.DigContext {
 	helmet := c.inv.Get(inventory.HelmetSlot)
 	ctx := world.DigContext{OnGround: true}
 	if c.server != nil {
-		ctx.Efficiency = c.server.Enchantments.Level(held, EnchantEfficiency)
-		ctx.AquaAffinity = c.server.Enchantments.Level(helmet, EnchantAquaAffinity) > 0
-		ctx.Haste = c.server.Effects.Level(c, EffectHaste)
-		ctx.MiningFatigue = c.server.Effects.Level(c, EffectMiningFatigue)
+		ctx.Efficiency = c.server.Enchantments.Level(held, enchant.Efficiency)
+		ctx.AquaAffinity = c.server.Enchantments.Level(helmet, enchant.AquaAffinity) > 0
+		ctx.Haste = c.server.Effects.Level(c, effect.Haste)
+		ctx.MiningFatigue = c.server.Effects.Level(c, effect.MiningFatigue)
 	}
 	if c.player != nil {
 		s := c.player.Snapshot()
@@ -447,7 +257,7 @@ func (c *ClientConnection) damageHeldTool(n int) {
 	if maxDamage == 0 {
 		return
 	}
-	if lvl := c.enchantOf(st, EnchantUnbreaking); lvl > 0 && unbreakingSpares(lvl) {
+	if lvl := c.enchantOf(st, enchant.Unbreaking); lvl > 0 && enchant.UnbreakingSpares(lvl) {
 		return // Unbreaking: only 1/(lvl+1) of hits wear the tool
 	}
 	st.Damage += n
@@ -463,10 +273,6 @@ func (c *ClientConnection) damageHeldTool(n int) {
 	_ = c.sendSetSlot(0, slot, st)
 	c.equipmentChanged()
 }
-
-// unbreakingSpares rolls the Unbreaking chance: a level-lvl item skips
-// lvl/(lvl+1) of its wear.
-func unbreakingSpares(lvl int) bool { return rand.Intn(lvl+1) > 0 }
 
 // entityFlagsPayload builds Set Entity Metadata with just the index-0 byte
 // (on fire / sneaking / sprinting / … bitmask).

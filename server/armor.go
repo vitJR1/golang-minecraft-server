@@ -2,6 +2,7 @@ package server
 
 import (
 	"minecraft-server/server/combat"
+	"minecraft-server/server/enchant"
 	"minecraft-server/server/inventory"
 	"minecraft-server/server/sound"
 	"minecraft-server/world"
@@ -38,7 +39,7 @@ func (c *ClientConnection) absorbDamage(dmg float32) float32 {
 		worn++
 		points += p
 		toughness += t
-		epf += c.enchantOf(st, EnchantProtection)
+		epf += c.enchantOf(st, enchant.Protection)
 	}
 	if worn == 0 {
 		return dmg
@@ -65,7 +66,7 @@ func (c *ClientConnection) wearArmor(n int) {
 		if maxDamage == 0 {
 			continue
 		}
-		if lvl := c.enchantOf(st, EnchantUnbreaking); lvl > 0 && unbreakingSpares(lvl) {
+		if lvl := c.enchantOf(st, enchant.Unbreaking); lvl > 0 && enchant.UnbreakingSpares(lvl) {
 			continue
 		}
 		st.Damage += n

@@ -8,6 +8,8 @@ import (
 
 	"minecraft-server/anticheat"
 	"minecraft-server/player"
+	"minecraft-server/server/attributes"
+	"minecraft-server/server/effect"
 	"minecraft-server/server/fluid"
 	"minecraft-server/world"
 )
@@ -229,8 +231,8 @@ func (c *ClientConnection) checkMotion(from, to anticheat.Vec) (check, detail st
 			m.BounceLeft = bounceMemory
 		}
 	})
-	speedLvl := anticheat.Held(c.effectLevel(EffectSpeed), &m.SpeedLevel, &m.SpeedHold, effectHold)
-	jumpLvl := anticheat.Held(c.effectLevel(EffectJumpBoost), &m.JumpLevel, &m.JumpHold, effectHold)
+	speedLvl := anticheat.Held(c.effectLevel(effect.Speed), &m.SpeedLevel, &m.SpeedHold, effectHold)
+	jumpLvl := anticheat.Held(c.effectLevel(effect.JumpBoost), &m.JumpLevel, &m.JumpHold, effectHold)
 	pushH, pushUp := c.ac.Velocity.Allowance()
 	exempt := inst.motionExempt(to, c.ac.Sneaking.Load())
 	if ev := c.checkKnock(to, exempt); ev != "" {
@@ -241,7 +243,7 @@ func (c *ClientConnection) checkMotion(from, to anticheat.Vec) (check, detail st
 
 	// Horizontal.
 	h := math.Hypot(to.X-from.X, to.Z-from.Z)
-	limit := maxHorizontal*(1+speedPerLevel*float64(speedLvl)) + pushH // speedPerLevel: attributes.go
+	limit := maxHorizontal*(1+attributes.SpeedPerLevel*float64(speedLvl)) + pushH
 	if m.IceLeft > 0 {
 		if m.BlueIce {
 			limit += blueIceBonus

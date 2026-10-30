@@ -8,30 +8,32 @@ import (
 	"minecraft-server/nbt"
 	"minecraft-server/player"
 	"minecraft-server/protocol"
+	"minecraft-server/server/effect"
+	"minecraft-server/server/enchant"
 	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
 func TestSlotNBTRoundTripsDamageAndEnchantments(t *testing.T) {
 	pick, _ := world.ItemByName("minecraft:diamond_pickaxe")
-	st := inventory.Stack{ID: pick, Count: 1, Damage: 12, Enchantments: map[string]int{EnchantEfficiency: 4, EnchantUnbreaking: 3}}
+	st := inventory.Stack{ID: pick, Count: 1, Damage: 12, Enchantments: map[string]int{enchant.Efficiency: 4, enchant.Unbreaking: 3}}
 	var buf bytes.Buffer
 	inventory.WriteSlot(&buf, st)
 	back, ok := inventory.ReadSlot(&buf)
 	if !ok {
 		t.Fatal("readSlot failed")
 	}
-	if back.ID != pick || back.Damage != 12 || back.EnchantLevel(EnchantEfficiency) != 4 || back.EnchantLevel(EnchantUnbreaking) != 3 {
+	if back.ID != pick || back.Damage != 12 || back.EnchantLevel(enchant.Efficiency) != 4 || back.EnchantLevel(enchant.Unbreaking) != 3 {
 		t.Errorf("round trip: %+v", back)
 	}
 	// A client-sent slot with a Short lvl (vanilla) parses too.
 	tag := nbt.Compound{"Enchantments": nbt.List{ElemTag: nbt.TagCompound, Items: []nbt.Value{
-		nbt.Compound{"id": nbt.String(EnchantEfficiency), "lvl": nbt.Short(5)},
+		nbt.Compound{"id": nbt.String(enchant.Efficiency), "lvl": nbt.Short(5)},
 	}}}
 	buf.Reset()
 	buf.Write(protocol.WriteSlotTagged(pick, 1, tag))
 	back, _ = inventory.ReadSlot(&buf)
-	if back.EnchantLevel(EnchantEfficiency) != 5 {
+	if back.EnchantLevel(enchant.Efficiency) != 5 {
 		t.Errorf("vanilla NBT: %+v", back)
 	}
 }
@@ -44,23 +46,23 @@ func TestEfficiencyAndHasteShortenTheDig(t *testing.T) {
 	stone := world.BreakInfoFor("minecraft:stone")
 
 	base := world.BreakTicksWith(stone, c.heldItemName(), c.digContext())
-	c.inv.Set(inventory.HotbarStart, inventory.Stack{ID: pick, Count: 1, Enchantments: map[string]int{EnchantEfficiency: 5}})
+	c.inv.Set(inventory.HotbarStart, inventory.Stack{ID: pick, Count: 1, Enchantments: map[string]int{enchant.Efficiency: 5}})
 	withEff := world.BreakTicksWith(stone, c.heldItemName(), c.digContext())
-	inst.Server.effects.apply(c, EffectHaste, 2, time.Minute)
+	inst.Server.effects.apply(c, effect.Haste, 2, time.Minute)
 	withBoth := world.BreakTicksWith(stone, c.heldItemName(), c.digContext())
 	if !(withBoth < withEff && withEff < base) {
 		t.Errorf("ticks base=%d efficiency=%d +haste=%d: each modifier must shorten the dig", base, withEff, withBoth)
 	}
-	if inst.Server.Effects.Level(c, EffectHaste) != 2 {
+	if inst.Server.Effects.Level(c, effect.Haste) != 2 {
 		t.Error("haste level not readable")
 	}
-	inst.Server.effects.remove(c, &EffectHaste)
-	if inst.Server.Effects.Level(c, EffectHaste) != 0 {
+	inst.Server.effects.remove(c, &effect.Haste)
+	if inst.Server.Effects.Level(c, effect.Haste) != 0 {
 		t.Error("haste should be removed")
 	}
-	inst.Server.effects.apply(c, EffectMiningFatigue, 1, 10*time.Millisecond)
+	inst.Server.effects.apply(c, effect.MiningFatigue, 1, 10*time.Millisecond)
 	time.Sleep(20 * time.Millisecond)
-	if inst.Server.Effects.Level(c, EffectMiningFatigue) != 0 {
+	if inst.Server.Effects.Level(c, effect.MiningFatigue) != 0 {
 		t.Error("expired effect must read as 0")
 	}
 }
@@ -70,11 +72,11 @@ func TestEffectCommand(t *testing.T) {
 	c := offlineHub(s, "Op")
 	s.Ops.Add("Op")
 	s.RunCommand(c, "effect Op haste 2 60")
-	if s.Effects.Level(c, EffectHaste) != 2 {
-		t.Errorf("/effect did not apply haste II: %d", s.Effects.Level(c, EffectHaste))
+	if s.Effects.Level(c, effect.Haste) != 2 {
+		t.Errorf("/effect did not apply haste II: %d", s.Effects.Level(c, effect.Haste))
 	}
 	s.RunCommand(c, "effect Op clear")
-	if s.Effects.Level(c, EffectHaste) != 0 {
+	if s.Effects.Level(c, effect.Haste) != 0 {
 		t.Error("/effect clear did not clear")
 	}
 }
@@ -125,7 +127,7 @@ func TestToolWearsAndBreaks(t *testing.T) {
 
 	// Unbreaking III spares ~3/4 of the wear; blocks (non-tools) never wear.
 	pick, _ := world.ItemByName("minecraft:diamond_pickaxe") // durability 1561
-	c.inv.Set(inventory.HotbarStart, inventory.Stack{ID: pick, Count: 1, Enchantments: map[string]int{EnchantUnbreaking: 3}})
+	c.inv.Set(inventory.HotbarStart, inventory.Stack{ID: pick, Count: 1, Enchantments: map[string]int{enchant.Unbreaking: 3}})
 	for i := 0; i < 400; i++ {
 		c.damageHeldTool(1)
 		drain(c)

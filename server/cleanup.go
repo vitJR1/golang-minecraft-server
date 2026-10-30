@@ -31,7 +31,7 @@ func (c *ClientConnection) cleanup() {
 	// Drop from any matchmaker queue we might be sitting in.
 	if c.server != nil && c.server.Matchmaker != nil {
 		c.server.Matchmaker.Dequeue(c)
-		c.server.effects.forget(c)
+		c.server.effects.Forget(c)
 	}
 
 	// Announce departure + Remove under the same lock as join, but only if

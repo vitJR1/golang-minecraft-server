@@ -7,6 +7,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/combat"
+	"minecraft-server/server/enchant"
 	"minecraft-server/server/projectile"
 	"minecraft-server/server/sound"
 	"minecraft-server/world"
@@ -65,7 +66,7 @@ func (c *ClientConnection) shootBow(u *useState) {
 	}
 	bow := c.inv.Held(u.slot)
 	creative := c.gamemode() == player.Creative
-	infinite := c.enchantOf(bow, EnchantInfinity) > 0
+	infinite := c.enchantOf(bow, enchant.Infinity) > 0
 	switch {
 	case creative:
 	case infinite:
@@ -91,8 +92,8 @@ func (c *ClientConnection) shootBow(u *useState) {
 		},
 		pickup: pickup,
 		item:   "minecraft:arrow",
-		power:  c.enchantOf(bow, EnchantPower),
-		punch:  c.enchantOf(bow, EnchantPunch),
+		power:  c.enchantOf(bow, enchant.Power),
+		punch:  c.enchantOf(bow, enchant.Punch),
 		crit:   f >= 1,
 	}
 	if !c.launch(p, world.ArrowSpeed*f) {

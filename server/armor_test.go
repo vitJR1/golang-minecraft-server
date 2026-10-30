@@ -7,6 +7,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/combat"
+	"minecraft-server/server/enchant"
 	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
@@ -46,7 +47,7 @@ func TestAbsorbDamageVanillaFormula(t *testing.T) {
 	}
 
 	// Protection IV on every piece: EPF 16 → another × (1 − 16/25) = 0.36.
-	prot := map[string]int{EnchantProtection: 4}
+	prot := map[string]int{enchant.Protection: 4}
 	wear(c, inventory.HelmetSlot, "minecraft:leather_helmet", prot)
 	wear(c, inventory.ChestplateSlot, "minecraft:leather_chestplate", prot)
 	wear(c, inventory.LeggingsSlot, "minecraft:leather_leggings", prot)
@@ -110,7 +111,7 @@ func TestWeaponDamageSwitch(t *testing.T) {
 	v.player.SetHealth(player.MaxHealth)
 	a.instance.tickCount.Add(1000)
 	sword, _ := world.ItemByName("minecraft:diamond_sword")
-	a.inv.Set(inventory.HotbarStart, inventory.Stack{ID: sword, Count: 1, Enchantments: map[string]int{EnchantSharpness: 2}})
+	a.inv.Set(inventory.HotbarStart, inventory.Stack{ID: sword, Count: 1, Enchantments: map[string]int{enchant.Sharpness: 2}})
 	a.handleAttack(v)
 	if got := player.MaxHealth - v.player.Health(); got != 8.5 {
 		t.Errorf("diamond sword + Sharpness II: dealt %v, want 8.5", got)
@@ -136,7 +137,7 @@ func TestKnockbackEnchantAddsHorizontalStrength(t *testing.T) {
 
 	v.player.SetHealth(player.MaxHealth)
 	a.instance.tickCount.Add(1000)
-	a.inv.Set(inventory.HotbarStart, inventory.Stack{ID: stick, Count: 1, Enchantments: map[string]int{EnchantKnockback: 2}})
+	a.inv.Set(inventory.HotbarStart, inventory.Stack{ID: stick, Count: 1, Enchantments: map[string]int{enchant.Knockback: 2}})
 	a.handleAttack(v)
 	boosted := lastPacket(t, v, packetid.CbPlayEntityVelocity)
 	if plain == nil || boosted == nil {

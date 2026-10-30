@@ -7,6 +7,7 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/server/botai"
+	"minecraft-server/server/effect"
 	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
@@ -89,8 +90,8 @@ func (b botBody) Move(x, y, z float64, yaw, pitch float32, onGround, show bool) 
 
 func (b botBody) Look(yaw, pitch float32, onGround bool) { b.c.player.LookAt(yaw, pitch, onGround) }
 func (b botBody) SetSprinting(on bool)                   { b.c.ac.Sprinting.Store(on) }
-func (b botBody) SpeedLevel() int                        { return b.c.effectLevel(EffectSpeed) }
-func (b botBody) JumpLevel() int                         { return b.c.effectLevel(EffectJumpBoost) }
+func (b botBody) SpeedLevel() int                        { return b.c.effectLevel(effect.Speed) }
+func (b botBody) JumpLevel() int                         { return b.c.effectLevel(effect.JumpBoost) }
 func (b botBody) FlightExempt() bool                     { return b.c.flightExempt() }
 
 func (b botBody) Slot(i int16) inventory.Stack { return b.c.inv.Get(i) }

@@ -8,6 +8,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/effect"
 	"minecraft-server/world"
 )
 
@@ -41,7 +42,7 @@ func TestAbsorptionEffectSyncsYellowHearts(t *testing.T) {
 	c := tntConn(inst, "Golden", player.Survival, 0, 64, 0)
 	w := tntConn(inst, "Watcher", player.Survival, 2, 64, 0)
 
-	c.applyEffect(EffectAbsorption, 1, 30*time.Millisecond)
+	c.applyEffect(effect.Absorption, 1, 30*time.Millisecond)
 	if a := c.player.Absorption(); a != 4 {
 		t.Fatalf("absorption after level I: %v, want 4", a)
 	}
@@ -54,11 +55,11 @@ func TestAbsorptionEffectSyncsYellowHearts(t *testing.T) {
 
 	// Re-applying at a lower level never shrinks a bigger pool.
 	c.player.SetAbsorption(8)
-	c.applyEffect(EffectAbsorption, 1, time.Minute)
+	c.applyEffect(effect.Absorption, 1, time.Minute)
 	if a := c.player.Absorption(); a != 8 {
 		t.Errorf("re-apply shrank the pool to %v", a)
 	}
-	c.removeEffect(EffectAbsorption)
+	c.removeEffect(effect.Absorption)
 	if a := c.player.Absorption(); a != 0 {
 		t.Errorf("removing the effect should empty the pool, got %v", a)
 	}
@@ -67,7 +68,7 @@ func TestAbsorptionEffectSyncsYellowHearts(t *testing.T) {
 	}
 
 	// Natural expiry through the sweep.
-	c.applyEffect(EffectAbsorption, 2, 30*time.Millisecond)
+	c.applyEffect(effect.Absorption, 2, 30*time.Millisecond)
 	if a := c.player.Absorption(); a != 8 {
 		t.Fatalf("level II pool: %v, want 8", a)
 	}
@@ -89,7 +90,7 @@ func TestDamageDrainsAbsorptionAndSyncs(t *testing.T) {
 	inst := bareInstance(New(), world.NewMemoryWorld())
 	inst.combatEnabled.Store(true)
 	c := tntConn(inst, "Burnt", player.Survival, 0, 64, 0)
-	c.applyEffect(EffectAbsorption, 1, time.Minute)
+	c.applyEffect(effect.Absorption, 1, time.Minute)
 	drain(c)
 
 	c.hurtEnvironment(3, 0, 10)

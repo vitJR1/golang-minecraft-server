@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"minecraft-server/player"
+	"minecraft-server/server/effect"
 )
 
 // cmd_admin.go: operator commands on players — /op /deop /gamemode /tp
@@ -181,7 +182,7 @@ func teleportConnTo(c *ClientConnection, x, y, z float64) {
 //	/effect <player> clear
 func cmdEffect(c *ClientConnection, args []string) {
 	if len(args) < 2 {
-		_ = c.sendSystemMessage("Usage: /effect <player> <" + strings.Join(effectNames(), "|") + "> [level] [seconds] | /effect <player> clear")
+		_ = c.sendSystemMessage("Usage: /effect <player> <" + strings.Join(effect.Names(), "|") + "> [level] [seconds] | /effect <player> clear")
 		return
 	}
 	target, _, ok := c.server.FindPlayer(args[0])
@@ -194,9 +195,9 @@ func cmdEffect(c *ClientConnection, args []string) {
 		_ = c.sendSystemMessage("Cleared effects on " + target.playerName)
 		return
 	}
-	effect, ok := knownEffects[strings.ToLower(args[1])]
+	eff, ok := effect.Known[strings.ToLower(args[1])]
 	if !ok {
-		_ = c.sendSystemMessage("Unknown effect: " + args[1] + " (" + strings.Join(effectNames(), ", ") + ")")
+		_ = c.sendSystemMessage("Unknown effect: " + args[1] + " (" + strings.Join(effect.Names(), ", ") + ")")
 		return
 	}
 	level, seconds := 1, 30
@@ -216,6 +217,6 @@ func cmdEffect(c *ClientConnection, args []string) {
 			return
 		}
 	}
-	c.server.effects.apply(target, effect, level, time.Duration(seconds)*time.Second)
-	_ = c.sendSystemMessage(fmt.Sprintf("Gave %s %s %d for %ds", target.playerName, effect.Name, level, seconds))
+	c.server.effects.apply(target, eff, level, time.Duration(seconds)*time.Second)
+	_ = c.sendSystemMessage(fmt.Sprintf("Gave %s %s %d for %ds", target.playerName, eff.Name, level, seconds))
 }

@@ -15,6 +15,10 @@ import (
 // explosion's effects — the game's break vetoes, drops, chain reactions,
 // player damage and knockback, the Explosion packets.
 
+// tntAutoFuse is the fuse of a TNT block a game lights as it is placed
+// (Instance.SetTNTAutoPrime).
+const tntAutoFuse = 50
+
 // primedTNT is one lit TNT entity and who lit it (or whose explosion did;
 // nil when unknown) — the actor for block-break vetoes and the killer on a
 // lethal blast.

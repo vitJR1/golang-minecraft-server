@@ -7,6 +7,7 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/effect"
 )
 
 // Suggestions computes the tab-completion reply for text (the whole chat
@@ -50,7 +51,7 @@ func completeEffect(c *ClientConnection, args []string) []string {
 	case 1:
 		return c.server.PlayerNames()
 	case 2:
-		return append(effectNames(), "clear")
+		return append(effect.Names(), "clear")
 	}
 	return nil
 }

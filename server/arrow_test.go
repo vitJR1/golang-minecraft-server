@@ -7,6 +7,8 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/consume"
+	"minecraft-server/server/enchant"
 	"minecraft-server/server/inventory"
 	"minecraft-server/server/projectile"
 	"minecraft-server/world"
@@ -62,7 +64,7 @@ func TestShortDrawIsWeakerAndPowerIsStronger(t *testing.T) {
 	v.player.SetHealth(player.MaxHealth)
 	inst.tickCount.Add(100)
 	bow, _ := world.ItemByName("minecraft:bow")
-	a.inv.Set(inventory.HotbarStart, inventory.Stack{ID: bow, Count: 1, Enchantments: map[string]int{EnchantPower: 2}})
+	a.inv.Set(inventory.HotbarStart, inventory.Stack{ID: bow, Count: 1, Enchantments: map[string]int{enchant.Power: 2}})
 	fire(inst, a, 25)
 	if lost := player.MaxHealth - v.player.Health(); lost < 11 {
 		t.Errorf("Power II full draw should deal ≥ 11, dealt %v", lost)
@@ -159,7 +161,7 @@ func TestDrawPoseBroadcastToOthers(t *testing.T) {
 	_ = lastPacket(t, v, packetid.CbPlaySetEntityMetadata)
 	_ = lastPacket(t, a, packetid.CbPlaySetEntityMetadata)
 	a.startDraw()
-	if got := handStateOf(t, lastPacket(t, v, packetid.CbPlaySetEntityMetadata)); got != handStateActive {
+	if got := handStateOf(t, lastPacket(t, v, packetid.CbPlaySetEntityMetadata)); got != consume.HandActive {
 		t.Errorf("watcher hand state %#x, want active", got)
 	}
 	if lastPacket(t, a, packetid.CbPlaySetEntityMetadata) != nil {
@@ -280,7 +282,7 @@ func TestStuckArrowIsPickedUpBySurvivalPlayer(t *testing.T) {
 func TestInfinityBowKeepsArrowAndMakesItCreativeOnly(t *testing.T) {
 	inst, a, v := archery(t, 1)
 	bow, _ := world.ItemByName("minecraft:bow")
-	a.inv.Set(inventory.HotbarStart, inventory.Stack{ID: bow, Count: 1, Enchantments: map[string]int{EnchantInfinity: 1}})
+	a.inv.Set(inventory.HotbarStart, inventory.Stack{ID: bow, Count: 1, Enchantments: map[string]int{enchant.Infinity: 1}})
 	p := stickArrow(t, inst, a)
 	if a.countItem(arrowItemID()) != 1 {
 		t.Errorf("Infinity must not spend the arrow, left %d", a.countItem(arrowItemID()))

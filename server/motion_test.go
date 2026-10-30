@@ -8,6 +8,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/effect"
 	"minecraft-server/world"
 )
 
@@ -67,7 +68,7 @@ func TestSpeedHackRefused(t *testing.T) {
 
 func TestSpeedEffectAllowsMore(t *testing.T) {
 	c := offlineConn(fieldWorld(), "Potion", player.Survival, 0.5, 64, 0.5)
-	c.applyEffect(EffectSpeed, 2, time.Minute) // Speed II: ×1.4
+	c.applyEffect(effect.Speed, 2, time.Minute) // Speed II: ×1.4
 	drain(c)
 	path(t, c, 20.5, 64, 0.5, 20) // 1 block a move
 	if flaggedNow(c, "movement.speed") {

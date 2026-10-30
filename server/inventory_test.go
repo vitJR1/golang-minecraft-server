@@ -7,6 +7,7 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/effect"
 	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
@@ -147,7 +148,7 @@ func TestReturnToHubResetsSpectatorAndState(t *testing.T) {
 	c.player.SetGamemode(player.Spectator)
 	sword, _ := world.ItemByName("minecraft:diamond_sword")
 	c.inv.Set(inventory.HotbarStart, inventory.Stack{ID: sword, Count: 1})
-	c.applyEffect(EffectSpeed, 2, time.Minute)
+	c.applyEffect(effect.Speed, 2, time.Minute)
 	c.player.SetHealth(3)
 
 	if err := s.MovePlayer(c, s.Hub, 0, 80, 0); err != nil {
@@ -160,7 +161,7 @@ func TestReturnToHubResetsSpectatorAndState(t *testing.T) {
 	if h := c.player.Health(); h != player.MaxHealth {
 		t.Errorf("health %v, want full", h)
 	}
-	if c.effectLevel(EffectSpeed) != 0 {
+	if c.effectLevel(effect.Speed) != 0 {
 		t.Error("effects must be cleared")
 	}
 	if st := c.inv.Get(inventory.HotbarStart); st.Name != inventory.NavigatorName {

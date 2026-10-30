@@ -6,6 +6,7 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/effect"
 	"minecraft-server/server/inventory"
 	"minecraft-server/server/sound"
 	"minecraft-server/world"
@@ -113,13 +114,13 @@ func (b playerBridge) SetHealth(h float32) {
 }
 
 func (b playerBridge) ApplyEffect(name string, level int, d time.Duration) {
-	if e, ok := knownEffects[name]; ok {
+	if e, ok := effect.Known[name]; ok {
 		b.conn.applyEffect(e, level, d)
 	}
 }
 
 func (b playerBridge) RemoveEffect(name string) {
-	if e, ok := knownEffects[name]; ok {
+	if e, ok := effect.Known[name]; ok {
 		b.conn.removeEffect(e)
 	}
 }
