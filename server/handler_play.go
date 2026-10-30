@@ -11,6 +11,7 @@ import (
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/enderchest"
 	"minecraft-server/server/inventory"
+	"minecraft-server/server/projectile"
 	"minecraft-server/world"
 	"strings"
 )
@@ -583,7 +584,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 				// no target — the server ray-casts for the fluid / spot.
 			default:
 				// Throwable items (egg / snowball / ender pearl) in any slot.
-				if _, ok := throwableEntityID(name); ok {
+				if _, ok := projectile.ThrowableEntityID(name); ok {
 					c.throwProjectile(name)
 					c.consumeHeld()
 				}

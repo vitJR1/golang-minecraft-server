@@ -109,7 +109,7 @@ type Instance struct {
 	// projectiles are in-flight thrown items (egg/snowball/ender pearl),
 	// simulated on the tick loop. Guarded by projMu.
 	projMu      sync.Mutex
-	projectiles []*projectile
+	projectiles []*projectileEntity
 
 	// items are dropped-item entities (generator output) lying in this
 	// instance, simulated on the tick loop (fall, pickup, despawn). Guarded by

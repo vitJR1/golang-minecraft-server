@@ -8,23 +8,9 @@ import (
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/inventory"
+	"minecraft-server/server/projectile"
 	"minecraft-server/world"
 )
-
-func TestDrawForceCurve(t *testing.T) {
-	if f := drawForce(5); f < 0.18 || f > 0.19 { // t=0.25 → (0.0625+0.5)/3
-		t.Errorf("5 ticks: %v", f)
-	}
-	if f := drawForce(20); f != 1 {
-		t.Errorf("20 ticks: %v, want 1 (full)", f)
-	}
-	if f := drawForce(100); f != 1 {
-		t.Errorf("overdraw must cap at 1, got %v", f)
-	}
-	if arrowDamage(3, 0, false) != 6 || arrowDamage(3, 1, false) != 9 || arrowDamage(3, 0, true) != 9 {
-		t.Errorf("damage: %v %v %v", arrowDamage(3, 0, false), arrowDamage(3, 1, false), arrowDamage(3, 0, true))
-	}
-}
 
 // archery sets up a shooter looking +Z at a target 6 blocks ahead.
 func archery(t *testing.T, arrows int) (*Instance, *ClientConnection, *ClientConnection) {
@@ -112,7 +98,7 @@ func TestArrowSticksInBlockThenVanishes(t *testing.T) {
 		t.Fatal("arrow should be stuck in the wall")
 	}
 	inst.projMu.Unlock()
-	for i := 0; i <= arrowStuckTicks; i++ {
+	for i := 0; i <= projectile.ArrowStuckTicks; i++ {
 		inst.projectileTick(uint64(i))
 	}
 	inst.projMu.Lock()
@@ -147,8 +133,8 @@ func TestArrowSpawnCarriesOwnerAndFacing(t *testing.T) {
 	buf := bytes.NewBuffer(body)
 	_, _ = protocol.ReadVarInt(buf) // eid
 	buf.Next(16)                    // uuid
-	if typ, _ := protocol.ReadVarInt(buf); int32(typ) != arrowEntityID {
-		t.Errorf("entity type %d, want arrow %d", typ, arrowEntityID)
+	if typ, _ := protocol.ReadVarInt(buf); int32(typ) != projectile.ArrowEntityID {
+		t.Errorf("entity type %d, want arrow %d", typ, projectile.ArrowEntityID)
 	}
 	buf.Next(24) // x y z
 	pitch, _ := buf.ReadByte()
@@ -232,16 +218,16 @@ func TestFullDrawArrowDoesNotTunnelThroughThinWall(t *testing.T) {
 	}
 	p := inst.projectiles[0]
 	if !p.stuck {
-		t.Fatalf("arrow should be stuck in the wall, at z=%.2f flying", p.z)
+		t.Fatalf("arrow should be stuck in the wall, at z=%.2f flying", p.Z)
 	}
-	if p.z >= 2 || p.z < 1.8 {
-		t.Errorf("arrow parked at z=%.2f, want just short of the wall face (1.8..2)", p.z)
+	if p.Z >= 2 || p.Z < 1.8 {
+		t.Errorf("arrow parked at z=%.2f, want just short of the wall face (1.8..2)", p.Z)
 	}
 }
 
 // stickArrow fires a full-draw arrow into a wall two blocks ahead and
 // returns it, still stuck.
-func stickArrow(t *testing.T, inst *Instance, a *ClientConnection) *projectile {
+func stickArrow(t *testing.T, inst *Instance, a *ClientConnection) *projectileEntity {
 	t.Helper()
 	inst.World.SetBlock(world.Position{X: 0, Y: 65, Z: 2}, world.Stone)
 	a.startDraw()
@@ -265,7 +251,7 @@ func projectileCount(inst *Instance) int {
 func TestStuckArrowIsPickedUpBySurvivalPlayer(t *testing.T) {
 	inst, a, v := archery(t, 1)
 	p := stickArrow(t, inst, a)
-	if p.pickup != pickupAllowed {
+	if p.pickup != projectile.PickupAllowed {
 		t.Fatalf("survival shot pickup mode %d, want allowed", p.pickup)
 	}
 	// The victim (far away) can't reach it; nobody is near → it stays.
@@ -275,7 +261,7 @@ func TestStuckArrowIsPickedUpBySurvivalPlayer(t *testing.T) {
 	}
 	// Walk the other player onto it.
 	_ = lastPacket(t, v, packetid.CbPlayPickupItem)
-	v.player.MoveTo(p.x, 64, p.z, true)
+	v.player.MoveTo(p.X, 64, p.Z, true)
 	inst.projectileTick(3)
 	if projectileCount(inst) != 0 {
 		t.Error("arrow should be collected")
@@ -299,11 +285,11 @@ func TestInfinityBowKeepsArrowAndMakesItCreativeOnly(t *testing.T) {
 	if a.countItem(arrowItemID()) != 1 {
 		t.Errorf("Infinity must not spend the arrow, left %d", a.countItem(arrowItemID()))
 	}
-	if p.pickup != pickupCreativeOnly {
+	if p.pickup != projectile.PickupCreativeOnly {
 		t.Fatalf("Infinity shot pickup mode %d, want creative-only", p.pickup)
 	}
 	// A survival player walking into it gets nothing and it stays.
-	v.player.MoveTo(p.x, 64, p.z, true)
+	v.player.MoveTo(p.X, 64, p.Z, true)
 	inst.projectileTick(2)
 	if projectileCount(inst) != 1 || v.countItem(arrowItemID()) != 0 {
 		t.Error("survival player must not collect an Infinity arrow")

@@ -7,6 +7,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/combat"
+	"minecraft-server/server/projectile"
 	"minecraft-server/server/sound"
 	"minecraft-server/world"
 )
@@ -37,14 +38,6 @@ import (
 //     creative or Infinity shot is only cleared by a creative player.
 //     Infinity itself keeps the arrow in the quiver (one must still be
 //     there).
-const (
-	arrowEntityID   int32   = 3
-	arrowMinForce           = 0.1
-	arrowStuckTicks         = 1200 // 60 s in a block, then gone
-	arrowBaseDamage float32 = 2
-	arrowCritScale  float32 = 1.5
-	punchStrength           = 0.6 // horizontal blocks/tick per Punch level
-)
 
 // startDraw begins a bow draw. Needs an arrow somewhere in the inventory
 // (creative players always have one).
@@ -58,16 +51,6 @@ func (c *ClientConnection) startDraw() {
 	c.beginUse(&useState{slot: c.heldSlot.Load(), item: "minecraft:bow", startTick: c.instance.Tick(), bow: true})
 }
 
-// drawForce is the vanilla charge curve for a bow held for ticks.
-func drawForce(ticks uint64) float64 {
-	t := float64(ticks) / 20
-	f := (t*t + 2*t) / 3
-	if f > 1 {
-		f = 1
-	}
-	return f
-}
-
 // shootBow looses the arrow of a finished draw.
 func (c *ClientConnection) shootBow(u *useState) {
 	if c.instance == nil || c.player == nil || c.player.IsDead() {
@@ -76,8 +59,8 @@ func (c *ClientConnection) shootBow(u *useState) {
 	if c.heldSlot.Load() != u.slot || c.heldItemName() != "minecraft:bow" {
 		return
 	}
-	f := drawForce(c.instance.Tick() - u.startTick)
-	if f < arrowMinForce {
+	f := projectile.DrawForce(c.instance.Tick() - u.startTick)
+	if f < projectile.ArrowMinForce {
 		return
 	}
 	bow := c.inv.Held(u.slot)
@@ -95,20 +78,22 @@ func (c *ClientConnection) shootBow(u *useState) {
 			return
 		}
 	}
-	pickup := pickupAllowed
+	pickup := projectile.PickupAllowed
 	if creative || infinite {
-		pickup = pickupCreativeOnly // vanilla: nothing to get back
+		pickup = projectile.PickupCreativeOnly // vanilla: nothing to get back
 	}
-	p := &projectile{
-		pickup:  pickup,
-		typeID:  arrowEntityID,
-		item:    "minecraft:arrow",
-		gravity: world.ArrowGravity,
-		drag:    world.ArrowDrag,
-		data:    c.player.EntityID, // Spawn Entity data = owner id (0 = none) since 1.17's Projectile
-		power:   c.enchantOf(bow, EnchantPower),
-		punch:   c.enchantOf(bow, EnchantPunch),
-		crit:    f >= 1,
+	p := &projectileEntity{
+		Flight: projectile.Flight{
+			TypeID:  projectile.ArrowEntityID,
+			Gravity: world.ArrowGravity,
+			Drag:    world.ArrowDrag,
+			Data:    c.player.EntityID, // Spawn Entity data = owner id (0 = none) since 1.17's Projectile
+		},
+		pickup: pickup,
+		item:   "minecraft:arrow",
+		power:  c.enchantOf(bow, EnchantPower),
+		punch:  c.enchantOf(bow, EnchantPunch),
+		crit:   f >= 1,
 	}
 	if !c.launch(p, world.ArrowSpeed*f) {
 		return
@@ -124,9 +109,9 @@ func arrowItemID() int32 {
 }
 
 // arrowHitPlayer returns the first player whose (inflated) hitbox the
-// arrow's path from (p.x,p.y,p.z) to (nx,ny,nz) crosses, skipping the
+// arrow's path from (p.X,p.Y,p.Z) to (nx,ny,nz) crosses, skipping the
 // shooter, the dead and spectators.
-func (i *Instance) arrowHitPlayer(p *projectile, nx, ny, nz float64) *ClientConnection {
+func (i *Instance) arrowHitPlayer(p *projectileEntity, nx, ny, nz float64) *ClientConnection {
 	var best *ClientConnection
 	bestT := math.Inf(1)
 	for _, c := range i.Players.snapshot() {
@@ -138,7 +123,7 @@ func (i *Instance) arrowHitPlayer(p *projectile, nx, ny, nz float64) *ClientConn
 			continue
 		}
 		half := playerHalfWidth + world.ArrowHitInflate
-		t, ok := anticheat.SegmentHitsBox(p.x, p.y, p.z, nx, ny, nz,
+		t, ok := anticheat.SegmentHitsBox(p.X, p.Y, p.Z, nx, ny, nz,
 			s.X-half, s.Y-world.ArrowHitInflate, s.Z-half,
 			s.X+half, s.Y+playerHeight+world.ArrowHitInflate, s.Z+half)
 		if ok && t < bestT {
@@ -148,22 +133,9 @@ func (i *Instance) arrowHitPlayer(p *projectile, nx, ny, nz float64) *ClientConn
 	return best
 }
 
-// arrowDamage is the hit damage of an arrow travelling at speed blocks/tick.
-func arrowDamage(speed float64, power int, crit bool) float32 {
-	per := arrowBaseDamage
-	if power > 0 {
-		per += 0.5*float32(power) + 0.5
-	}
-	dmg := float32(math.Ceil(speed * float64(per)))
-	if crit {
-		dmg *= arrowCritScale
-	}
-	return dmg
-}
-
 // arrowHit resolves an arrow that crossed victim's hitbox: game veto,
 // damage through armor, Punch knockback, death credited to the shooter.
-func (p *projectile) arrowHit(i *Instance, victim *ClientConnection) {
+func (p *projectileEntity) arrowHit(i *Instance, victim *ClientConnection) {
 	shooter := p.thrower
 	if shooter != nil && (shooter.instance != i || shooter.isClosed()) {
 		shooter = nil
@@ -175,8 +147,8 @@ func (p *projectile) arrowHit(i *Instance, victim *ClientConnection) {
 	if vp == nil || vp.IsDead() || !i.PvPEnabled() {
 		return
 	}
-	speed := math.Sqrt(p.vx*p.vx + p.vy*p.vy + p.vz*p.vz)
-	dmg := victim.absorbDamage(arrowDamage(speed, p.power, p.crit))
+	speed := math.Sqrt(p.VX*p.VX + p.VY*p.VY + p.VZ*p.VZ)
+	dmg := victim.absorbDamage(projectile.ArrowDamage(speed, p.power, p.crit))
 	now := i.Tick()
 	applied, newHealth, killed := vp.ApplyDamage(dmg, now, i.Combat.InvulnTicks)
 	if applied <= 0 {
@@ -186,10 +158,10 @@ func (p *projectile) arrowHit(i *Instance, victim *ClientConnection) {
 	i.Players.Broadcast(packetid.CbPlayHurtAnimation, combat.HurtAnimationPayload(s.EntityID, 0), -1)
 	i.playSound("minecraft:entity.arrow.hit_player", sound.CategoryPlayer, s.X, s.Y, s.Z, 1, 1)
 	if p.punch > 0 && speed > 0 {
-		k := punchStrength * float64(p.punch)
+		k := projectile.PunchStrength * float64(p.punch)
 		i.Players.Broadcast(packetid.CbPlayEntityVelocity,
-			combat.EntityVelocityPayload(s.EntityID, p.vx/speed*k, 0.1, p.vz/speed*k), -1)
-		victim.giveVelocity(p.vx/speed*k, 0.1, p.vz/speed*k)
+			combat.EntityVelocityPayload(s.EntityID, p.VX/speed*k, 0.1, p.VZ/speed*k), -1)
+		victim.giveVelocity(p.VX/speed*k, 0.1, p.VZ/speed*k)
 	}
 	if killed {
 		victim.die(shooter)

@@ -7,6 +7,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/inventory"
+	"minecraft-server/server/projectile"
 	"minecraft-server/world"
 )
 
@@ -109,7 +110,7 @@ func TestFireballFliesStraightAndExplodes(t *testing.T) {
 	inst.projMu.Lock()
 	p := inst.projectiles[0]
 	inst.projMu.Unlock()
-	if p.typeID != fireballEntityID || !p.noGravity {
+	if p.TypeID != projectile.FireballEntityID || !p.NoGravity {
 		t.Fatalf("fireball projectile: %+v", p)
 	}
 	for i := 0; i < 20; i++ {

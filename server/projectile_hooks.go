@@ -2,8 +2,7 @@ package server
 
 import (
 	"minecraft-server/anticheat"
-	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/combat"
+	"minecraft-server/server/projectile"
 	"minecraft-server/world"
 )
 
@@ -18,38 +17,27 @@ func (i *Instance) launchProjectile(thrower *ClientConnection, item string, spee
 	if thrower == nil || thrower.player == nil || i.Server == nil {
 		return false
 	}
-	typeID, ok := throwableEntityID(item)
+	typeID, ok := projectile.ThrowableEntityID(item)
 	if !ok {
 		if id, known := world.EntityTypeID(item); known {
 			typeID = id
 		} else {
-			typeID = snowballEntityID
+			typeID = projectile.SnowballEntityID
 		}
 	}
 	s := thrower.player.Snapshot()
 	look := anticheat.LookDir(s.Yaw, s.Pitch)
-
-	p := &projectile{
-		eid:      i.Server.nextEntityID.Add(1),
-		typeID:   typeID,
+	eid := i.Server.nextEntityID.Add(1)
+	i.addProjectile(&projectileEntity{
+		Flight: projectile.Flight{
+			EID: eid, UUID: entityUUID(eid), TypeID: typeID,
+			X: s.X, Y: s.Y + eyeHeight, Z: s.Z,
+			VX: look.X * speed, VY: look.Y * speed, VZ: look.Z * speed,
+		},
 		item:     item,
-		x:        s.X,
-		y:        s.Y + eyeHeight,
-		z:        s.Z,
-		vx:       look.X * speed,
-		vy:       look.Y * speed,
-		vz:       look.Z * speed,
 		thrower:  thrower,
 		onTick:   onTick,
 		onImpact: onImpact,
-	}
-	p.uuid = entityUUID(p.eid)
-
-	i.projMu.Lock()
-	i.projectiles = append(i.projectiles, p)
-	i.projMu.Unlock()
-
-	i.Players.Broadcast(packetid.CbPlaySpawnEntity, spawnProjectilePayload(p), -1)
-	i.Players.Broadcast(packetid.CbPlayEntityVelocity, combat.EntityVelocityPayload(p.eid, p.vx, p.vy, p.vz), -1)
+	})
 	return true
 }

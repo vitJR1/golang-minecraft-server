@@ -4,24 +4,9 @@ import (
 	"testing"
 
 	"minecraft-server/player"
+	"minecraft-server/server/projectile"
 	"minecraft-server/world"
 )
-
-func TestThrowableEntityID(t *testing.T) {
-	cases := map[string]int32{
-		"minecraft:egg":         eggEntityID,
-		"minecraft:snowball":    snowballEntityID,
-		"minecraft:ender_pearl": enderPearlEntityID,
-	}
-	for item, want := range cases {
-		if id, ok := throwableEntityID(item); !ok || id != want {
-			t.Errorf("%s: got %d,%v want %d", item, id, ok, want)
-		}
-	}
-	if _, ok := throwableEntityID("minecraft:diamond"); ok {
-		t.Error("diamond should not be throwable")
-	}
-}
 
 // bareInstance builds an Instance without starting its tick loop, so tests can
 // drive projectileTick deterministically.
@@ -31,18 +16,18 @@ func bareInstance(s *Server, w world.World) *Instance {
 
 func TestProjectileFliesThenExpires(t *testing.T) {
 	inst := bareInstance(New(), world.NewMemoryWorld())
-	p := &projectile{eid: 5, item: "minecraft:snowball", x: 0, y: 70, z: 0, vx: 1}
-	inst.projectiles = []*projectile{p}
+	p := &projectileEntity{Flight: projectile.Flight{EID: 5, X: 0, Y: 70, Z: 0, VX: 1}, item: "minecraft:snowball"}
+	inst.projectiles = []*projectileEntity{p}
 
 	inst.projectileTick(0)
 	if len(inst.projectiles) != 1 {
 		t.Fatalf("snowball should still be flying, have %d", len(inst.projectiles))
 	}
-	if p.x <= 0 {
-		t.Errorf("snowball didn't move: x=%v", p.x)
+	if p.X <= 0 {
+		t.Errorf("snowball didn't move: x=%v", p.X)
 	}
-	if p.vy >= 0 {
-		t.Errorf("gravity should pull vy negative: %v", p.vy)
+	if p.VY >= 0 {
+		t.Errorf("gravity should pull vy negative: %v", p.VY)
 	}
 }
 
@@ -51,8 +36,8 @@ func TestProjectileImpactRemoves(t *testing.T) {
 	w.SetBlock(world.Position{X: 2, Y: 70, Z: 0}, world.Stone)
 	inst := bareInstance(New(), w)
 	// Starts at x=1.5 moving +x → next step ~2.49 lands in the solid block.
-	p := &projectile{eid: 6, item: "minecraft:egg", x: 1.5, y: 70.5, z: 0, vx: 1}
-	inst.projectiles = []*projectile{p}
+	p := &projectileEntity{Flight: projectile.Flight{EID: 6, X: 1.5, Y: 70.5, Z: 0, VX: 1}, item: "minecraft:egg"}
+	inst.projectiles = []*projectileEntity{p}
 
 	inst.projectileTick(0)
 	if len(inst.projectiles) != 0 {
@@ -72,8 +57,8 @@ func TestEnderPearlTeleportsThrower(t *testing.T) {
 		outbound: make(chan outboundMsg, 16),
 		done:     make(chan struct{}),
 	}
-	p := &projectile{eid: 7, item: "minecraft:ender_pearl", x: 1.5, y: 70.5, z: 0, vx: 1, thrower: thrower}
-	inst.projectiles = []*projectile{p}
+	p := &projectileEntity{Flight: projectile.Flight{EID: 7, X: 1.5, Y: 70.5, Z: 0, VX: 1}, item: "minecraft:ender_pearl", thrower: thrower}
+	inst.projectiles = []*projectileEntity{p}
 
 	inst.projectileTick(0)
 	if len(inst.projectiles) != 0 {
