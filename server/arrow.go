@@ -122,10 +122,10 @@ func (i *Instance) arrowHitPlayer(p *projectileEntity, nx, ny, nz float64) *Clie
 		if s.Gamemode == player.Spectator {
 			continue
 		}
-		half := playerHalfWidth + world.ArrowHitInflate
+		half := anticheat.PlayerWidth/2 + world.ArrowHitInflate
 		t, ok := anticheat.SegmentHitsBox(p.X, p.Y, p.Z, nx, ny, nz,
 			s.X-half, s.Y-world.ArrowHitInflate, s.Z-half,
-			s.X+half, s.Y+playerHeight+world.ArrowHitInflate, s.Z+half)
+			s.X+half, s.Y+anticheat.PlayerHeight+world.ArrowHitInflate, s.Z+half)
 		if ok && t < bestT {
 			best, bestT = c, t
 		}
