@@ -100,7 +100,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		if err != nil {
 			return fmt.Errorf("set player position: %w", err)
 		}
-		if !finite64(x, y, z) {
+		if !anticheat.Finite64(x, y, z) {
 			c.kickInvalidMove()
 			break
 		}
@@ -120,7 +120,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		if err != nil {
 			return fmt.Errorf("set player position+rotation: %w", err)
 		}
-		if !finite64(x, y, z) || !finite32(yaw, pitch) {
+		if !anticheat.Finite64(x, y, z) || !anticheat.Finite32(yaw, pitch) {
 			c.kickInvalidMove()
 			break
 		}
@@ -138,7 +138,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		if err != nil {
 			return fmt.Errorf("set player rotation: %w", err)
 		}
-		if !finite32(yaw, pitch) {
+		if !anticheat.Finite32(yaw, pitch) {
 			c.kickInvalidMove()
 			break
 		}
@@ -233,7 +233,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		}
 		held := c.heldItemName()
 
-		if !cursorValid(cx, cy, cz) {
+		if !anticheat.CursorValid(cx, cy, cz) {
 			c.flag("badpackets.place", fmt.Sprintf("cursor %.3f,%.3f,%.3f outside the block", cx, cy, cz))
 			_ = c.sendBlockUpdate(placePos, c.instance.World.GetBlock(placePos))
 			break

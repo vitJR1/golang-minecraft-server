@@ -1,6 +1,7 @@
 package anticheat
 
 import (
+	"math"
 	"time"
 	"unicode/utf8"
 )
@@ -87,6 +88,53 @@ func ValidChat(text string) bool {
 	}
 	for _, r := range text {
 		if r == '§' || r < ' ' || r == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+// Movement sanity limits — deliberately generous, they stop garbage and
+// teleport hacks. Walking into or through walls is caught by Phased; speed
+// and flight by MoveState.Judge.
+const (
+	// maxMoveSqPerPacket is the squared per-packet travel cap: 10 blocks per
+	// movement packet, vanilla's "moved too quickly" threshold. Sprinting,
+	// knockback and post-teleport catch-up all stay far below it.
+	maxMoveSqPerPacket = 100.0
+
+	// maxWorldXZ / maxWorldY bound absolute coordinates (vanilla's world
+	// border sits at ~3.0e7). Positions outside are garbage regardless of
+	// travel speed — chunk math and other clients choke on them.
+	maxWorldXZ = 3.0e7
+	maxWorldY  = 2.0e4
+)
+
+// MoveSane checks a move from → to against the absolute limits: outside the
+// world, or farther than one packet may go.
+func MoveSane(from, to Vec) (outOfBounds, tooFast bool) {
+	dx, dy, dz := to.X-from.X, to.Y-from.Y, to.Z-from.Z
+	outOfBounds = math.Abs(to.X) > maxWorldXZ || math.Abs(to.Z) > maxWorldXZ || math.Abs(to.Y) > maxWorldY
+	tooFast = dx*dx+dy*dy+dz*dz > maxMoveSqPerPacket
+	return outOfBounds, tooFast
+}
+
+// Finite64 reports whether every value is a real number — NaN or ±Inf
+// coordinates poison entity broadcasts (other clients crash-kick on a
+// teleport packet carrying NaN), so they must never reach player state.
+func Finite64(vals ...float64) bool {
+	for _, v := range vals {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return false
+		}
+	}
+	return true
+}
+
+// Finite32 is Finite64 for the float32 rotation fields.
+func Finite32(vals ...float32) bool {
+	for _, v := range vals {
+		if f := float64(v); math.IsNaN(f) || math.IsInf(f, 0) {
 			return false
 		}
 	}

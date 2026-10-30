@@ -97,3 +97,68 @@ func FaceVisible(e Vec, x, y, z, face int, slack float64) bool {
 	}
 	return false
 }
+
+// Action geometry (vanilla-generous).
+const (
+	// digAngleMax: a block being dug is in front of the player — within
+	// this angle of the view from the eyes to its centre — unless it's so
+	// close (digAngleNear) that the crosshair may be on a far corner.
+	digAngleMax  = 60.0
+	digAngleNear = 2.0
+	// faceSlack: how far the eye may sit behind a clicked face's plane.
+	faceSlack = 0.1
+	// aimMargin grows the victim's hitbox for the aim test: the crosshair
+	// moves every frame, the server sees the rotation once a tick.
+	aimMargin = 1.0
+)
+
+// DigAimed reports whether a dig at a block centred at centre is in front
+// of one of the poses the client may have acted from (eyes × looks), and
+// the smallest angle off the view.
+func DigAimed(eyes, looks []Vec, centre Vec) (ok bool, angle float64) {
+	best := 180.0
+	for _, e := range eyes {
+		if Dist(e, centre) < digAngleNear {
+			return true, 0
+		}
+		for _, l := range looks {
+			best = math.Min(best, AngleTo(e, l, centre))
+		}
+	}
+	return best <= digAngleMax, best
+}
+
+// CursorValid: the click's position inside the block is in [0, 1] on every
+// axis (vanilla refuses anything else).
+func CursorValid(x, y, z float32) bool {
+	ok := func(v float32) bool { return v >= -0.0001 && v <= 1.0001 }
+	return ok(x) && ok(y) && ok(z)
+}
+
+// FaceSeen reports whether the clicked face of the block at (x, y, z) faces
+// one of the eyes — the client can only click a face it sees; scaffold
+// modules place against hidden ones.
+func FaceSeen(eyes []Vec, x, y, z, face int) bool {
+	for _, e := range eyes {
+		if FaceVisible(e, x, y, z, face, faceSlack) {
+			return true
+		}
+	}
+	return false
+}
+
+// Aimed reports whether a view ray (eyes × looks) passes through the
+// victim at any of the positions the client may have shown it at.
+func Aimed(eyes, looks []Vec, victim []Sample) bool {
+	for _, s := range victim {
+		box := PlayerBox(s).Expand(aimMargin)
+		for _, e := range eyes {
+			for _, l := range looks {
+				if RayHitsBox(e, l, box, CreativeAttackReach+aimMargin) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}

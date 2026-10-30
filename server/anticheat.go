@@ -80,7 +80,7 @@ func (c *ClientConnection) onTeleportConfirm(id int32) {
 	// starts over there. A setback only puts them back mid-air — resetting
 	// on it would let a flying client "land" on every rubber-band.
 	if !tp.Setback {
-		c.teleported(tp.Y)
+		c.ac.Move.Teleported(tp.Y)
 	}
 	// The vanilla client follows every confirm with an extra position
 	// packet in the same tick; it isn't a timer.

@@ -2,7 +2,6 @@ package server
 
 import (
 	"fmt"
-	"strings"
 
 	"minecraft-server/anticheat"
 	"minecraft-server/player"
@@ -62,20 +61,10 @@ func (c *ClientConnection) useInReach(pos world.Position) bool {
 	return false
 }
 
-// entityBox approximates a world entity's hitbox: an item frame is a small
-// box around its centre, anything else (villager NPCs) a standing mob.
-func entityBox(e world.Entity) anticheat.Box {
-	if strings.HasSuffix(e.Type, "item_frame") {
-		c := anticheat.Vec{X: e.X, Y: e.Y, Z: e.Z}
-		return anticheat.Box{Min: c, Max: c}.Expand(0.375)
-	}
-	return anticheat.FeetBox(anticheat.Vec{X: e.X, Y: e.Y, Z: e.Z}, 0.6, 1.95)
-}
-
 // entityInReach: Interact on a world entity is honoured while the eyes are
 // within MaxEntityReach of its hitbox. Out of reach is flagged.
 func (c *ClientConnection) entityInReach(e world.Entity) bool {
-	d := entityBox(e).DistanceTo(c.eye())
+	d := anticheat.EntityBox(e.Type, e.X, e.Y, e.Z).DistanceTo(c.eye())
 	if d <= anticheat.MaxEntityReach {
 		return true
 	}

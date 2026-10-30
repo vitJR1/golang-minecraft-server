@@ -1,6 +1,9 @@
 package anticheat
 
-import "math"
+import (
+	"math"
+	"strings"
+)
 
 // reach.go: the geometry of interaction-range checks, as vanilla 1.20.1
 // measures it — from the eyes to a block's centre or an entity's hitbox.
@@ -151,4 +154,14 @@ func LookDir(yaw, pitch float32) Vec {
 	y := float64(yaw) * math.Pi / 180
 	p := float64(pitch) * math.Pi / 180
 	return Vec{X: -math.Sin(y) * math.Cos(p), Y: -math.Sin(p), Z: math.Cos(y) * math.Cos(p)}
+}
+
+// EntityBox approximates a world entity's hitbox: an item frame is a small
+// box around its centre, anything else (villager NPCs) a standing mob.
+func EntityBox(entityType string, x, y, z float64) Box {
+	if strings.HasSuffix(entityType, "item_frame") {
+		c := Vec{X: x, Y: y, Z: z}
+		return Box{Min: c, Max: c}.Expand(0.375)
+	}
+	return FeetBox(Vec{X: x, Y: y, Z: z}, 0.6, 1.95)
 }
