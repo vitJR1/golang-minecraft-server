@@ -11,6 +11,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/combat"
 	"minecraft-server/world"
 )
 
@@ -20,7 +21,7 @@ import (
 // combat tuning, long since any tick.
 func pvpInstance() *Instance {
 	inst := bareInstance(New(), world.NewMemoryWorld())
-	inst.Combat = DefaultCombatConfig()
+	inst.Combat = combat.DefaultConfig()
 	inst.SetPvP(true)
 	inst.tickCount.Store(1000)
 	return inst

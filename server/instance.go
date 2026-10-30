@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"minecraft-server/cfg"
 	"minecraft-server/game"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/botai"
+	"minecraft-server/server/combat"
 	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 	"sync"
@@ -29,70 +29,6 @@ var tickInterval = time.Second / TickRate
 // handler takes longer than tickInterval, the next tick is dropped (the
 // ticker doesn't queue), so a slow handler stretches game time visibly.
 type TickHandler func(tick uint64)
-
-// CombatConfig tunes the 1.9-style PvP system per instance. Zero value is
-// not usable — construct via DefaultCombatConfig and tweak. All damage is
-// in half-heart units (20 = full health). These are the numeric knobs only;
-// the live on/off toggles (PvP enabled, instant respawn) live on Instance as
-// atomics so they can be flipped at runtime (e.g. via /instance set pvp).
-type CombatConfig struct {
-	// Version is the combat model: PvP18 (no cooldown) or PvP19 (charge
-	// scaling). Defaults from cfg.PvPVersion (PVP_VERSION env var).
-	Version PvPVersion
-
-	// BaseDamage is the weapon's raw hit damage at full charge, before the
-	// cooldown scaling and crit multiplier. 6 ≈ a vanilla iron sword.
-	BaseDamage float32
-
-	// AttackSpeed is attacks-per-second (vanilla "Attack Speed" attribute):
-	// fist 4.0, sword 1.6, axe 1.0. Drives the cooldown charge window —
-	// cooldown is 1/AttackSpeed seconds.
-	AttackSpeed float32
-
-	// Knockback is the horizontal launch strength of a normal hit, in
-	// blocks/tick. SprintKnockback is the extra added when the attacker is
-	// sprinting (the 1.9 "w-tap"). VerticalKnockback is the upward launch.
-	Knockback         float32
-	SprintKnockback   float32
-	VerticalKnockback float32
-
-	// CritMultiplier scales damage on a critical hit (attacker falling, at
-	// full charge). Vanilla is 1.5.
-	CritMultiplier float32
-
-	// InvulnTicks is the per-target i-frame window (vanilla: 10 ticks).
-	InvulnTicks uint64
-
-	// RegenIntervalTicks is how often a below-max, alive player heals one
-	// half-heart. 0 disables natural regen.
-	RegenIntervalTicks uint64
-}
-
-// DefaultCombatConfig returns the out-of-the-box PvP tuning: a sword-like
-// weapon with the full 1.9 cooldown/crit/knockback model and slow natural
-// regen. Enabled by default — disable it on safe instances (e.g. the hub).
-func DefaultCombatConfig() CombatConfig {
-	return CombatConfig{
-		Version:            pvpVersionFromCfg(),
-		BaseDamage:         6,
-		AttackSpeed:        1.6,
-		Knockback:          0.4,
-		SprintKnockback:    0.4,
-		VerticalKnockback:  0.4,
-		CritMultiplier:     1.5,
-		InvulnTicks:        10,
-		RegenIntervalTicks: 40, // ~2s per half-heart
-	}
-}
-
-// pvpVersionFromCfg maps the cfg.PvPVersion int (set from PVP_VERSION) to a
-// PvPVersion, falling back to 1.9 for any unrecognized value.
-func pvpVersionFromCfg() PvPVersion {
-	if cfg.PvPVersion == int(PvP18) {
-		return PvP18
-	}
-	return PvP19
-}
 
 // Spawn is a respawn/teleport target. Defaults to the world origin column.
 type Spawn struct {
@@ -129,10 +65,10 @@ type Instance struct {
 	ephemeralState
 
 	// Combat holds the numeric PvP tuning for this instance (damage, speed,
-	// knockback). Set at construction (DefaultCombatConfig) and safe to
+	// knockback). Set at construction (combat.DefaultConfig) and safe to
 	// tweak before traffic arrives; the live on/off toggles below are
 	// separate atomics so they can flip mid-fight without a data race.
-	Combat CombatConfig
+	Combat combat.Config
 
 	// combatEnabled gates the whole PvP system; instantRespawn picks the
 	// death behavior (instant heal+teleport vs death screen). Atomic so
@@ -141,7 +77,7 @@ type Instance struct {
 	instantRespawn atomic.Bool
 	// customRespawn: death leaves the player dead for the game to respawn
 	// (game.Instance.SetCustomRespawn). weaponDamage: melee damage from the
-	// held weapon + armour instead of the flat CombatConfig value.
+	// held weapon + armour instead of the flat combat.Config value.
 	// tntAutoPrime: a placed TNT block ignites at once.
 	customRespawn atomic.Bool
 	weaponDamage  atomic.Bool
@@ -305,7 +241,7 @@ func NewInstance(id string, srv *Server, w world.World) *Instance {
 		Server:     srv,
 		World:      w,
 		Players:    NewPlayerList(),
-		Combat:     DefaultCombatConfig(),
+		Combat:     combat.DefaultConfig(),
 		SpawnPoint: Spawn{X: 0.5, Y: 67, Z: 0.5},
 		stopTick:   make(chan struct{}),
 	}

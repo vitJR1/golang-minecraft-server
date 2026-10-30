@@ -1,22 +1,14 @@
 package server
 
 import (
-	"math"
-
+	"minecraft-server/server/combat"
 	"minecraft-server/server/inventory"
+	"minecraft-server/server/sound"
 	"minecraft-server/world"
 )
 
-// armor.go: damage reduction from worn armor, vanilla 1.20.1 style.
-//
-//	reduced = dmg × (1 − min(20, max(A/5, A − dmg/(2 + T/4))) / 25)
-//	        × (1 − min(20, ΣProtection) / 25)
-//
-// where A is the sum of the four pieces' defence points and T their
-// toughness (world.ArmorPoints), and ΣProtection the Protection levels
-// across the pieces (EPF). Each worn piece then wears by max(1, dmg/4)
-// durability, breaking at world.ToolDurability. Used for melee, lava/fire
-// and explosions alike.
+// armor.go: worn armor against damage — the formula is combat.ArmorReduce
+// (combat), the wear is applied here.
 
 // armorSlots are the window-0 indices of worn armor, helmet first.
 var armorSlots = [4]int16{armorHelmetSlot, armorChestplateSlot, armorLeggingsSlot, armorBootsSlot}
@@ -51,14 +43,8 @@ func (c *ClientConnection) absorbDamage(dmg float32) float32 {
 	if worn == 0 {
 		return dmg
 	}
-	armorFactor := float32(math.Max(float64(points/5), float64(points-dmg/(2+toughness/4))))
-	armorFactor = float32(math.Min(20, float64(armorFactor)))
-	out := dmg * (1 - armorFactor/25)
-	if epf > 20 {
-		epf = 20
-	}
-	out *= 1 - float32(epf)/25
-	c.wearArmor(max(1, int(dmg/4)))
+	out := combat.ArmorReduce(dmg, points, toughness, epf)
+	c.wearArmor(combat.ArmorWear(dmg))
 	return out
 }
 
@@ -87,7 +73,7 @@ func (c *ClientConnection) wearArmor(n int) {
 			st = inventory.Stack{}
 			if c.player != nil {
 				s := c.player.Snapshot()
-				c.instance.playSound("minecraft:entity.item.break", soundCategoryPlayer, s.X, s.Y, s.Z, 0.8, 1)
+				c.instance.playSound("minecraft:entity.item.break", sound.CategoryPlayer, s.X, s.Y, s.Z, 0.8, 1)
 			}
 		}
 		c.inv.Set(slot, st)

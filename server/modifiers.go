@@ -11,6 +11,7 @@ import (
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/inventory"
+	"minecraft-server/server/sound"
 	"minecraft-server/world"
 )
 
@@ -458,7 +459,7 @@ func (c *ClientConnection) damageHeldTool(n int) {
 		if c.player != nil {
 			s := c.player.Snapshot()
 			_ = c.safeWrite(packetid.CbPlaySoundEffect,
-				soundEffectPayload("minecraft:entity.item.break", soundCategoryPlayer, s.X, s.Y, s.Z, 0.8, 1))
+				sound.EffectPayload("minecraft:entity.item.break", sound.CategoryPlayer, s.X, s.Y, s.Z, 0.8, 1))
 		}
 	}
 	c.inv.Set(slot, st)

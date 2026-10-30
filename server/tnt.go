@@ -8,6 +8,8 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/combat"
+	"minecraft-server/server/sound"
 	"minecraft-server/world"
 )
 
@@ -121,7 +123,7 @@ func (i *Instance) primeTNT(pos world.Position, fuse int, igniter *ClientConnect
 
 	i.Players.Broadcast(packetid.CbPlaySpawnEntity, spawnTNTPayload(t), -1)
 	i.Players.Broadcast(packetid.CbPlaySetEntityMetadata, tntMetadataPayload(t), -1)
-	i.playSound("minecraft:entity.tnt.primed", soundCategoryBlocks, t.x, t.y, t.z, 1, 1)
+	i.playSound("minecraft:entity.tnt.primed", sound.CategoryBlocks, t.x, t.y, t.z, 1, 1)
 	return true
 }
 
@@ -405,8 +407,8 @@ func (i *Instance) explosionPlayers(x, y, z, power float64, actor *ClientConnect
 		if applied <= 0 {
 			continue
 		}
-		i.Players.Broadcast(packetid.CbPlayHurtAnimation, hurtAnimationPayload(s.EntityID, 0), -1)
-		i.playSound("minecraft:entity.player.hurt", soundCategoryPlayer, s.X, s.Y, s.Z, 1, 1)
+		i.Players.Broadcast(packetid.CbPlayHurtAnimation, combat.HurtAnimationPayload(s.EntityID, 0), -1)
+		i.playSound("minecraft:entity.player.hurt", sound.CategoryPlayer, s.X, s.Y, s.Z, 1, 1)
 		if killed {
 			var killer *ClientConnection
 			if actor != nil && actor != c {
@@ -541,9 +543,9 @@ func spawnTNTPayload(t *primedTNT) []byte {
 	buf.WriteByte(0)                        // yaw
 	buf.WriteByte(0)                        // head yaw
 	protocol.WriteVarInt32ToBuffer(&buf, 0) // data
-	buf.Write(protocol.WriteShort(velocityShort(t.vx)))
-	buf.Write(protocol.WriteShort(velocityShort(t.vy)))
-	buf.Write(protocol.WriteShort(velocityShort(t.vz)))
+	buf.Write(protocol.WriteShort(protocol.VelocityShort(t.vx)))
+	buf.Write(protocol.WriteShort(protocol.VelocityShort(t.vy)))
+	buf.Write(protocol.WriteShort(protocol.VelocityShort(t.vz)))
 	return buf.Bytes()
 }
 

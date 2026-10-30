@@ -9,6 +9,7 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/server/botai"
+	"minecraft-server/server/combat"
 	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
@@ -74,7 +75,7 @@ func botWorld() (*Instance, world.Position) {
 	planks, _ := world.BlockByName("minecraft:oak_planks")
 	target := world.Position{X: 16, Y: 64, Z: 0}
 	inst.World.SetBlock(target, planks)
-	inst.Combat = DefaultCombatConfig()
+	inst.Combat = combat.DefaultConfig()
 	inst.SetPvP(true)
 	return inst, target
 }
@@ -135,7 +136,7 @@ func gapWorld(gap int) *Instance {
 			}
 		}
 	}
-	inst.Combat = DefaultCombatConfig()
+	inst.Combat = combat.DefaultConfig()
 	inst.SetPvP(true)
 	return inst
 }
@@ -651,7 +652,7 @@ func TestArcherShootsFarEnemies(t *testing.T) {
 			inst.World.SetBlock(world.Position{X: x + 60, Y: 63, Z: z}, world.Stone)
 		}
 	}
-	inst.Combat = DefaultCombatConfig()
+	inst.Combat = combat.DefaultConfig()
 	inst.SetPvP(true)
 	guide := &fakeGuide{plan: game.BotPlan{Team: "red"}}
 	var bots []*ClientConnection

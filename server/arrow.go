@@ -6,6 +6,8 @@ import (
 	"minecraft-server/anticheat"
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/combat"
+	"minecraft-server/server/sound"
 	"minecraft-server/world"
 )
 
@@ -113,7 +115,7 @@ func (c *ClientConnection) shootBow(u *useState) {
 	}
 	c.damageHeldTool(1)
 	s := c.player.Snapshot()
-	c.instance.playSound("minecraft:entity.arrow.shoot", soundCategoryPlayer, s.X, s.Y, s.Z, 1, float32(1/(f*0.5+1.2)))
+	c.instance.playSound("minecraft:entity.arrow.shoot", sound.CategoryPlayer, s.X, s.Y, s.Z, 1, float32(1/(f*0.5+1.2)))
 }
 
 func arrowItemID() int32 {
@@ -181,12 +183,12 @@ func (p *projectile) arrowHit(i *Instance, victim *ClientConnection) {
 		return
 	}
 	s := vp.Snapshot()
-	i.Players.Broadcast(packetid.CbPlayHurtAnimation, hurtAnimationPayload(s.EntityID, 0), -1)
-	i.playSound("minecraft:entity.arrow.hit_player", soundCategoryPlayer, s.X, s.Y, s.Z, 1, 1)
+	i.Players.Broadcast(packetid.CbPlayHurtAnimation, combat.HurtAnimationPayload(s.EntityID, 0), -1)
+	i.playSound("minecraft:entity.arrow.hit_player", sound.CategoryPlayer, s.X, s.Y, s.Z, 1, 1)
 	if p.punch > 0 && speed > 0 {
 		k := punchStrength * float64(p.punch)
 		i.Players.Broadcast(packetid.CbPlayEntityVelocity,
-			entityVelocityPayload(s.EntityID, p.vx/speed*k, 0.1, p.vz/speed*k), -1)
+			combat.EntityVelocityPayload(s.EntityID, p.vx/speed*k, 0.1, p.vz/speed*k), -1)
 		victim.giveVelocity(p.vx/speed*k, 0.1, p.vz/speed*k)
 	}
 	if killed {

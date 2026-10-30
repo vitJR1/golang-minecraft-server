@@ -6,6 +6,7 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/combat"
 	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
@@ -79,7 +80,7 @@ func TestArmorWearsAndBreaks(t *testing.T) {
 func duel(t *testing.T) (*Instance, *ClientConnection, *ClientConnection) {
 	t.Helper()
 	inst := bareInstance(New(), world.NewMemoryWorld())
-	inst.Combat = DefaultCombatConfig()
+	inst.Combat = combat.DefaultConfig()
 	inst.combatEnabled.Store(true)
 	inst.tickCount.Store(1000) // long since any previous swing → full charge
 	a := tntConn(inst, "Attacker", player.Survival, 0, 64, 0)

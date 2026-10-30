@@ -338,3 +338,10 @@ func ReadBool(buf *bytes.Buffer) (bool, error) {
 	}
 	return b != 0, nil
 }
+
+// VelocityShort converts blocks/tick to the protocol's 1/8000-block units,
+// clamped to the int16 range so an absurd value can't wrap around.
+func VelocityShort(v float64) int16 {
+	s := min(math.MaxInt16, max(math.MinInt16, math.Round(v*8000)))
+	return int16(s)
+}

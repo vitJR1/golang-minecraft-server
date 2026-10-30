@@ -209,3 +209,15 @@ func TestBoolNonZero(t *testing.T) {
 		t.Error("ReadBool(0) = true")
 	}
 }
+
+func TestVelocityShortClamp(t *testing.T) {
+	if got := VelocityShort(0.4); got != 3200 {
+		t.Errorf("0.4 blocks/tick: got %d, want 3200", got)
+	}
+	if got := VelocityShort(1000); got != math.MaxInt16 {
+		t.Errorf("overflow: got %d, want %d", got, int16(math.MaxInt16))
+	}
+	if got := VelocityShort(-1000); got != math.MinInt16 {
+		t.Errorf("underflow: got %d, want %d", got, int16(math.MinInt16))
+	}
+}

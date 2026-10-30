@@ -339,9 +339,9 @@ func spawnItemPayload(it *itemEntity) []byte {
 	buf.WriteByte(0)                        // yaw
 	buf.WriteByte(0)                        // head yaw
 	protocol.WriteVarInt32ToBuffer(&buf, 0) // data (unused for items)
-	buf.Write(protocol.WriteShort(velocityShort(it.vx)))
-	buf.Write(protocol.WriteShort(velocityShort(it.vy)))
-	buf.Write(protocol.WriteShort(velocityShort(it.vz)))
+	buf.Write(protocol.WriteShort(protocol.VelocityShort(it.vx)))
+	buf.Write(protocol.WriteShort(protocol.VelocityShort(it.vy)))
+	buf.Write(protocol.WriteShort(protocol.VelocityShort(it.vz)))
 	return buf.Bytes()
 }
 

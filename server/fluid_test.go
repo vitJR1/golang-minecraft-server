@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"minecraft-server/player"
+	"minecraft-server/server/combat"
 	"minecraft-server/world"
 )
 
@@ -163,7 +164,7 @@ func TestFluidsCannotBeBroken(t *testing.T) {
 func lavaArena(t *testing.T) (*Instance, *ClientConnection) {
 	t.Helper()
 	inst := bareInstance(New(), world.NewMemoryWorld())
-	inst.Combat = DefaultCombatConfig()
+	inst.Combat = combat.DefaultConfig()
 	inst.combatEnabled.Store(true)
 	inst.World.SetBlock(world.Position{X: 0, Y: 64, Z: 0}, world.Lava)
 	c := tntConn(inst, "Swimmer", player.Survival, 0.5, 64, 0.5)

@@ -8,6 +8,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/combat"
 	"minecraft-server/world"
 )
 
@@ -172,7 +173,7 @@ func TestCriticalHitNeedsRealFall(t *testing.T) {
 		}
 	}
 	c := offlineConn(inst, "Critter", player.Survival, 0.5, 64, 0.5)
-	inst.Combat.Version = PvP18 // no cooldown: every hit fully charged
+	inst.Combat.Version = combat.PvP18 // no cooldown: every hit fully charged
 
 	base := critDamage(t, inst, c, "V1")
 	if base <= 0 {

@@ -7,6 +7,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/combat"
 	"minecraft-server/world"
 )
 
@@ -155,7 +156,7 @@ func (c *ClientConnection) launch(p *projectile, speed float64) bool {
 	// Spawn for everyone with the initial velocity so the client animates it.
 	c.instance.Players.Broadcast(packetid.CbPlaySpawnEntity, spawnProjectilePayload(p), -1)
 	c.instance.Players.Broadcast(packetid.CbPlayEntityVelocity,
-		entityVelocityPayload(p.eid, p.vx, p.vy, p.vz), -1)
+		combat.EntityVelocityPayload(p.eid, p.vx, p.vy, p.vz), -1)
 	return true
 }
 
@@ -384,9 +385,9 @@ func spawnProjectilePayload(p *projectile) []byte {
 	buf.WriteByte(protocol.AngleToByte(yaw))
 	buf.WriteByte(protocol.AngleToByte(yaw))     // head yaw
 	protocol.WriteVarInt32ToBuffer(&buf, p.data) // data (arrows: owner id)
-	buf.Write(protocol.WriteShort(velocityShort(p.vx)))
-	buf.Write(protocol.WriteShort(velocityShort(p.vy)))
-	buf.Write(protocol.WriteShort(velocityShort(p.vz)))
+	buf.Write(protocol.WriteShort(protocol.VelocityShort(p.vx)))
+	buf.Write(protocol.WriteShort(protocol.VelocityShort(p.vy)))
+	buf.Write(protocol.WriteShort(protocol.VelocityShort(p.vz)))
 	return buf.Bytes()
 }
 

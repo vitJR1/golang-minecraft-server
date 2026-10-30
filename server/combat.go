@@ -2,9 +2,10 @@ package server
 
 import (
 	"fmt"
-	"math"
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/combat"
+	"minecraft-server/server/sound"
 	"minecraft-server/world"
 )
 
@@ -17,65 +18,6 @@ import (
 // per-target invulnerability, death, and respawn. It is core-server
 // behavior driven from the SbPlayInteract handler — games observe (and may
 // veto) a hit via the OnPlayerAttack hook, but the damage math lives here.
-
-// PvPVersion selects the melee combat model for an instance. The integer
-// values match the PVP_VERSION env var (1 = 1.8, 2 = 1.9).
-type PvPVersion int
-
-const (
-	PvP18 PvPVersion = 1 // 1.8: no attack cooldown, full damage per hit
-	PvP19 PvPVersion = 2 // 1.9: attack-cooldown charge scaling
-)
-
-// cooldownTicks converts an attack-speed attribute (attacks/second) into the
-// tick window the charge bar refills over. Guards a non-positive speed so a
-// misconfigured instance can't divide by zero (treated as "instant").
-func cooldownTicks(attackSpeed float32) float64 {
-	if attackSpeed <= 0 {
-		return 0
-	}
-	return float64(TickRate) / float64(attackSpeed)
-}
-
-// attackStrengthScale is vanilla's getAttackStrengthScale(0.5): how charged
-// the attack is, in [0,1]. ticksSince is ticks elapsed since the attacker's
-// previous swing; the +0.5 matches vanilla's mid-tick sampling. A zero (or
-// negative) cooldown means always fully charged.
-func attackStrengthScale(ticksSince uint64, cooldown float64) float32 {
-	if cooldown <= 0 {
-		return 1
-	}
-	f := (float64(ticksSince) + 0.5) / cooldown
-	return float32(max(0, min(1, f)))
-}
-
-// scaledDamage applies the 1.9 charge curve: a fully charged hit deals the
-// full base, a freshly-spammed hit deals 20%. damage = base*(0.2+0.8*s²).
-func scaledDamage(base, strength float32) float32 {
-	return base * (0.2 + strength*strength*0.8)
-}
-
-// knockbackHoriz returns the horizontal velocity (blocks/tick) to launch the
-// victim directly away from the attacker, at the given strength. When the
-// two share a column (degenerate direction) it pushes along +Z so the hit
-// still registers visibly.
-func knockbackHoriz(attackerX, attackerZ, victimX, victimZ float64, strength float32) (vx, vz float64) {
-	dx := victimX - attackerX
-	dz := victimZ - attackerZ
-	dist := math.Hypot(dx, dz)
-	if dist < 1e-4 {
-		return 0, float64(strength)
-	}
-	return dx / dist * float64(strength), dz / dist * float64(strength)
-}
-
-// yawTo computes the Minecraft yaw (degrees) pointing from (fromX,fromZ)
-// toward (toX,toZ). Used for the Hurt Animation recoil direction.
-func yawTo(fromX, fromZ, toX, toZ float64) float32 {
-	dx := toX - fromX
-	dz := toZ - fromZ
-	return float32(math.Atan2(-dx, dz) * 180 / math.Pi)
-}
 
 // handleAttack runs one melee hit from c against victim. Called from the
 // Interact handler after the OnPlayerAttack hook has approved it. No-op when
@@ -95,9 +37,9 @@ func (c *ClientConnection) handleAttack(victim *ClientConnection) {
 	// 1.8 has no attack cooldown: every hit is full strength. 1.9 scales
 	// damage by how charged the swing is since the attacker's last hit.
 	var strength float32 = 1
-	if cfg.Version == PvP19 {
+	if cfg.Version == combat.PvP19 {
 		prev := ap.AttackCooldownTick(now)
-		strength = attackStrengthScale(now-prev, cooldownTicks(cfg.AttackSpeed))
+		strength = combat.AttackStrengthScale(now-prev, combat.CooldownTicks(cfg.AttackSpeed, TickRate))
 	}
 
 	aSnap := ap.Snapshot()
@@ -112,7 +54,7 @@ func (c *ClientConnection) handleAttack(victim *ClientConnection) {
 			base += 0.5*float32(lvl) + 0.5
 		}
 	}
-	damage := scaledDamage(base, strength)
+	damage := combat.ScaledDamage(base, strength)
 
 	// Critical hit: attacker airborne and falling, by the server's own
 	// ground test — the packet's onGround flag is the client's word, and a
@@ -120,7 +62,7 @@ func (c *ClientConnection) handleAttack(victim *ClientConnection) {
 	// requires a fully charged swing). Vanilla also forbids sprinting, but
 	// we don't gate on that to keep it forgiving.
 	crit := !c.serverOnGround() && c.ac.Move.LastDY < 0
-	if cfg.Version == PvP19 {
+	if cfg.Version == combat.PvP19 {
 		crit = crit && strength > 0.9
 	}
 	if crit {
@@ -142,15 +84,15 @@ func (c *ClientConnection) handleAttack(victim *ClientConnection) {
 	c.applyKnockback(cfg, aSnap, vSnap, victim)
 
 	// Red flash + recoil for everyone, including the victim's own client.
-	hurtYaw := yawTo(vSnap.X, vSnap.Z, aSnap.X, aSnap.Z)
-	c.instance.Players.Broadcast(packetid.CbPlayHurtAnimation, hurtAnimationPayload(vSnap.EntityID, hurtYaw), -1)
+	hurtYaw := combat.YawTo(vSnap.X, vSnap.Z, aSnap.X, aSnap.Z)
+	c.instance.Players.Broadcast(packetid.CbPlayHurtAnimation, combat.HurtAnimationPayload(vSnap.EntityID, hurtYaw), -1)
 
 	// Hurt sound at the victim, audible to everyone nearby.
-	c.instance.playSound("minecraft:entity.player.hurt", soundCategoryPlayer, vSnap.X, vSnap.Y, vSnap.Z, 1, 1)
+	c.instance.playSound("minecraft:entity.player.hurt", sound.CategoryPlayer, vSnap.X, vSnap.Y, vSnap.Z, 1, 1)
 
 	if crit {
 		c.broadcastEntityAnimation(4) // 4 = critical-hit particles on attacker
-		c.instance.playSound("minecraft:entity.player.attack.crit", soundCategoryPlayer, vSnap.X, vSnap.Y, vSnap.Z, 1, 1)
+		c.instance.playSound("minecraft:entity.player.attack.crit", sound.CategoryPlayer, vSnap.X, vSnap.Y, vSnap.Z, 1, 1)
 	}
 
 	if killed {
@@ -167,7 +109,7 @@ func (c *ClientConnection) handleAttack(victim *ClientConnection) {
 // applyKnockback launches the victim away from the attacker, broadcasting
 // Set Entity Velocity to everyone (the victim's own client included, so its
 // movement actually changes). Sprinting attackers add the w-tap bonus.
-func (c *ClientConnection) applyKnockback(cfg CombatConfig, aSnap, vSnap player.Snapshot, victim *ClientConnection) {
+func (c *ClientConnection) applyKnockback(cfg combat.Config, aSnap, vSnap player.Snapshot, victim *ClientConnection) {
 	strength := cfg.Knockback
 	if c.sprintHit() {
 		strength += cfg.SprintKnockback
@@ -177,9 +119,9 @@ func (c *ClientConnection) applyKnockback(cfg CombatConfig, aSnap, vSnap player.
 		c.ac.Sprinting.Store(false)
 	}
 	strength += 0.5 * float32(c.heldEnchant(EnchantKnockback)) // knockback stick
-	vx, vz := knockbackHoriz(aSnap.X, aSnap.Z, vSnap.X, vSnap.Z, strength)
+	vx, vz := combat.KnockbackHoriz(aSnap.X, aSnap.Z, vSnap.X, vSnap.Z, strength)
 	c.instance.Players.Broadcast(packetid.CbPlayEntityVelocity,
-		entityVelocityPayload(vSnap.EntityID, vx, float64(cfg.VerticalKnockback), vz), -1)
+		combat.EntityVelocityPayload(vSnap.EntityID, vx, float64(cfg.VerticalKnockback), vz), -1)
 	victim.giveVelocity(vx, float64(cfg.VerticalKnockback), vz)
 }
 
@@ -201,7 +143,7 @@ func (c *ClientConnection) die(killer *ClientConnection) {
 	c.clearEffects() // …and ends every potion effect
 	c.cancelUse()
 	s := c.player.Snapshot()
-	c.instance.playSound("minecraft:entity.player.death", soundCategoryPlayer, s.X, s.Y, s.Z, 1, 1)
+	c.instance.playSound("minecraft:entity.player.death", sound.CategoryPlayer, s.X, s.Y, s.Z, 1, 1)
 
 	if c.instance.CustomRespawn() {
 		// The game owns what happens next (spectator, countdown, kit): the
@@ -225,7 +167,7 @@ func (c *ClientConnection) die(killer *ClientConnection) {
 		killerEID = killer.player.EntityID
 		msg = fmt.Sprintf("%s was slain by %s", c.player.Name, killer.player.Name)
 	}
-	_ = c.safeWrite(packetid.CbPlayCombatDeath, combatDeathPayload(c.player.EntityID, killerEID, msg))
+	_ = c.safeWrite(packetid.CbPlayCombatDeath, combat.DeathPayload(c.player.EntityID, killerEID, msg))
 	_ = c.sendSetHealth(0)
 	c.instance.BroadcastChat("", msg)
 

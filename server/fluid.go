@@ -6,6 +6,8 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/combat"
+	"minecraft-server/server/sound"
 	"minecraft-server/world"
 )
 
@@ -314,8 +316,8 @@ func (c *ClientConnection) hurtEnvironment(amount float32, invulnTicks, now uint
 		return
 	}
 	s := p.Snapshot()
-	c.instance.Players.Broadcast(packetid.CbPlayHurtAnimation, hurtAnimationPayload(s.EntityID, 0), -1)
-	c.instance.playSound("minecraft:entity.player.hurt", soundCategoryPlayer, s.X, s.Y, s.Z, 1, 1)
+	c.instance.Players.Broadcast(packetid.CbPlayHurtAnimation, combat.HurtAnimationPayload(s.EntityID, 0), -1)
+	c.instance.playSound("minecraft:entity.player.hurt", sound.CategoryPlayer, s.X, s.Y, s.Z, 1, 1)
 	if killed {
 		c.die(nil)
 		return

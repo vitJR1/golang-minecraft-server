@@ -7,7 +7,9 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/combat"
 	"minecraft-server/server/inventory"
+	"minecraft-server/server/sound"
 	"minecraft-server/world"
 )
 
@@ -224,7 +226,7 @@ func TestBroadcastNearFiltersByDistance(t *testing.T) {
 	inst := bareInstance(New(), tntWorld())
 	in := tntConn(inst, "In", player.Survival, 10, 64, 0)
 	out := tntConn(inst, "Out", player.Survival, 0, 64, 17)
-	inst.playSound("minecraft:entity.tnt.primed", soundCategoryBlocks, 0, 64, 0, 1, 1)
+	inst.playSound("minecraft:entity.tnt.primed", sound.CategoryBlocks, 0, 64, 0, 1, 1)
 	if lastPacket(t, in, packetid.CbPlaySoundEffect) == nil {
 		t.Error("player 10 blocks away should hear a volume-1 sound")
 	}
@@ -232,7 +234,7 @@ func TestBroadcastNearFiltersByDistance(t *testing.T) {
 		t.Error("player 17 blocks away should not be sent a volume-1 sound")
 	}
 	// Louder sounds carry proportionally further.
-	inst.playSound("minecraft:entity.generic.explode", soundCategoryBlocks, 0, 64, 0, 4, 1)
+	inst.playSound("minecraft:entity.generic.explode", sound.CategoryBlocks, 0, 64, 0, 4, 1)
 	if lastPacket(t, out, packetid.CbPlaySoundEffect) == nil {
 		t.Error("volume-4 sound should reach 17 blocks")
 	}
@@ -301,7 +303,7 @@ func TestExplosionRecordsAreRelativeOffsets(t *testing.T) {
 // the explosion sends must parse, and nothing may panic.
 func TestExplosionBehindWoolWallWithArmor(t *testing.T) {
 	inst := bareInstance(New(), tntWorld())
-	inst.Combat = DefaultCombatConfig()
+	inst.Combat = combat.DefaultConfig()
 	inst.combatEnabled.Store(true)
 	for y := 64; y <= 65; y++ {
 		inst.World.SetBlock(world.Position{X: 0, Y: y, Z: 2}, world.Block{StateID: 1384, Name: "minecraft:white_wool"})

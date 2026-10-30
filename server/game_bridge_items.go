@@ -7,6 +7,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/inventory"
+	"minecraft-server/server/sound"
 	"minecraft-server/world"
 )
 
@@ -138,7 +139,7 @@ func (b playerBridge) SetNameTag(tag game.NameTag) {
 func (b playerBridge) PlaySound(name string, volume, pitch float32) {
 	s := b.conn.player.Snapshot()
 	_ = b.conn.safeWrite(packetid.CbPlaySoundEffect,
-		soundEffectPayload(name, soundCategoryPlayer, s.X, s.Y, s.Z, volume, pitch))
+		sound.EffectPayload(name, sound.CategoryPlayer, s.X, s.Y, s.Z, volume, pitch))
 }
 
 // Respawn brings a dead (or alive) player back at (x, y, z) with full
@@ -174,7 +175,7 @@ func (b instanceBridge) SetExplosionDamage(scale float64) {
 func (b instanceBridge) FreezeTime(dayTime int64) { b.inst.FreezeTime(dayTime) }
 
 func (b instanceBridge) PlaySound(name string, x, y, z float64, volume, pitch float32) {
-	b.inst.playSound(name, soundCategoryPlayer, x, y, z, volume, pitch)
+	b.inst.playSound(name, sound.CategoryPlayer, x, y, z, volume, pitch)
 }
 
 func (b instanceBridge) ThrowProjectile(p game.PlayerHandle, item string, speed float64, hooks game.ProjectileHooks) {

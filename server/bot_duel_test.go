@@ -6,6 +6,7 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/server/botai"
+	"minecraft-server/server/combat"
 	"minecraft-server/world"
 )
 
@@ -34,7 +35,7 @@ func botDuel(t *testing.T, diff botai.Difficulty) (int, uint64) {
 			inst.World.SetBlock(world.Position{X: x, Y: 63, Z: z}, world.Stone)
 		}
 	}
-	inst.Combat = DefaultCombatConfig()
+	inst.Combat = combat.DefaultConfig()
 	inst.SetPvP(true)
 	inst.SetCustomRespawn(true) // the dead stay dead
 	inst.botGuide = &duelGuide{team: map[int32]string{}}

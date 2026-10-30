@@ -9,6 +9,7 @@ import (
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/inventory"
+	"minecraft-server/server/sound"
 	"minecraft-server/world"
 )
 
@@ -140,7 +141,7 @@ func (c *ClientConnection) finishConsume(u *useState) {
 			}
 		}
 	}
-	c.instance.playSound(consumeSound(u.item), soundCategoryPlayer, c.player.Snapshot().X, c.player.Snapshot().Y, c.player.Snapshot().Z, 1, 1)
+	c.instance.playSound(consumeSound(u.item), sound.CategoryPlayer, c.player.Snapshot().X, c.player.Snapshot().Y, c.player.Snapshot().Z, 1, 1)
 	if u.item == "minecraft:potion" {
 		// The bottle stays behind (not in creative).
 		if c.gamemode() != player.Creative {

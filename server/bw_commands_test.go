@@ -4,12 +4,13 @@ import (
 	"testing"
 
 	"minecraft-server/player"
+	"minecraft-server/server/combat"
 	"minecraft-server/world"
 )
 
 func TestBwGiveAndKillOnlyInWeaponDamageInstances(t *testing.T) {
 	inst := bareInstance(New(), world.NewMemoryWorld())
-	inst.Combat = DefaultCombatConfig()
+	inst.Combat = combat.DefaultConfig()
 	inst.combatEnabled.Store(true)
 	c := tntConn(inst, "QA", player.Survival, 0, 64, 0)
 	inst.Server.Ops.Add("QA")

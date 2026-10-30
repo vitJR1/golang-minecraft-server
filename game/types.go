@@ -220,7 +220,7 @@ type Instance interface {
 	// PlayerHandle.Respawn. Off by default.
 	SetCustomRespawn(enabled bool)
 
-	// SetWeaponDamage switches melee damage from the flat CombatConfig
+	// SetWeaponDamage switches melee damage from the flat combat.Config
 	// value to the held weapon's vanilla damage (+Sharpness) with armour
 	// reduction (+Protection). Off by default.
 	SetWeaponDamage(enabled bool)
