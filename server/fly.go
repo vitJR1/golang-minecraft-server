@@ -4,32 +4,17 @@ import (
 	"fmt"
 
 	"minecraft-server/player"
-	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/abilities"
 )
 
 // fly.go: /fly — lets a survival or adventure player fly (double-tap jump),
-// through Player Abilities (Cb 0x34: flags Byte, flying speed Float, field
-// of view modifier Float; minecraft-data 1.20 "abilities").
+// through Player Abilities (server/abilities).
 //
 // The client resets its abilities on every gamemode change and Respawn, so
 // the permission ends there too (dropFlight): flight granted in the hub
 // never reaches a game. While flight is allowed — and until the client has
 // confirmed it was taken away — the movement checks leave the player alone.
-
-// Player Abilities flags.
-const (
-	abilityInvulnerable = 0x01
-	abilityFlying       = 0x02
-	abilityMayFly       = 0x04
-	abilityInstabuild   = 0x08
-)
-
-// Vanilla defaults carried by every Player Abilities packet.
-const (
-	defaultFlySpeed = 0.05
-	defaultFOVMod   = 0.1
-)
 
 // flightExempt reports whether the movement checks should skip the player:
 // /fly is on, or was turned off and the client hasn't confirmed it yet.
@@ -41,23 +26,8 @@ func (c *ClientConnection) flightExempt() bool {
 // plus "may fly" when /fly is on. flying forces the flying state (sent
 // false when flight is taken away, so a flying player drops).
 func (c *ClientConnection) sendAbilities(flying bool) error {
-	var flags byte
-	switch c.gamemode() {
-	case player.Creative:
-		flags = abilityInvulnerable | abilityMayFly | abilityInstabuild
-	case player.Spectator:
-		flags = abilityInvulnerable | abilityMayFly | abilityFlying
-	}
-	if c.canFly.Load() {
-		flags |= abilityMayFly
-	}
-	if flying {
-		flags |= abilityFlying
-	}
-	payload := []byte{flags}
-	payload = append(payload, protocol.WriteFloat(defaultFlySpeed)...)
-	payload = append(payload, protocol.WriteFloat(defaultFOVMod)...)
-	return c.safeWrite(packetid.CbPlayPlayerAbil, payload)
+	flags := abilities.Flags(c.gamemode(), c.canFly.Load(), flying)
+	return c.safeWrite(packetid.CbPlayPlayerAbil, abilities.Payload(flags))
 }
 
 // setFlight turns /fly on or off. Off keeps the movement checks away until
@@ -101,7 +71,7 @@ func (c *ClientConnection) endFlightGrace() {
 // is flying. A vanilla client can't fly without permission — fly modules
 // set the flag anyway.
 func (c *ClientConnection) onClientAbilities(flags byte) {
-	if flags&abilityFlying == 0 || c.flightExempt() {
+	if flags&abilities.Flying == 0 || c.flightExempt() {
 		return
 	}
 	switch c.gamemode() {

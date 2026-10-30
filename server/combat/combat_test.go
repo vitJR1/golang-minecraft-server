@@ -3,9 +3,10 @@ package combat
 import (
 	"bytes"
 	"math"
+	"testing"
+
 	"minecraft-server/cfg"
 	"minecraft-server/protocol"
-	"testing"
 )
 
 func TestCooldownTicks(t *testing.T) {

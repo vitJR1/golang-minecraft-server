@@ -18,8 +18,9 @@
 package fluid
 
 import (
-	"minecraft-server/world"
 	"sync"
+
+	"minecraft-server/world"
 )
 
 // Kind holds one fluid's tuning.

@@ -2,9 +2,10 @@ package enderchest
 
 import (
 	"context"
-	"minecraft-server/server/inventory"
 	"os"
 	"testing"
+
+	"minecraft-server/server/inventory"
 )
 
 // TestEnderChestLoadFailureBlocksSave: when the store can't be read, the

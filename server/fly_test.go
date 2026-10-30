@@ -6,6 +6,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/abilities"
 )
 
 // fly_test.go: /fly and its interplay with the movement checks.
@@ -40,7 +41,7 @@ func TestFlyTogglesMayFly(t *testing.T) {
 	drain(c)
 
 	s.RunCommand(c, "fly")
-	if got := abilitiesSent(t, c); len(got) != 1 || got[0] != abilityMayFly {
+	if got := abilitiesSent(t, c); len(got) != 1 || got[0] != abilities.MayFly {
 		t.Fatalf("/fly on sent abilities %v, want [may fly]", got)
 	}
 	if !c.canFly.Load() {
@@ -60,7 +61,7 @@ func TestFlyKeepsCreativeAbilities(t *testing.T) {
 	s.RunCommand(c, "fly")
 	s.RunCommand(c, "fly") // off again: creative still flies
 	got := abilitiesSent(t, c)
-	want := byte(abilityInvulnerable | abilityMayFly | abilityInstabuild)
+	want := byte(abilities.Invulnerable | abilities.MayFly | abilities.Instabuild)
 	if len(got) != 2 || got[1] != want {
 		t.Fatalf("creative after /fly off: %v, want creative's own flags", got)
 	}
@@ -118,14 +119,14 @@ func TestGamemodeChangeAndRespawnDropFlight(t *testing.T) {
 func TestClientClaimingFlightFlagged(t *testing.T) {
 	inst := fieldWorld()
 	c := offlineConn(inst, "Hacker", player.Survival, 0.5, 64, 0.5)
-	play(t, c, packetid.SbPlayPlayerAbilities, []byte{abilityFlying})
+	play(t, c, packetid.SbPlayPlayerAbilities, []byte{abilities.Flying})
 	if !flaggedNow(c, "badpackets.abilities") {
 		t.Fatal("flying without permission not flagged")
 	}
 	ok := offlineConn(inst, "Pilot", player.Survival, 2.5, 64, 0.5)
 	ok.setFlight(true)
 	drain(ok)
-	play(t, ok, packetid.SbPlayPlayerAbilities, []byte{abilityFlying})
+	play(t, ok, packetid.SbPlayPlayerAbilities, []byte{abilities.Flying})
 	if flaggedNow(ok, "badpackets.abilities") {
 		t.Fatal("flying with /fly flagged")
 	}
