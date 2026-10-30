@@ -29,7 +29,6 @@ func BucketKind(item string) (*Kind, bool) {
 	return nil, false
 }
 
-
 // RayToPlacement walks the ray from (ox,oy,oz) along (dx,dy,dz) through air
 // and fluids until it meets a solid block, returning the last block position
 // the ray occupied before the hit. false when nothing solid is within reach.
