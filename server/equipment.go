@@ -1,69 +1,21 @@
 package server
 
 import (
-	"bytes"
-
-	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/inventory"
+	"minecraft-server/server/equipment"
 )
 
-// equipment.go: Set Equipment (Cb 0x55) — what other players see in a
-// player's hands and on their body. The payload is built from the
-// server-side inventory model (window-0 slots: 5 helmet, 6 chestplate,
-// 7 leggings, 8 boots, 45 off hand, 36+heldSlot main hand) through
-// inventory.WriteSlot, so NBT (enchant glint, dyed leather) travels along.
+// equipment.go: Set Equipment (Cb 0x55, payload: server/equipment) — what
+// other players see in a player's hands and on their body.
 //
 // It is broadcast to everyone else in the instance whenever something that
 // shows changes — the selected hotbar slot, the held stack, armor — via
 // equipmentChanged, and sent for every present player to a joining or
 // resyncing client next to Spawn Player (sendOthersEquipment).
 
-// Equipment slot ids of the Set Equipment packet.
-const (
-	equipMainHand   byte = 0
-	equipOffHand    byte = 1
-	equipBoots      byte = 2
-	equipLeggings   byte = 3
-	equipChestplate byte = 4
-	equipHelmet     byte = 5
-)
-
-// Window-0 indices of the armor and off-hand slots (helmet is
-// armorHelmetSlot in modifiers.go).
-const (
-	armorChestplateSlot int16 = 6
-	armorLeggingsSlot   int16 = 7
-	armorBootsSlot      int16 = 8
-	offHandSlot         int16 = 45
-)
-
-// equipmentPayload encodes all six equipment slots of this player: entity
-// id, then (slot byte | 0x80 while more follow, Slot) per entry. Sending
-// every slot each time means a cleared slot is cleared on the client too.
+// equipmentPayload is this player's Set Equipment (equipment.Payload).
 func (c *ClientConnection) equipmentPayload() []byte {
-	entries := []struct {
-		slot byte
-		st   inventory.Stack
-	}{
-		{equipMainHand, c.inv.Held(c.heldSlot.Load())},
-		{equipOffHand, c.inv.Get(offHandSlot)},
-		{equipBoots, c.inv.Get(armorBootsSlot)},
-		{equipLeggings, c.inv.Get(armorLeggingsSlot)},
-		{equipChestplate, c.inv.Get(armorChestplateSlot)},
-		{equipHelmet, c.inv.Get(armorHelmetSlot)},
-	}
-	var buf bytes.Buffer
-	protocol.WriteVarInt32ToBuffer(&buf, c.player.EntityID)
-	for i, e := range entries {
-		slot := e.slot
-		if i < len(entries)-1 {
-			slot |= 0x80 // another entry follows
-		}
-		buf.WriteByte(slot)
-		inventory.WriteSlot(&buf, e.st)
-	}
-	return buf.Bytes()
+	return equipment.Payload(c.player.EntityID, &c.inv, c.heldSlot.Load())
 }
 
 // equipmentChanged tells everyone else in the instance what this player now

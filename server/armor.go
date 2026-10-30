@@ -11,7 +11,7 @@ import (
 // (combat), the wear is applied here.
 
 // armorSlots are the window-0 indices of worn armor, helmet first.
-var armorSlots = [4]int16{armorHelmetSlot, armorChestplateSlot, armorLeggingsSlot, armorBootsSlot}
+var armorSlots = [4]int16{inventory.HelmetSlot, inventory.ChestplateSlot, inventory.LeggingsSlot, inventory.BootsSlot}
 
 // absorbDamage returns dmg after this player's armor, and wears the armor.
 // A player with nothing on gets dmg back unchanged and nothing wears.

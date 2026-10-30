@@ -5,6 +5,7 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/server/combat"
+	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
 
@@ -44,7 +45,7 @@ func TestBwGiveAndKillOnlyInWeaponDamageInstances(t *testing.T) {
 	}
 
 	// Kill goes through die(): with armour on it's still lethal.
-	wear(c, armorChestplateSlot, "minecraft:diamond_chestplate", nil)
+	wear(c, inventory.ChestplateSlot, "minecraft:diamond_chestplate", nil)
 	var deaths int
 	inst.OnPlayerDeath = func(_, _ *ClientConnection) { deaths++ }
 	cmdBwKill(c, nil)

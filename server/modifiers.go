@@ -413,7 +413,7 @@ func entityEffectPayload(eid int32, effect Effect, level int, d time.Duration) [
 // digContext gathers the modifiers for this player's current dig.
 func (c *ClientConnection) digContext() world.DigContext {
 	held := c.inv.Held(c.heldSlot.Load())
-	helmet := c.inv.Get(armorHelmetSlot)
+	helmet := c.inv.Get(inventory.HelmetSlot)
 	ctx := world.DigContext{OnGround: true}
 	if c.server != nil {
 		ctx.Efficiency = c.server.Enchantments.Level(held, EnchantEfficiency)
@@ -429,9 +429,6 @@ func (c *ClientConnection) digContext() world.DigContext {
 	}
 	return ctx
 }
-
-// armorHelmetSlot is the window-0 index of the helmet.
-const armorHelmetSlot = 5
 
 // damageHeldTool wears the held tool by n points (Unbreaking may spare it),
 // breaking it — slot emptied, break sound — when its durability runs out.

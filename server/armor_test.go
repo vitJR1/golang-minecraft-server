@@ -28,29 +28,29 @@ func TestAbsorbDamageVanillaFormula(t *testing.T) {
 
 	// Full diamond: 20 points, toughness 8 →
 	// 7 × (1 − min(20, max(4, 20 − 7/(2+2))) / 25) = 7 × (1 − 18.25/25) = 1.89
-	wear(c, armorHelmetSlot, "minecraft:diamond_helmet", nil)
-	wear(c, armorChestplateSlot, "minecraft:diamond_chestplate", nil)
-	wear(c, armorLeggingsSlot, "minecraft:diamond_leggings", nil)
-	wear(c, armorBootsSlot, "minecraft:diamond_boots", nil)
+	wear(c, inventory.HelmetSlot, "minecraft:diamond_helmet", nil)
+	wear(c, inventory.ChestplateSlot, "minecraft:diamond_chestplate", nil)
+	wear(c, inventory.LeggingsSlot, "minecraft:diamond_leggings", nil)
+	wear(c, inventory.BootsSlot, "minecraft:diamond_boots", nil)
 	if got := c.absorbDamage(7); !near(got, 1.89) {
 		t.Errorf("diamond set vs 7: %v, want 1.89", got)
 	}
 
 	// Leather set: 7 points, no toughness → max(1.4, 7 − 7/2 = 3.5) → 7 × 0.86 = 6.02
-	wear(c, armorHelmetSlot, "minecraft:leather_helmet", nil)
-	wear(c, armorChestplateSlot, "minecraft:leather_chestplate", nil)
-	wear(c, armorLeggingsSlot, "minecraft:leather_leggings", nil)
-	wear(c, armorBootsSlot, "minecraft:leather_boots", nil)
+	wear(c, inventory.HelmetSlot, "minecraft:leather_helmet", nil)
+	wear(c, inventory.ChestplateSlot, "minecraft:leather_chestplate", nil)
+	wear(c, inventory.LeggingsSlot, "minecraft:leather_leggings", nil)
+	wear(c, inventory.BootsSlot, "minecraft:leather_boots", nil)
 	if got := c.absorbDamage(7); !near(got, 6.02) {
 		t.Errorf("leather set vs 7: %v, want 6.02", got)
 	}
 
 	// Protection IV on every piece: EPF 16 → another × (1 − 16/25) = 0.36.
 	prot := map[string]int{EnchantProtection: 4}
-	wear(c, armorHelmetSlot, "minecraft:leather_helmet", prot)
-	wear(c, armorChestplateSlot, "minecraft:leather_chestplate", prot)
-	wear(c, armorLeggingsSlot, "minecraft:leather_leggings", prot)
-	wear(c, armorBootsSlot, "minecraft:leather_boots", prot)
+	wear(c, inventory.HelmetSlot, "minecraft:leather_helmet", prot)
+	wear(c, inventory.ChestplateSlot, "minecraft:leather_chestplate", prot)
+	wear(c, inventory.LeggingsSlot, "minecraft:leather_leggings", prot)
+	wear(c, inventory.BootsSlot, "minecraft:leather_boots", prot)
 	if got := c.absorbDamage(7); !near(got, 6.02*0.36) {
 		t.Errorf("leather + Protection IV vs 7: %v, want %v", got, 6.02*0.36)
 	}
@@ -60,18 +60,18 @@ func TestArmorWearsAndBreaks(t *testing.T) {
 	inst := bareInstance(New(), world.NewMemoryWorld())
 	c := tntConn(inst, "Worn", player.Survival, 0, 64, 0)
 	boots, _ := world.ItemByName("minecraft:leather_boots") // durability 65
-	c.inv.Set(armorBootsSlot, inventory.Stack{ID: boots, Count: 1, Damage: 63})
-	wear(c, armorHelmetSlot, "minecraft:iron_helmet", nil)
+	c.inv.Set(inventory.BootsSlot, inventory.Stack{ID: boots, Count: 1, Damage: 63})
+	wear(c, inventory.HelmetSlot, "minecraft:iron_helmet", nil)
 
 	c.absorbDamage(8) // wear = max(1, 8/4) = 2 per piece
-	if st := c.inv.Get(armorBootsSlot); !st.Empty() {
+	if st := c.inv.Get(inventory.BootsSlot); !st.Empty() {
 		t.Errorf("boots at 63+2 ≥ 65 should break, got %+v", st)
 	}
-	if st := c.inv.Get(armorHelmetSlot); st.Damage != 2 {
+	if st := c.inv.Get(inventory.HelmetSlot); st.Damage != 2 {
 		t.Errorf("helmet wear: %d, want 2", st.Damage)
 	}
 	c.absorbDamage(1)
-	if st := c.inv.Get(armorHelmetSlot); st.Damage != 3 {
+	if st := c.inv.Get(inventory.HelmetSlot); st.Damage != 3 {
 		t.Errorf("small hits wear at least 1: %d, want 3", st.Damage)
 	}
 }
@@ -119,7 +119,7 @@ func TestWeaponDamageSwitch(t *testing.T) {
 	// Armor on the victim reduces it.
 	v.player.SetHealth(player.MaxHealth)
 	a.instance.tickCount.Add(1000)
-	wear(v, armorChestplateSlot, "minecraft:iron_chestplate", nil) // 6 points
+	wear(v, inventory.ChestplateSlot, "minecraft:iron_chestplate", nil) // 6 points
 	a.handleAttack(v)
 	// 8.5 × (1 − max(1.2, 6 − 8.5/2 = 1.75)/25) = 8.5 × 0.93 = 7.905
 	if got := player.MaxHealth - v.player.Health(); !near(got, 7.905) {

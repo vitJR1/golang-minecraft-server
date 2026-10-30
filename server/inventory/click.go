@@ -40,7 +40,11 @@ const (
 	CraftResultSlot  = 0    // window 0
 	CraftGridStart   = 1    // window 0, 2×2 grid 1..4
 	ArmorStart       = 5    // window 0, helmet..boots 5..8
-	OffhandSlot      = 45   // window 0
+	HelmetSlot       = ArmorStart
+	ChestplateSlot   = ArmorStart + 1
+	LeggingsSlot     = ArmorStart + 2
+	BootsSlot        = ArmorStart + 3
+	OffhandSlot      = 45 // window 0
 	chestPlayerStart = ChestSlots
 )
 

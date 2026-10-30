@@ -11,6 +11,16 @@ import (
 	"minecraft-server/world"
 )
 
+// Set Equipment slot ids (wire values the tests read packets with).
+const (
+	equipMainHand   byte = 0
+	equipOffHand    byte = 1
+	equipBoots      byte = 2
+	equipLeggings   byte = 3
+	equipChestplate byte = 4
+	equipHelmet     byte = 5
+)
+
 // readEquipment parses a Set Equipment body into entity id + slot→stack.
 func readEquipment(t *testing.T, body []byte) (int32, map[byte]inventory.Stack) {
 	t.Helper()
@@ -42,7 +52,7 @@ func TestEquipmentBroadcastToOthersOnly(t *testing.T) {
 	sword, _ := world.ItemByName("minecraft:iron_sword")
 	helmet, _ := world.ItemByName("minecraft:iron_helmet")
 	alice.inv.Set(inventory.HotbarStart+2, inventory.Stack{ID: sword, Count: 1, Enchantments: map[string]int{"minecraft:sharpness": 2}})
-	alice.inv.Set(armorHelmetSlot, inventory.Stack{ID: helmet, Count: 1})
+	alice.inv.Set(inventory.HelmetSlot, inventory.Stack{ID: helmet, Count: 1})
 	alice.heldSlot.Store(2)
 	alice.equipmentChanged()
 
@@ -75,7 +85,7 @@ func TestOthersEquipmentSentOnJoin(t *testing.T) {
 	inst := bareInstance(New(), world.NewMemoryWorld())
 	alice := tntConn(inst, "Alice", player.Survival, 0, 64, 0)
 	chest, _ := world.ItemByName("minecraft:diamond_chestplate")
-	alice.inv.Set(armorChestplateSlot, inventory.Stack{ID: chest, Count: 1})
+	alice.inv.Set(inventory.ChestplateSlot, inventory.Stack{ID: chest, Count: 1})
 
 	bob := tntConn(inst, "Bob", player.Survival, 2, 64, 0)
 	bob.sendOthersEquipment()
