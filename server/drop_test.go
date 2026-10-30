@@ -205,7 +205,7 @@ func TestNoDropItemCantGoIntoChest(t *testing.T) {
 	clickIn(t, c, menuWindowID, chestHotbar0, 0, inventory.ClickPickup) // onto the cursor
 	clickIn(t, c, menuWindowID, 0, 0, inventory.ClickPickup)            // into chest slot 0
 	clickIn(t, c, menuWindowID, chestHotbar0, 0, inventory.ClickQuickMove)
-	if got := inst.chestAt(pos); !got[0].Empty() {
+	if got := inst.chests.Contents(pos); !got[0].Empty() {
 		t.Fatalf("selector stashed in the chest: %+v", got[0])
 	}
 	if c.countItem(wool.ID)+int(c.cursor.Count) != 1 {

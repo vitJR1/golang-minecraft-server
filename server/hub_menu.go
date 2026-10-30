@@ -8,6 +8,7 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/chest"
 	"minecraft-server/server/inventory"
 	"minecraft-server/templates"
 	"minecraft-server/world"
@@ -65,7 +66,7 @@ type openMenu struct {
 
 	// chest is the open chest's storage when kind == "chest" (a block chest
 	// or the player's ender chest), so Click Container changes persist there.
-	chest chestStore
+	chest chest.Store
 
 	// rows is the window height, kept so a plugin menu can be re-sent
 	// after each click.

@@ -49,7 +49,7 @@ func cheat(cli *testClient, n int) {
 // setStatus puts conn's player at status st in s's anticheat log.
 func setStatus(t *testing.T, s *Server, conn *ClientConnection, st anticheat.Status) {
 	t.Helper()
-	setStatusFor(t, s, uuidString(conn.player.UUID), conn.playerName, st)
+	setStatusFor(t, s, protocol.UUIDString(conn.player.UUID), conn.playerName, st)
 }
 
 // setStatusFor records a past punishment that left uuid at st.
@@ -67,7 +67,7 @@ func setStatusFor(t *testing.T, s *Server, uuid, name string, st anticheat.Statu
 // latest returns the newest anticheat record of conn's player.
 func latest(t *testing.T, s *Server, conn *ClientConnection) anticheat.Record {
 	t.Helper()
-	return latestFor(t, s, uuidString(conn.player.UUID))
+	return latestFor(t, s, protocol.UUIDString(conn.player.UUID))
 }
 
 func latestFor(t *testing.T, s *Server, uuid string) anticheat.Record {
@@ -177,7 +177,7 @@ func TestOneStepPerSession(t *testing.T) {
 	cheat(cli, 4*flagsToDetect)
 	waitFor(t, 2*time.Second, conn.isClosed, "kick")
 	time.Sleep(50 * time.Millisecond) // any stray second punishment would land by now
-	recs, _ := s.AnticheatLog.History(context.Background(), uuidString(conn.player.UUID), 0)
+	recs, _ := s.AnticheatLog.History(context.Background(), protocol.UUIDString(conn.player.UUID), 0)
 	if len(recs) != 1 {
 		t.Fatalf("%d records for one session, want 1", len(recs))
 	}
@@ -191,7 +191,7 @@ func TestLogModeDoesNotPunish(t *testing.T) {
 	if conn.isClosed() {
 		t.Fatal("log mode kicked")
 	}
-	if recs, _ := s.AnticheatLog.History(context.Background(), uuidString(conn.player.UUID), 0); len(recs) != 0 {
+	if recs, _ := s.AnticheatLog.History(context.Background(), protocol.UUIDString(conn.player.UUID), 0); len(recs) != 0 {
 		t.Fatalf("log mode recorded %d punishments", len(recs))
 	}
 	if !conn.ac.Detected.Load() {
@@ -216,7 +216,7 @@ func TestAcResetClearsStatusAndLogsAdmin(t *testing.T) {
 
 	s.RunCommand(admin, "ac reset Reformed appealed on discord")
 	drain(admin)
-	uuid := uuidString(target.player.UUID)
+	uuid := protocol.UUIDString(target.player.UUID)
 	if st, _ := s.AnticheatLog.Status(context.Background(), uuid); st != anticheat.StatusClean {
 		t.Fatalf("status after reset = %s", st)
 	}
@@ -246,7 +246,7 @@ func TestAcInfoNeedsOp(t *testing.T) {
 	target := offlineConn(s.Hub, "Shown", player.Survival, 0, 67, 0)
 	setStatus(t, s, target, anticheat.StatusSuspicious)
 	s.RunCommand(plain, "ac reset Shown")
-	if st, _ := s.AnticheatLog.Status(context.Background(), uuidString(target.player.UUID)); st != anticheat.StatusSuspicious {
+	if st, _ := s.AnticheatLog.Status(context.Background(), protocol.UUIDString(target.player.UUID)); st != anticheat.StatusSuspicious {
 		t.Fatal("a non-op reset the status")
 	}
 }

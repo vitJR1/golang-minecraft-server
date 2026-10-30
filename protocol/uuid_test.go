@@ -92,3 +92,10 @@ func TestOfflineUUIDRoundTrip(t *testing.T) {
 		t.Errorf("WriteUUID rejects OfflineUUID output: %v", err)
 	}
 }
+
+func TestUUIDString(t *testing.T) {
+	u := [16]byte{0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00}
+	if got := UUIDString(u); got != "11223344-5566-7788-99aa-bbccddeeff00" {
+		t.Errorf("UUIDString = %q", got)
+	}
+}

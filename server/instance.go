@@ -10,6 +10,7 @@ import (
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/botai"
+	"minecraft-server/server/chest"
 	"minecraft-server/server/combat"
 	"minecraft-server/server/fluid"
 	"minecraft-server/server/inventory"
@@ -101,10 +102,8 @@ type Instance struct {
 	worldEntities []instanceEntity
 
 	// chests holds the stored contents of opened chests, keyed by block
-	// position (27 slots each). Populated lazily on first interaction;
-	// guarded by chestsMu (multiple players may open chests concurrently).
-	chestsMu sync.Mutex
-	chests   map[world.Position]*chestInventory
+	// position (27 slots each), created on first interaction.
+	chests chest.Chests
 
 	// projectiles are in-flight thrown items (egg/snowball/ender pearl),
 	// simulated on the tick loop. Guarded by projMu.

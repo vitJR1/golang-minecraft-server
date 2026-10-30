@@ -54,3 +54,9 @@ func OfflineUUID(name string) string {
 		b[10], b[11], b[12], b[13], b[14], b[15],
 	)
 }
+
+// UUIDString formats a binary UUID in the hyphenated form
+// ("xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx").
+func UUIDString(u [16]byte) string {
+	return fmt.Sprintf("%x-%x-%x-%x-%x", u[0:4], u[4:6], u[6:8], u[8:10], u[10:16])
+}

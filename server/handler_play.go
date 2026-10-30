@@ -9,6 +9,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/enderchest"
 	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 	"strings"
@@ -657,15 +658,15 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 				claim, err := inventory.ReadClaim(packet)
 				if err != nil {
 					c.flag("badpackets.click", err.Error())
-					_ = c.sendChestInventory(m.chest.contents())
+					_ = c.sendChestInventory(m.chest.Contents())
 					break
 				}
 				if c.gamemode() == player.Spectator {
-					_ = c.sendChestInventory(m.chest.contents())
+					_ = c.sendChestInventory(m.chest.Contents())
 					break
 				}
 				c.clickChest(m.chest, int(slot), int(button), int(mode), claim)
-				if e, ok := m.chest.(*enderChest); ok && c.server != nil {
+				if e, ok := m.chest.(*enderchest.Chest); ok && c.server != nil {
 					c.server.saveEnderChest(e)
 				}
 			case m.kind == menuKindPlugin:

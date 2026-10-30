@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"minecraft-server/player"
+	"minecraft-server/server/chest"
 	"minecraft-server/server/inventory"
 )
 
@@ -32,13 +33,13 @@ func (c *ClientConnection) clickInventory(slot, button, mode int, claim inventor
 // clickChest handles a Click Container on an open chest window. The chest
 // is updated under its store's lock, so two players clicking the same chest
 // can't both take the same stack.
-func (c *ClientConnection) clickChest(store chestStore, slot, button, mode int, claim inventory.Claim) {
+func (c *ClientConnection) clickChest(store chest.Store, slot, button, mode int, claim inventory.Claim) {
 	var (
 		v      *inventory.View
 		before []inventory.Stack
 		ok     bool
 	)
-	store.update(func(chest *[inventory.ChestSlots]inventory.Stack) {
+	store.Update(func(slots *chest.Slots) {
 		v = &inventory.View{
 			Slots:    make([]inventory.Stack, 0, inventory.ChestSlots+36),
 			Cursor:   c.cursor,
@@ -46,17 +47,17 @@ func (c *ClientConnection) clickChest(store chestStore, slot, button, mode int, 
 			Chest:    true,
 			Creative: c.gamemode() == player.Creative,
 		}
-		v.Slots = append(v.Slots, chest[:]...)
+		v.Slots = append(v.Slots, slots[:]...)
 		v.Slots = append(v.Slots, c.inv.Slots[inventory.MainStart:inventory.HotbarStart+9]...)
 		before = append([]inventory.Stack(nil), v.Slots...)
 		v.Click(slot, button, mode, &c.drag)
 		if ok = c.dropsAllowed(v.Drops) && !inventory.StoresUndroppable(before[:inventory.ChestSlots], v.Slots[:inventory.ChestSlots]); !ok {
 			return
 		}
-		copy(chest[:], v.Slots[:inventory.ChestSlots])
+		copy(slots[:], v.Slots[:inventory.ChestSlots])
 	})
 	if !ok {
-		_ = c.sendChestInventory(store.contents())
+		_ = c.sendChestInventory(store.Contents())
 		return
 	}
 	copy(c.inv.Slots[inventory.MainStart:inventory.HotbarStart+9], v.Slots[inventory.ChestSlots:])
@@ -64,7 +65,7 @@ func (c *ClientConnection) clickChest(store chestStore, slot, button, mode int, 
 	c.cursor = v.Cursor
 	c.throwAll(v.Drops)
 	if !claim.Matches(before, v) {
-		_ = c.sendChestInventory(store.contents())
+		_ = c.sendChestInventory(store.Contents())
 	}
 	c.equipmentChanged()
 }

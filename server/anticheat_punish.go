@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"minecraft-server/anticheat"
+	"minecraft-server/protocol"
 )
 
 // anticheat_punish.go turns detections into the punishment ladder of
@@ -37,7 +38,7 @@ func (c *ClientConnection) detect(check string) {
 	}
 	d := detection{
 		check:   check,
-		uuid:    uuidString(c.player.UUID),
+		uuid:    protocol.UUIDString(c.player.UUID),
 		name:    c.playerName,
 		reasons: c.ac.Violations.Recent(),
 	}
@@ -125,7 +126,7 @@ func (s *Server) forEachPlayer(fn func(c *ClientConnection)) {
 // the UUID on their latest punishment record.
 func (s *Server) acTarget(ctx context.Context, name string) (uuid, display string, ok bool, err error) {
 	if conn, _, online := s.FindPlayer(name); online && conn.player != nil {
-		return uuidString(conn.player.UUID), conn.playerName, true, nil
+		return protocol.UUIDString(conn.player.UUID), conn.playerName, true, nil
 	}
 	uuid, ok, err = s.AnticheatLog.UUIDByName(ctx, name)
 	return uuid, name, ok, err

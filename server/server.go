@@ -93,9 +93,8 @@ type Server struct {
 
 	// enderChests holds every player's ender chest inventory, keyed by player
 	// UUID, so the same 27 slots show up in any ender chest block in any
-	// instance. Guarded by enderMu. In-memory only for now.
-	enderMu     sync.Mutex
-	enderChests map[[16]byte]*enderChest
+	// instance.
+	enderChests enderchest.Chests
 	// EnderChests persists them: store.EnderChestRepo (Postgres),
 	// enderchest.FileStore (enderchests.json) or nil for RAM only. Set by main
 	// before players connect.
