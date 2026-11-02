@@ -201,54 +201,11 @@ func TestLogModeDoesNotPunish(t *testing.T) {
 
 // --- /ac and manual bans ------------------------------------------------
 
+// opConn is an operator's socketless connection in the hub.
 func opConn(t *testing.T, s *Server, name string) *ClientConnection {
 	t.Helper()
 	s.Ops.Add(name)
-	c := offlineConn(s.Hub, name, player.Creative, 0.5, 67, 0.5)
-	return c
-}
-
-func TestAcResetClearsStatusAndLogsAdmin(t *testing.T) {
-	s := New()
-	target := offlineConn(s.Hub, "Reformed", player.Survival, 0, 67, 0)
-	setStatus(t, s, target, anticheat.StatusBanned3d)
-	admin := opConn(t, s, "Admin")
-
-	s.RunCommand(admin, "ac reset Reformed appealed on discord")
-	drain(admin)
-	uuid := protocol.UUIDString(target.player.UUID)
-	if st, _ := s.AnticheatLog.Status(context.Background(), uuid); st != anticheat.StatusClean {
-		t.Fatalf("status after reset = %s", st)
-	}
-	rec := latest(t, s, target)
-	if rec.Action != anticheat.ActionReset || rec.By != "Admin" || rec.Before != anticheat.StatusBanned3d ||
-		len(rec.Reasons) != 1 || rec.Reasons[0].Detail != "appealed on discord" {
-		t.Fatalf("reset record = %+v", rec)
-	}
-}
-
-func TestAcInfoListsRecords(t *testing.T) {
-	s := New()
-	target := offlineConn(s.Hub, "Shown", player.Survival, 0, 67, 0)
-	setStatus(t, s, target, anticheat.StatusSuspicious)
-	admin := opConn(t, s, "Admin")
-	drain(admin)
-
-	s.RunCommand(admin, "ac info Shown")
-	if n := admin.link.Queued(); n < 3 { // header + record + its reason
-		t.Fatalf("/ac info sent %d messages", n)
-	}
-}
-
-func TestAcInfoNeedsOp(t *testing.T) {
-	s := New()
-	plain := offlineConn(s.Hub, "Nosy", player.Survival, 0, 67, 0)
-	target := offlineConn(s.Hub, "Shown", player.Survival, 0, 67, 0)
-	setStatus(t, s, target, anticheat.StatusSuspicious)
-	s.RunCommand(plain, "ac reset Shown")
-	if st, _ := s.AnticheatLog.Status(context.Background(), protocol.UUIDString(target.player.UUID)); st != anticheat.StatusSuspicious {
-		t.Fatal("a non-op reset the status")
-	}
+	return offlineConn(s.Hub, name, player.Creative, 0.5, 67, 0.5)
 }
 
 // offlineTarget is a player who isn't connected: known only by name and

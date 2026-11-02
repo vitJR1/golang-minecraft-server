@@ -38,7 +38,7 @@ func TestBotMatchWatcher(t *testing.T) {
 		}
 	}()
 
-	name, n, err := s.botMatch(op, "bedwars-1x1", templates.BedwarsDotaMap, botai.DifficultyEasy)
+	name, n, err := s.BotMatch(op, "bedwars-1x1", templates.BedwarsDotaMap, botai.DifficultyEasy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestBotMatchWatcher(t *testing.T) {
 	for i := 0; i < 40; i++ {
 		inst.ticks.Step()
 	}
-	bots := s.botsIn(inst)
+	bots := s.Bots(inst)
 	ctx := inst.pluginCtx()
 	if len(bots) != 2 || !inst.botGuide.BotEnemy(ctx, playerBridge{conn: bots[0]}, playerBridge{conn: bots[1]}) {
 		t.Fatal("the bots aren't playing each other")

@@ -30,14 +30,6 @@ func fixedArg(n int, words ...string) func(c *ClientConnection, args []string) [
 	return command.FixedArg[*ClientConnection](n, words...)
 }
 
-// completeSpectate: /spectate [arena]
-func completeSpectate(c *ClientConnection, args []string) []string {
-	if len(args) == 1 {
-		return c.server.ArenasOfKind("")
-	}
-	return nil
-}
-
 // sendCommandSuggestionsResponse writes Cb 0x11 (command.SuggestionsPayload).
 func (c *ClientConnection) sendCommandSuggestionsResponse(txID, start, length int32, matches []string) error {
 	return c.safeWrite(packetid.CbPlayCommandSuggestResp, command.SuggestionsPayload(txID, start, length, matches))

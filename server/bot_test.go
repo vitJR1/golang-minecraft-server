@@ -505,33 +505,25 @@ type teamsGuide struct{ fakeGuide }
 
 func (*teamsGuide) BotTeams(*game.Ctx) []string { return []string{"red", "blue"} }
 
-func TestBotSuggestions(t *testing.T) {
+// TestBotCompletionSources: what /bot's tab completion (server/commands)
+// lists — the game's team names and the bots.
+func TestBotCompletionSources(t *testing.T) {
 	inst, _ := botWorld()
-	op := offlineConn(inst, "Op", player.Creative, 0.5, 64, 0.5)
 	guide := &teamsGuide{fakeGuide{plan: game.BotPlan{Idle: true}}}
 	inst.botGuide = guide
 	inst.ID = "bots"
 	inst.Server.mu.Lock()
-	inst.Server.instances[inst.ID] = inst // so /bot remove lists its bots
+	inst.Server.instances[inst.ID] = inst // so Bots(nil) lists its bots
 	inst.Server.mu.Unlock()
 	b, err := inst.Server.AddBot(inst, "red", botai.DifficultyEasy)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cases := map[string][]string{
-		"/bot ":         {"add", "clear", "list", "match", "remove"},
-		"/bot a":        {"add"},
-		"/bot add ":     {"blue", "red"},
-		"/bot add r":    {"red"},
-		"/bot add red ": {"easy", "hard", "normal"},
-		"/bot remove ":  {b.playerName},
-		"/bot list ":    nil,
+	if got := inst.Server.BotTeamNames(inst); strings.Join(got, ",") != "red,blue" && strings.Join(got, ",") != "blue,red" {
+		t.Errorf("team names %v, want red and blue", got)
 	}
-	for text, want := range cases {
-		_, _, got := inst.Server.Suggestions(op, text)
-		if strings.Join(got, ",") != strings.Join(want, ",") {
-			t.Errorf("%q → %v, want %v", text, got, want)
-		}
+	if bots := inst.Server.Bots(nil); len(bots) != 1 || bots[0] != b {
+		t.Errorf("bots %v, want [%s]", bots, b.playerName)
 	}
 }
 

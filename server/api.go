@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"minecraft-server/player"
+	"minecraft-server/server/botai"
 	"minecraft-server/server/effect"
 	"minecraft-server/server/lobby"
 )
@@ -93,4 +94,28 @@ func (s *Server) LeaveGame(c *ClientConnection) (reason string, err error) {
 		}
 	}
 	return "", s.MovePlayer(c, target, 0.5, 67, 0.5)
+}
+
+// IsBot reports whether the connection is an AI player (/bot); Bot is its
+// mind (nil for a real player).
+func (c *ClientConnection) IsBot() bool     { return c.isBot() }
+func (c *ClientConnection) Bot() *botai.Bot { return c.bot }
+
+// CanFly reports whether /fly granted the player flight; SetFlight grants
+// or takes it (Player Abilities, exempt from the flight check).
+func (c *ClientConnection) CanFly() bool      { return c.canFly.Load() }
+func (c *ClientConnection) SetFlight(on bool) { c.setFlight(on) }
+
+// GiveItem puts n of itemID in the inventory (hotbar first); the count that
+// didn't fit is returned. CountItem is how many the player holds.
+func (c *ClientConnection) GiveItem(itemID int32, n int) int { return c.giveItem(itemID, n) }
+func (c *ClientConnection) CountItem(itemID int32) int       { return c.countItem(itemID) }
+
+// Kill deals a lethal environmental hit: through armour like anything
+// else, but far beyond what armour absorbs, then the regular death path.
+func (c *ClientConnection) Kill() {
+	if c.player == nil || c.instance == nil {
+		return
+	}
+	c.hurtEnvironment(player.MaxHealth*50, 0, c.instance.Tick())
 }

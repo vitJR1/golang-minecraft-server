@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"math/rand"
 	"sort"
-	"strings"
 
 	"minecraft-server/game"
 	"minecraft-server/player"
@@ -104,7 +103,7 @@ func (s *Server) RemoveBot(c *ClientConnection) {
 }
 
 // botsIn lists the bots in inst (all instances when inst is nil), by name.
-func (s *Server) botsIn(inst *Instance) []*ClientConnection {
+func (s *Server) Bots(inst *Instance) []*ClientConnection {
 	var out []*ClientConnection
 	s.forEachPlayer(func(c *ClientConnection) {
 		if c.isBot() && (inst == nil || c.instance == inst) {
@@ -115,45 +114,9 @@ func (s *Server) botsIn(inst *Instance) []*ClientConnection {
 	return out
 }
 
-// completeBot completes /bot: add <team> [difficulty] with the teams of
-// the game in c's instance (game.BotTeams), remove <name> with the bots.
-func completeBot(c *ClientConnection, args []string) []string {
-	s, argIdx := c.server, len(args)
-	if argIdx == 1 {
-		return []string{"add", "match", "remove", "list", "clear"}
-	}
-	switch strings.ToLower(args[0]) {
-	case "add":
-		switch argIdx {
-		case 2:
-			return s.botTeamNames(c.instance)
-		case 3:
-			return []string{"easy", "normal", "hard"}
-		}
-	case "match":
-		switch argIdx {
-		case 2:
-			return botMatchKinds()
-		case 3:
-			return []string{"easy", "normal", "hard"}
-		case 4:
-			return s.TemplateNames()
-		}
-	case "remove":
-		if argIdx == 2 {
-			var names []string
-			for _, b := range s.botsIn(nil) {
-				names = append(names, b.playerName)
-			}
-			return names
-		}
-	}
-	return nil
-}
-
-// botTeamNames are the teams of the game in inst (game.BotTeams), if it
+// BotTeamNames are the teams of the game in inst (game.BotTeams), if it
 // names them.
-func (s *Server) botTeamNames(inst *Instance) []string {
+func (s *Server) BotTeamNames(inst *Instance) []string {
 	if inst == nil {
 		return nil
 	}
@@ -161,80 +124,4 @@ func (s *Server) botTeamNames(inst *Instance) []string {
 		return bt.BotTeams(inst.pluginCtx())
 	}
 	return nil
-}
-
-// botMatchKinds are the arena kinds /bot match offers.
-func botMatchKinds() []string { return game.ArenaKinds() }
-
-func init() {
-	registerCommand(&Command{
-		Name:     "bot",
-		NeedsOp:  true,
-		Help:     "/bot add <team> [easy|normal|hard] | match <mode> [difficulty] | remove <name> | list | clear — AI players",
-		Run:      cmdBot,
-		Complete: completeBot,
-	})
-}
-
-// cmdBot: /bot add <team> [easy|normal|hard] | remove <name> | list | clear
-func cmdBot(c *ClientConnection, args []string) {
-	usage := "Usage: /bot add <team> [easy|normal|hard]  |  /bot match <mode> [difficulty]  |  /bot remove <name>  |  /bot list  |  /bot clear"
-	if len(args) == 0 {
-		_ = c.sendSystemMessage(usage)
-		return
-	}
-	s := c.server
-	switch strings.ToLower(args[0]) {
-	case "add":
-		if len(args) < 2 || len(args) > 3 {
-			_ = c.sendSystemMessage(usage)
-			return
-		}
-		diff := botai.DifficultyNormal
-		if len(args) == 3 {
-			d, ok := botai.ParseDifficulty(args[2])
-			if !ok {
-				_ = c.sendSystemMessage("Difficulty is easy, normal or hard")
-				return
-			}
-			diff = d
-		}
-		b, err := s.AddBot(c.instance, args[1], diff)
-		if err != nil {
-			_ = c.sendSystemMessage("Can't add a bot: " + err.Error())
-			return
-		}
-		_ = c.sendSystemMessage(fmt.Sprintf("Added %s (%s) to team %s", b.playerName, diff, args[1]))
-	case "remove":
-		if len(args) != 2 {
-			_ = c.sendSystemMessage(usage)
-			return
-		}
-		b, _, ok := s.FindPlayer(args[1])
-		if !ok || !b.isBot() {
-			_ = c.sendSystemMessage("No bot named " + args[1])
-			return
-		}
-		s.RemoveBot(b)
-		_ = c.sendSystemMessage("Removed " + b.playerName)
-	case "match":
-		cmdBotMatch(c, args[1:])
-	case "list":
-		bots := s.botsIn(nil)
-		if len(bots) == 0 {
-			_ = c.sendSystemMessage("No bots.")
-			return
-		}
-		for _, b := range bots {
-			_ = c.sendSystemMessage(fmt.Sprintf("%s — %s, in %s", b.playerName, b.bot.Difficulty(), b.instance.ID))
-		}
-	case "clear":
-		bots := s.botsIn(c.instance)
-		for _, b := range bots {
-			s.RemoveBot(b)
-		}
-		_ = c.sendSystemMessage(fmt.Sprintf("Removed %d bot(s)", len(bots)))
-	default:
-		_ = c.sendSystemMessage(usage)
-	}
 }

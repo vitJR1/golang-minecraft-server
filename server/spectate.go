@@ -3,12 +3,10 @@ package server
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"sync/atomic"
 
 	"minecraft-server/player"
 	"minecraft-server/server/botai"
-	"minecraft-server/templates"
 )
 
 // spectate.go: watching a game without playing it. /spectate <arena> puts
@@ -65,48 +63,13 @@ func (c *ClientConnection) endWatch(old *Instance) {
 	c.watch.watched.CompareAndSwap(old, nil)
 }
 
-func init() {
-	registerCommand(&Command{
-		Name:     "spectate",
-		Aliases:  []string{"watch"},
-		Help:     "/spectate [arena] — watch a running game in spectator mode",
-		Run:      cmdSpectate,
-		Complete: completeSpectate,
-	})
-}
-
-// cmdSpectate: /spectate [arena] — watch a running arena; no argument lists
-// them.
-func cmdSpectate(c *ClientConnection, args []string) {
-	s := c.server
-	if len(args) == 0 {
-		arenas := s.ArenasOfKind("")
-		if len(arenas) == 0 {
-			_ = c.sendSystemMessage("No running arenas. Ops can start a bot match: /bot match <mode>")
-			return
-		}
-		_ = c.sendSystemMessage("Usage: /spectate <arena> — running: " + strings.Join(arenas, ", "))
-		return
-	}
-	inst := s.GetInstance(args[0])
-	if inst == nil || !s.IsArena(args[0]) {
-		_ = c.sendSystemMessage("No arena named " + args[0])
-		return
-	}
-	if err := s.Spectate(c, inst); err != nil {
-		_ = c.sendSystemMessage("Can't watch: " + err.Error())
-		return
-	}
-	_ = c.sendSystemMessage(fmt.Sprintf("§7Watching §f%s§7. /leave to stop.", inst.ID))
-}
-
 // botMatchFill is the most bots /bot match puts on one team.
 const botMatchFill = 8
 
-// botMatch creates an arena of kind from template, fills every team with
+// BotMatch creates an arena of kind from template, fills every team with
 // bots of diff, starts the round and has c watch. Returns the arena name
 // and the number of bots.
-func (s *Server) botMatch(c *ClientConnection, kind, template string, diff botai.Difficulty) (string, int, error) {
+func (s *Server) BotMatch(c *ClientConnection, kind, template string, diff botai.Difficulty) (string, int, error) {
 	name, err := s.CreateArena(kind, template, "")
 	if err != nil {
 		return "", 0, err
@@ -115,7 +78,7 @@ func (s *Server) botMatch(c *ClientConnection, kind, template string, diff botai
 	if inst == nil || inst.botGuide == nil {
 		return name, 0, fmt.Errorf("%s runs no game that bots can play", kind)
 	}
-	teams := s.botTeamNames(inst)
+	teams := s.BotTeamNames(inst)
 	if len(teams) == 0 {
 		return name, 0, fmt.Errorf("%s doesn't name its teams", kind)
 	}
@@ -138,32 +101,4 @@ func (s *Server) botMatch(c *ClientConnection, kind, template string, diff botai
 		}
 	}
 	return name, added, nil
-}
-
-// cmdBotMatch: /bot match <mode> [easy|normal|hard] [template].
-func cmdBotMatch(c *ClientConnection, args []string) {
-	if len(args) < 1 || len(args) > 3 {
-		_ = c.sendSystemMessage("Usage: /bot match <mode> [easy|normal|hard] [template] — modes: " +
-			strings.Join(botMatchKinds(), ", "))
-		return
-	}
-	diff := botai.DifficultyNormal
-	if len(args) >= 2 {
-		d, ok := botai.ParseDifficulty(args[1])
-		if !ok {
-			_ = c.sendSystemMessage("botai.Difficulty is easy, normal or hard")
-			return
-		}
-		diff = d
-	}
-	template := templates.BedwarsDotaMap
-	if len(args) == 3 {
-		template = args[2]
-	}
-	name, n, err := c.server.botMatch(c, strings.ToLower(args[0]), template, diff)
-	if err != nil {
-		_ = c.sendSystemMessage("Bot match: " + err.Error())
-		return
-	}
-	_ = c.sendSystemMessage(fmt.Sprintf("§aBot match §f%s§a: %d %s bots. You're watching — /leave to stop.", name, n, diff))
 }

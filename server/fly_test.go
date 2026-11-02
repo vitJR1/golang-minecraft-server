@@ -9,7 +9,8 @@ import (
 	"minecraft-server/server/abilities"
 )
 
-// fly_test.go: /fly and its interplay with the movement checks.
+// fly_test.go: flight permission (/fly is server/commands) and its interplay
+// with the movement checks.
 
 // abilitiesSent returns the flags of the Player Abilities packets c sent.
 func abilitiesSent(t *testing.T, c *ClientConnection) []byte {
@@ -40,14 +41,14 @@ func TestFlyTogglesMayFly(t *testing.T) {
 	c := offlineConn(s.Hub, "Pilot", player.Survival, 0.5, 64, 0.5)
 	drain(c)
 
-	s.RunCommand(c, "fly")
+	c.setFlight(!c.canFly.Load())
 	if got := abilitiesSent(t, c); len(got) != 1 || got[0] != abilities.MayFly {
 		t.Fatalf("/fly on sent abilities %v, want [may fly]", got)
 	}
 	if !c.canFly.Load() {
 		t.Fatal("flight not allowed after /fly")
 	}
-	s.RunCommand(c, "fly")
+	c.setFlight(!c.canFly.Load())
 	if got := abilitiesSent(t, c); len(got) != 1 || got[0] != 0 {
 		t.Fatalf("/fly off sent abilities %v, want [none]", got)
 	}
@@ -58,21 +59,12 @@ func TestFlyKeepsCreativeAbilities(t *testing.T) {
 	s.Ops.Add("Builder")
 	c := offlineConn(s.Hub, "Builder", player.Creative, 0.5, 64, 0.5)
 	drain(c)
-	s.RunCommand(c, "fly")
-	s.RunCommand(c, "fly") // off again: creative still flies
+	c.setFlight(!c.canFly.Load())
+	c.setFlight(!c.canFly.Load()) // off again: creative still flies
 	got := abilitiesSent(t, c)
 	want := byte(abilities.Invulnerable | abilities.MayFly | abilities.Instabuild)
 	if len(got) != 2 || got[1] != want {
 		t.Fatalf("creative after /fly off: %v, want creative's own flags", got)
-	}
-}
-
-func TestFlyNeedsOp(t *testing.T) {
-	s := New()
-	c := offlineConn(s.Hub, "Wannabe", player.Survival, 0.5, 64, 0.5)
-	s.RunCommand(c, "fly")
-	if c.canFly.Load() {
-		t.Fatal("a non-op got flight")
 	}
 }
 

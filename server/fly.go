@@ -80,39 +80,3 @@ func (c *ClientConnection) onClientAbilities(flags byte) {
 	}
 	c.flag("badpackets.abilities", fmt.Sprintf("claims flight in %v without permission", c.gamemode()))
 }
-
-func init() {
-	registerCommand(&Command{
-		Name:    "fly",
-		NeedsOp: true,
-		Help:    "/fly [player] — toggle flight (until the next gamemode change or instance move)",
-		Run:     cmdFly,
-	})
-}
-
-// cmdFly: /fly [player] — toggle flight.
-func cmdFly(c *ClientConnection, args []string) {
-	target := c
-	if len(args) > 1 {
-		_ = c.sendSystemMessage("Usage: /fly [player]")
-		return
-	}
-	if len(args) == 1 {
-		conn, _, ok := c.server.FindPlayer(args[0])
-		if !ok {
-			_ = c.sendSystemMessage("Player not found: " + args[0])
-			return
-		}
-		target = conn
-	}
-	on := !target.canFly.Load()
-	target.setFlight(on)
-	state := "off"
-	if on {
-		state = "on"
-	}
-	_ = c.sendSystemMessage(fmt.Sprintf("Flight %s for %s", state, target.playerName))
-	if target != c {
-		_ = target.sendSystemMessage("Flight " + state)
-	}
-}

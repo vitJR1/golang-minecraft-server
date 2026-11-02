@@ -90,7 +90,8 @@ server/commands/
                The built-in slash commands over that API: /op /deop
                /gamemode /tp /effect, /ban /unban /kick /mute /unmute,
                /play /hub /leave /forcestart, /instance /template, /arena,
-               their tab completion. Imports server, never imported by it:
+               /fly, /spectate, /bot, /ac, /bwgive /bwkill, their tab
+               completion. Imports server, never imported by it:
                main.go blank-imports it, so server's own tests run without
                these commands (their tests live here).
 server/servertest/
@@ -113,9 +114,9 @@ server/command/ Slash-command engine, generic over the sender: Registry
                the Command Suggestions Response payload, and the shared
                argument parsers (args.go: ParseOnOff/OnOff, ParseGamemode,
                ParseCoords) + completers (ArgFrom, FixedArg). The built-in
-               commands are server/commands; the domain files still in
-               server (bot.go, spectate.go, fly.go, auth.go,
-               anticheat_punish.go, bw_commands.go) register theirs.
+               commands are server/commands; only auth.go's (/register
+               /login /banip /unbanip, installed by EnableAuth) and /help
+               are still registered inside server.
 server/packets/ Serverbound decoding: Handshake, Login Start, Encryption
                Response, and the play packets with more than one field
                (Move from Set Pos / Pos+Rot / Rot, UseItemOn, PlayerAction,
@@ -302,7 +303,7 @@ slots, place/break/attack/draw), reads its instance through `botai.World`
 (blocks, tick, players as `botai.Mob`, the game's `BotGuide`, `Teams`) and
 sees other players as `Mob`s. `server/bot_body.go` implements them
 (`botBody`, `instWorld`, `connMob` over `*ClientConnection` / `*Instance`);
-`server/bot.go` keeps `/bot`, `AddBot`/`RemoveBot` and tab completion. The
+`server/bot.go` keeps `AddBot`/`RemoveBot`/`Bots`; `/bot` and its tab completion are `server/commands/bot.go`. The
 server's bot tests read the brain through `botai`'s inspection methods
 (`inspect.go`: `Pos`, `Role`, `Target`, `Searching`, `RouteAt`, `Digging`,
 `FallSpots`, `TeamTargets`, `Trace`…).
@@ -320,7 +321,7 @@ server's bot tests read the brain through `botai`'s inspection methods
 - **Pusher** (`server/botai/pusher.go`): the beds at any cost. TNT tops its shopping list (up to `botPusherTNT`), and without any it waits at the station for the gold (≤ `botPusherSave`); it fights only enemies within `botPusherEngage`, never retreats, never raids. At an enemy bed covered on top (`dropSpot`: the first free cell above the bed column, none when the top is open) it **towers** up beside it (`tower`: jump, fill the cell it left once the feet clear it by `botTowerClearing`, ≤ `botTowerMax`), drops a TNT on the cover (auto-primed), flees, and digs the bed; drops repeat every `botPushGap` while TNT and cover last.
 - **Movement extras**: normal/hard bots **bunny-hop** (`botSkill.hop`, `straightAhead`) down straight flat stretches of ≥ `botHopAhead` steps — jump on every landing, steer for the stretch's end and count the cells flown over (≈ 18% faster than sprinting); a landing on a later route cell (`botHopSkip`) picks the route up from there, and feet a cell above a lower step (on the ledge's edge, stepping down) count as on the route (`dropping`). **Archers** (role) with a bow engage enemies they can see (`sees`) up to `botArcherSight` 70 blocks away (±`botArcherRise`), lead moving targets (`targetVelocity` × the flight time `aimArrow` returns), never chase a far enemy they can't shoot, and hold fire + `sidestep` while a non-enemy stands in the line (`friendInLine`) — arrows stop at teammates.
 - **Team brain** (`server/botai/team.go`): one `teamBrain` per `BotPlan.Team` (`Instance.botTeams`, a `botai.Teams`, tick goroutine only) decides every `botTeamEvery` ticks for all the team's living bots, by entity id: 1st the **pusher** while any enemy bed stands (a warrior — `roleAttacker` — once none is left); defenders — one with ≥2 bots while the bed (`BotPlan.Defend`) stands, two while an **intruder** (nearest enemy within `botBaseRadius` of the bed) is there and there are ≥3 bots; with ≥3 bots an **archer** if one is free (bow + arrows first in the shop, opens with the bow beyond `botArcherRange`); the rest attack. Defenders fill `bedCover` round the bed with wool, then the second layer `bedOuterCover` (cells they can't reach or fill are skipped for `botCoverRetry` via `coverFail`), then **join the attack** (no idling at the forge — only when out of blocks with the cover unfinished), and go for the intruder from any distance (`teamIntruder`); attackers all go for the lead's nearest bed first (`teamTargets`, the **focus**).
-- **Game side**: `game.BotGuide` (optional, wired by `AttachLogic` → `Instance.botGuide`): `BotJoin` (team by name), `BotEnemy`, `BotPlan` (team, own bed to defend, station, home, shop, buy key/item/currency/price, targets, `Pickups` — `game.BotPickup{Pos, Item}`, `Wares` — `game.BotWare{Key, Kind (Ware* const), Tier, Currency, Price, Owned}`), `BotBuy` (true when it paid); optional `game.BotTeams` lists team names for `/bot add` tab completion (`completeBot`: sub-commands, teams, difficulties, bot names for `remove`). BedWars implements it in `games/bedwars/bots.go` (iron forge, item-shop villager, team wool for 4 iron, enemy beds nearest first; `botWaresLocked`: swords/armour by tier with owned marks, next pickaxe/axe tier, shears, bow, arrows, TNT; `botUpgradesLocked`: the next tier of each team upgrade, key `upgrade:<key>`, bought through `buyUpgrade`; pickups = the neutral diamond/emerald generators; mid-round `BotJoin` moves teams and re-kits).
+- **Game side**: `game.BotGuide` (optional, wired by `AttachLogic` → `Instance.botGuide`): `BotJoin` (team by name), `BotEnemy`, `BotPlan` (team, own bed to defend, station, home, shop, buy key/item/currency/price, targets, `Pickups` — `game.BotPickup{Pos, Item}`, `Wares` — `game.BotWare{Key, Kind (Ware* const), Tier, Currency, Price, Owned}`), `BotBuy` (true when it paid); optional `game.BotTeams` lists team names for `/bot add` tab completion (`completeBot` in `server/commands/bot.go`: sub-commands, teams, difficulties, bot names for `remove`). BedWars implements it in `games/bedwars/bots.go` (iron forge, item-shop villager, team wool for 4 iron, enemy beds nearest first; `botWaresLocked`: swords/armour by tier with owned marks, next pickaxe/axe tier, shears, bow, arrows, TNT; `botUpgradesLocked`: the next tier of each team upgrade, key `upgrade:<key>`, bought through `buyUpgrade`; pickups = the neutral diamond/emerald generators; mid-round `BotJoin` moves teams and re-kits).
 - `BOTSIM=1 go test ./server -run TestBotOnDotaMap` plays a bot alone on the shipped DOTA map and expects an enemy bed broken (≈1200–1600 ticks; bots roll a random style, so it varies); it waits for each off-tick search. `BOTTRACE=1` logs the bot's state every 100 ticks.
 
 ### Plugins (server-wide)

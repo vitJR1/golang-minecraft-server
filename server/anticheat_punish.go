@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"minecraft-server/anticheat"
@@ -99,92 +98,14 @@ func (s *Server) forEachPlayer(fn func(c *ClientConnection)) {
 	}
 }
 
-// acTarget resolves a player name for /ac: an online player's UUID, else
+// AnticheatTarget resolves a player name (/ac, manual bans): an online player's UUID, else
 // the UUID on their latest punishment record.
-func (s *Server) acTarget(ctx context.Context, name string) (uuid, display string, ok bool, err error) {
+func (s *Server) AnticheatTarget(ctx context.Context, name string) (uuid, display string, ok bool, err error) {
 	if conn, _, online := s.FindPlayer(name); online && conn.player != nil {
 		return protocol.UUIDString(conn.player.UUID), conn.playerName, true, nil
 	}
 	uuid, ok, err = s.AnticheatLog.UUIDByName(ctx, name)
 	return uuid, name, ok, err
-}
-
-func init() {
-	registerCommand(&Command{
-		Name:    "ac",
-		NeedsOp: true,
-		Help:    "/ac info <player> | /ac reset <player> [reason] — anticheat status + punishment log",
-		Run:     cmdAnticheat,
-	})
-}
-
-// cmdAnticheat: /ac info <player> | /ac reset <player> [reason…]
-func cmdAnticheat(c *ClientConnection, args []string) {
-	usage := "Usage: /ac info <player>  |  /ac reset <player> [reason]"
-	if len(args) < 2 {
-		_ = c.sendSystemMessage(usage)
-		return
-	}
-	s := c.server
-	ctx, cancel := context.WithTimeout(context.Background(), punishTimeout)
-	defer cancel()
-	uuid, name, ok, err := s.acTarget(ctx, args[1])
-	switch {
-	case err != nil:
-		_ = c.sendSystemMessage("Anticheat store error: " + err.Error())
-		return
-	case !ok:
-		_ = c.sendSystemMessage(args[1] + " is offline and has no anticheat record")
-		return
-	}
-	switch strings.ToLower(args[0]) {
-	case "info":
-		acInfo(ctx, c, uuid, name)
-	case "reset":
-		reason := "reset by " + c.playerName
-		if len(args) > 2 {
-			reason = strings.Join(args[2:], " ")
-		}
-		acReset(ctx, c, uuid, name, reason)
-	default:
-		_ = c.sendSystemMessage(usage)
-	}
-}
-
-// acInfoLimit is how many records /ac info lists.
-const acInfoLimit = 10
-
-func acInfo(ctx context.Context, c *ClientConnection, uuid, name string) {
-	s := c.server
-	status, err := s.AnticheatLog.Status(ctx, uuid)
-	if err != nil {
-		_ = c.sendSystemMessage("Anticheat store error: " + err.Error())
-		return
-	}
-	recs, err := s.AnticheatLog.History(ctx, uuid, acInfoLimit)
-	if err != nil {
-		_ = c.sendSystemMessage("Anticheat store error: " + err.Error())
-		return
-	}
-	for _, line := range anticheat.InfoLines(name, status, recs) {
-		_ = c.sendSystemMessage(line)
-	}
-}
-
-func acReset(ctx context.Context, c *ClientConnection, uuid, name, reason string) {
-	s := c.server
-	before, err := s.AnticheatLog.Status(ctx, uuid)
-	if err != nil {
-		_ = c.sendSystemMessage("Anticheat store error: " + err.Error())
-		return
-	}
-	rec := anticheat.AdminRecord(uuid, name, c.instanceID(), c.playerName, reason,
-		anticheat.ActionReset, before, anticheat.StatusClean, time.Time{}, time.Now())
-	if err := s.AnticheatLog.Record(ctx, rec); err != nil {
-		_ = c.sendSystemMessage("Anticheat store error: " + err.Error())
-		return
-	}
-	_ = c.sendSystemMessage(fmt.Sprintf("%s: status %s → clean", name, before))
 }
 
 // RecordManualBan logs an admin's /ban of a player at the max status — the
@@ -195,7 +116,7 @@ func (s *Server) RecordManualBan(admin *ClientConnection, target, reason string,
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), punishTimeout)
 	defer cancel()
-	uuid, name, ok, err := s.acTarget(ctx, target)
+	uuid, name, ok, err := s.AnticheatTarget(ctx, target)
 	if err != nil || !ok {
 		return
 	}

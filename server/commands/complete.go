@@ -97,3 +97,11 @@ func completePlay(c *server.ClientConnection, args []string) []string {
 	}
 	return nil
 }
+
+// completeSpectate: /spectate [arena]
+func completeSpectate(c *server.ClientConnection, args []string) []string {
+	if len(args) == 1 {
+		return c.Server().ArenasOfKind("")
+	}
+	return nil
+}
