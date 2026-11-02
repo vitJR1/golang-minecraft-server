@@ -7,7 +7,9 @@
 package templates
 
 import (
+	"io/fs"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -59,4 +61,32 @@ func Name(root, path string) (string, bool) {
 		return "", false
 	}
 	return filepath.ToSlash(rel[:len(rel)-len(ext)]), true
+}
+
+// Scan returns every *.schem template under root as a template name
+// (relative to root, extension stripped), sorted. A missing root returns
+// (nil, nil) — equivalent to "no templates".
+func Scan(root string) ([]string, error) {
+	var names []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			// Surface the root-missing case as "no templates", not error.
+			if path == root {
+				return filepath.SkipAll
+			}
+			return err
+		}
+		if d.IsDir() || !IsSchem(path) {
+			return nil
+		}
+		if name, ok := Name(root, path); ok {
+			names = append(names, name)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(names)
+	return names, nil
 }

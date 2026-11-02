@@ -4,18 +4,9 @@ import (
 	"bytes"
 	"fmt"
 	"log/slog"
-	"minecraft-server/anticheat"
-	"minecraft-server/game"
-	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/consume"
-	"minecraft-server/server/enderchest"
-	"minecraft-server/server/inventory"
-	"minecraft-server/server/lobby"
-	"minecraft-server/server/projectile"
-	"minecraft-server/world"
-	"strings"
+	"minecraft-server/server/packets"
 )
 
 func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error {
@@ -50,35 +41,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		if err != nil {
 			return fmt.Errorf("reading chat message: %w", err)
 		}
-		if !c.acceptChat(message) {
-			break
-		}
-		// Auth gate: until /login or /register succeeds, chat is silent
-		// for everyone else. Player gets a reminder line.
-		if !gateAuth(c, "Please /login or /register before chatting.") {
-			break
-		}
-		// Mute check happens before the moderator + per-instance OnChat
-		// hook so games and bots can't accidentally bypass it. The muted
-		// player gets a one-line reminder; nobody else sees anything.
-		if until, muted := c.server.Mutes.MutedUntil(c.playerName); muted {
-			_ = c.sendSystemMessage(fmt.Sprintf("You are muted until %s",
-				until.Format("2006-01-02 15:04:05")))
-			break
-		}
-		// Custom chat bot (e.g. anti-spam / anti-flame). Returns the text
-		// to broadcast and an allow flag; may also install a mute.
-		if rewritten, allow := c.server.applyChatModerator(c, message); !allow {
-			break
-		} else {
-			message = rewritten
-		}
-		slog.Info("chat", "player", c.playerName, "msg", message)
-		rewrite, allow := c.instance.filterChat(c, message)
-		if !allow {
-			break
-		}
-		c.instance.BroadcastChat(c.playerName, rewrite)
+		c.onChat(message)
 
 	case packetid.SbPlayChatCommand:
 		raw, err := protocol.ReadStringFromBuf(packet)
@@ -95,61 +58,22 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		slog.Info("command", "player", c.playerName, "cmd", raw)
 		c.server.RunCommand(c, raw)
 
-	case packetid.SbPlaySetPos:
+	case packetid.SbPlaySetPos, packetid.SbPlaySetPosRot, packetid.SbPlaySetRot:
 		c.countMove()
-		x, y, z, onGround, err := readPosOnGround(packet)
+		var m packets.Move
+		var err error
+		switch packetID {
+		case packetid.SbPlaySetPos:
+			m, err = packets.ReadPos(packet)
+		case packetid.SbPlaySetPosRot:
+			m, err = packets.ReadPosRot(packet)
+		default:
+			m, err = packets.ReadRot(packet)
+		}
 		if err != nil {
-			return fmt.Errorf("set player position: %w", err)
+			return err
 		}
-		if !anticheat.Finite64(x, y, z) {
-			c.kickInvalidMove()
-			break
-		}
-		if c.awaitingTeleport() || !c.acceptMove(x, y, z) {
-			break
-		}
-		c.player.MoveTo(x, y, z, onGround)
-		c.broadcastEntityTeleport()
-
-	case packetid.SbPlaySetPosRot:
-		c.countMove()
-		x, y, z, err := readXYZ(packet)
-		if err != nil {
-			return fmt.Errorf("set player position+rotation: %w", err)
-		}
-		yaw, pitch, onGround, err := readYawPitchOnGround(packet)
-		if err != nil {
-			return fmt.Errorf("set player position+rotation: %w", err)
-		}
-		if !anticheat.Finite64(x, y, z) || !anticheat.Finite32(yaw, pitch) {
-			c.kickInvalidMove()
-			break
-		}
-		if c.awaitingTeleport() || !c.acceptLook(pitch) || !c.acceptMove(x, y, z) {
-			break
-		}
-		c.rememberLook()
-		c.player.MoveAndLook(x, y, z, yaw, pitch, onGround)
-		c.broadcastEntityTeleport()
-		c.broadcastHeadRotation()
-
-	case packetid.SbPlaySetRot:
-		c.countMove()
-		yaw, pitch, onGround, err := readYawPitchOnGround(packet)
-		if err != nil {
-			return fmt.Errorf("set player rotation: %w", err)
-		}
-		if !anticheat.Finite32(yaw, pitch) {
-			c.kickInvalidMove()
-			break
-		}
-		if c.awaitingTeleport() || !c.acceptLook(pitch) {
-			break
-		}
-		c.rememberLook()
-		c.player.LookAt(yaw, pitch, onGround)
-		c.broadcastEntityTeleport()
-		c.broadcastHeadRotation()
+		c.onMove(m)
 
 	case packetid.SbPlayMoveStatus:
 		// On-ground flag only, sent when it changes; the server works out
@@ -174,20 +98,12 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		_, _ = protocol.ReadStringFromBuf(packet)
 
 	case packetid.SbPlayCommandSuggestReq:
-		// VarInt(transactionId) + String(text). The earlier "parse fails"
-		// was because we were listening on the wrong packet id (0x08 =
-		// settings, not tab_complete). With the right id (0x09) the
-		// fields line up.
-		txID, err := protocol.ReadVarInt(packet)
+		req, err := packets.ReadSuggestRequest(packet)
 		if err != nil {
-			return fmt.Errorf("suggest req txID: %w", err)
+			return err
 		}
-		text, err := protocol.ReadStringFromBuf(packet)
-		if err != nil {
-			return fmt.Errorf("suggest req text: %w", err)
-		}
-		start, length, matches := c.server.Suggestions(c, text)
-		_ = c.sendCommandSuggestionsResponse(int32(txID), start, length, matches)
+		start, length, matches := c.server.Suggestions(c, req.Text)
+		_ = c.sendCommandSuggestionsResponse(req.ID, start, length, matches)
 
 	case packetid.SbPlaySwingArm:
 		hand, err := protocol.ReadVarInt(packet)
@@ -203,273 +119,25 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		c.swung()
 
 	case packetid.SbPlayUseItemOnBlock:
-		// hand(VarInt) + Position(8) + face(VarInt) + cursor x/y/z(3×Float)
-		// + inside_block(bool) + sequence(VarInt)
-		_, _ = protocol.ReadVarInt(packet) // hand
-		bx, by, bz, err := protocol.ReadPosition(packet)
+		u, err := packets.ReadUseItemOn(packet)
 		if err != nil {
-			return fmt.Errorf("use item on: position: %w", err)
+			return err
 		}
-		face, err := protocol.ReadVarInt(packet)
-		if err != nil {
-			return fmt.Errorf("use item on: face: %w", err)
-		}
-		// Cursor: where on the face the click landed, each axis in [0, 1].
-		cx, _ := protocol.ReadFloat(packet)
-		cy, _ := protocol.ReadFloat(packet)
-		cz, _ := protocol.ReadFloat(packet)
-		_, _ = protocol.ReadBool(packet) // inside_block
-		seq, err := protocol.ReadVarInt(packet)
-		if err != nil {
-			return fmt.Errorf("use item on: sequence: %w", err)
-		}
-		// Acknowledge the client's prediction first so it doesn't roll back.
-		_ = c.sendAckBlockChange(int32(seq))
-
-		clickedPos := world.Position{X: bx, Y: by, Z: bz}
-		placePos := offsetByFace(clickedPos, face)
-		// Right-clicking grass & co. puts the block where the plant was.
-		if world.ReplacedInPlace(c.instance.World.GetBlock(clickedPos)) {
-			placePos = clickedPos
-		}
-		held := c.heldItemName()
-
-		if !anticheat.CursorValid(cx, cy, cz) {
-			c.flag("badpackets.place", fmt.Sprintf("cursor %.3f,%.3f,%.3f outside the block", cx, cy, cz))
-			_ = c.sendBlockUpdate(placePos, c.instance.World.GetBlock(placePos))
-			break
-		}
-		// Dead players and spectators click nothing, and the block must be
-		// within vanilla's use range (reach.go).
-		if !c.mayAct() || !c.useInReach(clickedPos) {
-			_ = c.sendBlockUpdate(placePos, c.instance.World.GetBlock(placePos))
-			break
-		}
-
-		// Plugins get first refusal on the click (selection wands, tools).
-		// A consumed click places nothing: roll back the client's predicted
-		// placement at the target block.
-		click := game.BlockInteraction{Pos: clickedPos, Face: int(face), Action: game.RightClick, Item: held}
-		if !c.instance.allowBlockInteract(c, click) {
-			_ = c.sendBlockUpdate(placePos, c.instance.World.GetBlock(placePos))
-			break
-		}
-
-		// Flint and steel / fire charge on a TNT block lights it.
-		if c.mayBuild() && c.tryIgniteTNT(clickedPos, held) {
-			break
-		}
-
-		// A fire charge on any other block is still a fireball throw: the
-		// client sends Use Item On Block, not Use Item, whenever a block is
-		// in reach (looking at your own feet), and it predicts placing fire
-		// on the clicked face — roll that back, then launch like Use Item.
-		if held == "minecraft:fire_charge" {
-			_ = c.sendBlockUpdate(placePos, c.instance.World.GetBlock(placePos))
-			if c.instance.allowItemUse(c, game.ItemUse{Item: held, Name: c.inv.Held(c.heldSlot.Load()).Name, Slot: int(c.heldSlot.Load())}) {
-				c.throwFireball()
-				c.consumeHeld()
-			}
-			break
-		}
-
-		// Right-clicking a chest opens it instead of placing a block.
-		if isChestBlock(c.instance.World.GetBlock(clickedPos)) {
-			c.openBlockChest(clickedPos)
-			break
-		}
-
-		// Everything below changes the world, which adventure mode can't;
-		// and it's a placement: rate and clicked-face checks (actions.go).
-		if !c.mayBuild() || !c.placeAllowed(clickedPos, int(face)) {
-			_ = c.sendBlockUpdate(placePos, c.instance.World.GetBlock(placePos))
-			break
-		}
-
-		// Item frames are entities, not blocks — placing one spawns an item
-		// frame on the clicked face (the UseItemOnBlock face enum 0..5 maps
-		// directly onto the frame Facing enum).
-		if held == "minecraft:item_frame" || held == "minecraft:glow_item_frame" {
-			c.instance.AddWorldEntity(world.Entity{
-				Type: held,
-				X:    float64(placePos.X) + 0.5,
-				Y:    float64(placePos.Y) + 0.5,
-				Z:    float64(placePos.Z) + 0.5,
-				Frame: &world.FrameData{
-					Facing:  byte(face),
-					Glowing: held == "minecraft:glow_item_frame",
-				},
-			})
-			c.consumeHeld()
-			break
-		}
-
-		// Beds are two blocks (foot + head with a facing) — handled specially.
-		if bed, ok := world.BedFromItem(held); ok {
-			c.placeBed(placePos, bed)
-			break
-		}
-
-		// Place a block ONLY if the held item is a real block. No block in
-		// hand (empty slot, or a non-block item like a sword) → nothing
-		// happens; the always-place-stone fallback is gone.
-		block, ok := world.BlockByName(held)
-		if !ok || block == world.Air {
-			break
-		}
-		// Only into air, fluid or vegetation: a forged click must not
-		// overwrite a map block (or an enemy bed). Not flagged — a vanilla
-		// client gets here too when someone else just built on the spot.
-		if !world.Replaceable(c.instance.World.GetBlock(placePos)) {
-			_ = c.sendBlockUpdate(placePos, c.instance.World.GetBlock(placePos))
-			break
-		}
-		// Games/plugins may swap the block (BedWars: team-coloured beds).
-		block = c.instance.rewritePlacedBlock(c, placePos, block)
-		// Orientation / attachment rules (ladders hang on a wall).
-		block, ok = c.instance.orientForPlacement(block, placePos, int(face), c.player.Snapshot().Yaw)
-		if !ok {
-			_ = c.sendBlockUpdate(placePos, c.instance.World.GetBlock(placePos))
-			break
-		}
-		// Not into anyone's hitbox (including the placer's own).
-		if c.instance.blockedByPlayer(placePos) {
-			_ = c.sendBlockUpdate(placePos, c.instance.World.GetBlock(placePos))
-			break
-		}
-		if !c.instance.allowBlockPlace(c, placePos, block) {
-			// Veto: replay the existing block back to the client to
-			// roll back its placement prediction.
-			_ = c.sendBlockUpdate(placePos, c.instance.World.GetBlock(placePos))
-			break
-		}
-		c.instance.SetBlock(placePos, block)
-		c.consumeHeld()
-		switch {
-		case block == world.TNT && c.instance.TNTAutoPrime():
-			// Games can make TNT light itself the moment it's placed.
-			c.instance.primeTNT(placePos, tntAutoFuse, c)
-		case block == world.Sponge:
-			c.instance.absorbWater(placePos)
-		}
+		c.onUseItemOn(u)
 
 	case packetid.SbPlayPlayerAction:
-		// action(VarInt) + Position(8) + face(Byte) + sequence(VarInt)
-		action, err := protocol.ReadVarInt(packet)
+		a, err := packets.ReadPlayerAction(packet)
 		if err != nil {
-			return fmt.Errorf("player action: %w", err)
+			return err
 		}
-		bx, by, bz, err := protocol.ReadPosition(packet)
-		if err != nil {
-			return fmt.Errorf("player action: position: %w", err)
-		}
-		face, _ := packet.ReadByte()
-		seq, err := protocol.ReadVarInt(packet)
-		if err != nil {
-			return fmt.Errorf("player action: sequence: %w", err)
-		}
-		_ = c.sendAckBlockChange(int32(seq))
-		// action 0 = started digging (creative breaks instantly),
-		// action 1 = cancelled, 2 = finished digging (survival),
-		// 3 = drop item stack, 4 = drop item, 5 = shoot arrow / finish eating,
-		// 6 = swap held items. We treat 0/2 as "break this block".
-		pos := world.Position{X: bx, Y: by, Z: bz}
-		switch action {
-		case 5: // release use item: stopped eating / drinking, or loosed a bow
-			c.releaseUse()
-		case 0:
-			c.cancelUse()
-			// Only survival/creative dig, within vanilla's dig range, at a
-			// sane rate, at a block in front (actions.go).
-			if !c.mayBuild() || !c.digInReach(pos) || !c.breakAllowed(pos) {
-				_ = c.sendBlockUpdate(pos, c.instance.World.GetBlock(pos))
-				break
-			}
-			// Start of a dig = a left click: plugins may consume it (wand).
-			// Remember the position so the survival client's matching
-			// "finished digging" for the same block is swallowed too.
-			click := game.BlockInteraction{Pos: pos, Face: int(face), Action: game.LeftClick, Item: c.heldItemName()}
-			if !c.instance.allowBlockInteract(c, click) {
-				c.consumedDig = &pos
-				_ = c.sendBlockUpdate(pos, c.instance.World.GetBlock(pos))
-				break
-			}
-			c.consumedDig = nil
-			c.startDig(pos)
-		case 1:
-			c.consumedDig = nil
-			c.cancelDig()
-		case 2:
-			if !c.mayBuild() || !c.digInReach(pos) || !c.breakAllowed(pos) {
-				c.consumedDig = nil
-				c.cancelDig()
-				_ = c.sendBlockUpdate(pos, c.instance.World.GetBlock(pos))
-				break
-			}
-			if c.consumedDig != nil && *c.consumedDig == pos {
-				c.consumedDig = nil
-				_ = c.sendBlockUpdate(pos, c.instance.World.GetBlock(pos))
-				break
-			}
-			c.consumedDig = nil
-			c.finishDig(pos)
-		case 3: // ctrl+Q: drop the whole held stack
-			if c.mayAct() {
-				c.dropHeld(true)
-			}
-		case 4: // Q: drop one unit of the held stack
-			if c.mayAct() {
-				c.dropHeld(false)
-			}
-		}
+		c.onPlayerAction(a)
 
 	case packetid.SbPlayInteract:
-		// target_eid(VarInt) + type(VarInt: 0=interact, 1=attack, 2=interact_at)
-		// + (if type==2) 3×Float + hand(VarInt) + sneaking(bool).
-		target, err := protocol.ReadVarInt(packet)
+		in, err := packets.ReadInteract(packet)
 		if err != nil {
-			return fmt.Errorf("interact target: %w", err)
+			return err
 		}
-		atype, err := protocol.ReadVarInt(packet)
-		if err != nil {
-			return fmt.Errorf("interact type: %w", err)
-		}
-		// A spectator's attack only asks to spectate; the dead do nothing.
-		if !c.mayAct() {
-			break
-		}
-		switch atype {
-		case 1: // attack
-			if victim, ok := c.instance.Players.Get(int32(target)); ok && victim != c && victim.player != nil {
-				// Lag-compensated reach (reach.go): an out-of-reach hit is
-				// cancelled and flagged.
-				if !c.attackInReach(victim) || !c.attackAllowed(victim) {
-					break
-				}
-				// The game logic hook gets first refusal: returning false
-				// vetoes the hit (no damage), so a game can implement teams,
-				// spawn protection, spectators, etc. A nil hook = allow.
-				if c.instance.allowAttack(c, victim) {
-					c.handleAttack(victim)
-				}
-			}
-		case 0: // interact (right-click). Only "interact" (not interact_at, 2)
-			// drives the action so a single right-click isn't processed twice.
-			held := c.heldItemName()
-			if e, ok := c.instance.worldEntity(int32(target)); ok {
-				if !c.entityInReach(e) {
-					break
-				}
-				// Game logic / plugins first (shop NPCs); a consumed click
-				// skips the item-frame default.
-				ei := game.EntityInteraction{EntityID: int32(target), Type: e.Type, X: e.X, Y: e.Y, Z: e.Z, Item: held}
-				if !c.instance.allowEntityInteract(c, ei) {
-					break
-				}
-			}
-			// Item frames: insert the held item, or rotate the existing one.
-			c.instance.FrameInteract(int32(target), held)
-		}
+		c.onInteract(in)
 
 	case packetid.SbPlayPlayerAbilities:
 		// 1-byte flags. Bit 0x02 = flying (creative double-tap-space, /fly).
@@ -481,34 +149,11 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		c.onClientAbilities(flags)
 
 	case packetid.SbPlayPlayerCommand:
-		// entity_id (VarInt) + action (VarInt) + jump_boost (VarInt).
-		// We track sneak (0/1) and sprint (3/4) input — combat applies the
-		// 1.9 sprint-knockback bonus, anticheat keeps the sneak state in the
-		// position history; the rest is ignored for now.
-		eid, err := protocol.ReadVarInt(packet)
+		pc, err := packets.ReadPlayerCommand(packet)
 		if err != nil {
-			return fmt.Errorf("player command entity: %w", err)
+			return err
 		}
-		action, err := protocol.ReadVarInt(packet)
-		if err != nil {
-			return fmt.Errorf("player command action: %w", err)
-		}
-		_, _ = protocol.ReadVarInt(packet)
-		// The vanilla client only ever names itself.
-		if int32(eid) != c.player.EntityID {
-			c.flag("badpackets.command", fmt.Sprintf("player command for entity %d", eid))
-			break
-		}
-		switch action {
-		case 0: // start sneaking
-			c.ac.Sneaking.Store(true)
-		case 1: // stop sneaking
-			c.ac.Sneaking.Store(false)
-		case 3: // start sprinting
-			c.ac.Sprinting.Store(true)
-		case 4: // stop sprinting
-			c.ac.Sprinting.Store(false)
-		}
+		c.onPlayerCommand(pc)
 
 	case packetid.SbPlayClientCommand:
 		// action (VarInt): 0 = perform respawn, 1 = request stats.
@@ -531,85 +176,16 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		}
 
 	case packetid.SbPlayUseItem:
-		// hand(VarInt) + sequence(VarInt). Dispatches by the player's
-		// currently-held hotbar slot (tracked via SbPlaySetHeldItem)
-		// against the items we hand out:
-		//   slot 0 (blaze rod, "Navigator") — opens the hub picker
-		//                                     in hub and in any lobby
-		//   slot 1 (ender pearl, "Arena selector") — opens the
-		//                                            current-lobby's
-		//                                            arena chest
-		// Other slots / instances no-op.
-		_, _ = protocol.ReadVarInt(packet) // hand
-		_, _ = protocol.ReadVarInt(packet) // sequence
-		if !c.mayAct() {
-			break // spectators and the dead use nothing
-		}
-		// Server-given menu items are recognised by their custom name in the
-		// inventory model (wherever the player moved them), so a plain ender
-		// pearl is still throwable while the "Arena selector" opens a menu.
-		held := c.inv.Held(c.heldSlot.Load())
-		inLobby := lobby.Is(c.instance.ID)
-		switch {
-		case held.Name == inventory.NavigatorName:
-			if c.instance == c.server.Hub || inLobby {
-				c.openHubMainMenu()
-			}
-		case held.Name == inventory.SelectorName:
-			// BedWars lobby gets the live DOTA arena browser (create/join);
-			// other lobbies keep the placeholder arena list for now.
-			if c.instance.ID == lobby.BedWars {
-				c.openBedwarsArenaMenu()
-			} else if arenas, ok := lobby.Arenas(c.instance.ID); ok {
-				c.openArenaMenu(c.instance.ID, arenas)
-			}
-		default:
-			name := c.heldItemName()
-			if name == "" {
-				break
-			}
-			// Games/plugins get first refusal on the click (bridge egg, …).
-			if !c.instance.allowItemUse(c, game.ItemUse{Item: name, Name: held.Name, Slot: int(c.heldSlot.Load())}) {
-				break
-			}
-			switch {
-			case consume.Consumable(name):
-				// Eating/drinking takes time: the consume tick finishes it.
-				c.startUse(name)
-			case name == "minecraft:bow":
-				c.startDraw()
-			case name == "minecraft:fire_charge":
-				c.throwFireball()
-				c.consumeHeld()
-			case c.mayBuild() && c.useBucket(name):
-				// Buckets: the client sends a plain Use Item for them, with
-				// no target — the server ray-casts for the fluid / spot.
-			default:
-				// Throwable items (egg / snowball / ender pearl) in any slot.
-				if _, ok := projectile.ThrowableEntityID(name); ok {
-					c.throwProjectile(name)
-					c.consumeHeld()
-				}
-			}
-		}
+		// hand(VarInt) + sequence(VarInt), both unused: dispatch is by the
+		// held stack.
+		c.onUseItem()
 
 	case packetid.SbPlaySetHeldItem:
-		// Int16 — the new hotbar slot (0..8). Saved on the connection
-		// for SbPlayUseItem dispatch above.
-		raw, err := protocol.ReadUShortFromBuf(packet)
+		slot, err := packets.ReadHeldSlot(packet)
 		if err != nil {
-			return fmt.Errorf("set held item: %w", err)
+			return err
 		}
-		slot := int16(raw) // signed cast preserves bits; vanilla sends 0..8
-		// Anything else would address main-inventory slots as "held"
-		// (inventory.HotbarStart + slot): using a sword straight from the backpack.
-		if !anticheat.ValidHotbarSlot(int(slot)) {
-			c.flag("badpackets.helditem", fmt.Sprintf("held slot %d", slot))
-			break
-		}
-		c.heldSlot.Store(int32(slot))
-		c.cancelUse()
-		c.equipmentChanged()
+		c.onSetHeldItem(slot)
 
 	case packetid.SbPlaySetCreativeSlot:
 		// Short slot + Slot(item). Creative players send this whenever they
@@ -619,99 +195,18 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		c.onSetCreativeSlot(packet)
 
 	case packetid.SbPlayClickContainer:
-		// Window ID(UByte) + State ID(VarInt) + Slot(Short) + Button(Byte)
-		// + Mode(VarInt) + array of changed slots + carried item. Menus use
-		// Slot plus Button/Mode (shift-click, right click); the changed
-		// slots only matter for window 0 and chests.
-		winID, err := packet.ReadByte()
+		k, err := packets.ReadClick(packet)
 		if err != nil {
-			return fmt.Errorf("click container: window id: %w", err)
+			return err
 		}
-		_, _ = protocol.ReadVarInt(packet) // state id
-		slotU, err := protocol.ReadUShortFromBuf(packet)
-		if err != nil {
-			return fmt.Errorf("click container: slot: %w", err)
-		}
-		// Slot can be -999 (drop outside window) which arrives as 0xFC19;
-		// the int16 cast preserves the bits and gives us back the sign.
-		slot := int16(slotU)
-		button, _ := packet.ReadByte()
-		mode, _ := protocol.ReadVarInt(packet)
-		click := menuClick{button: button, mode: mode}
-		if winID == 0 {
-			// The player's own inventory screen: simulated on the model
-			// (click.go); the client's predicted result is only compared.
-			claim, err := inventory.ReadClaim(packet)
-			if err != nil {
-				c.flag("badpackets.click", err.Error())
-				_ = c.sendInventoryContents()
-				break
-			}
-			if c.gamemode() == player.Spectator {
-				_ = c.sendInventoryContents() // spectators only look
-				break
-			}
-			c.clickInventory(int(slot), int(button), int(mode), claim)
-			break
-		}
-		if m := c.menu.Load(); m != nil && winID == menuWindowID {
-			switch {
-			case m.kind == "chest":
-				// Simulated against the chest + inventory (click.go).
-				claim, err := inventory.ReadClaim(packet)
-				if err != nil {
-					c.flag("badpackets.click", err.Error())
-					_ = c.sendChestInventory(m.chest.Contents())
-					break
-				}
-				if c.gamemode() == player.Spectator {
-					_ = c.sendChestInventory(m.chest.Contents())
-					break
-				}
-				c.clickChest(m.chest, int(slot), int(button), int(mode), claim)
-				if e, ok := m.chest.(*enderchest.Chest); ok && c.server != nil {
-					c.server.saveEnderChest(e)
-				}
-			case m.kind == menuKindPlugin:
-				// Plugin GUI (shops): dispatch, then re-send the whole window
-				// so the client's ghost pickup / local inventory moves are
-				// undone and the menu stays open for the next click.
-				if entry, ok := m.entries[slot]; ok && m.onClick != nil {
-					m.onClick(c, entry, click)
-				}
-				if c.menu.Load() == m {
-					_ = c.sendChestContents(m.rows, m.entries)
-				}
-			default:
-				// Navigation menu: dispatch the clicked icon. The rest of the
-				// packet (changed slots, carried item) is discarded.
-				if entry, ok := m.entries[slot]; ok && m.onClick != nil {
-					m.onClick(c, entry, click)
-				}
-			}
-		}
+		c.onClickContainer(k, packet)
 
 	case packetid.SbPlayCloseContainer:
-		// Window ID(UByte). Clear our menu state if it matches AND re-send
-		// the whole player inventory from the model — a stray ghost-click
-		// on a menu icon can leave the client's cursor/slots out of step,
-		// and the full Set Container Content puts every slot back.
 		winID, err := packet.ReadByte()
 		if err != nil {
 			return fmt.Errorf("close container: window id: %w", err)
 		}
-		// Closing any window (the inventory screen is window 0) with a stack
-		// still on the cursor drops it, like vanilla; the inventory screen
-		// also hands back its 2×2 crafting grid.
-		c.drag.Reset()
-		c.dropCursor()
-		if winID == 0 {
-			c.returnCraftGrid()
-		}
-		if winID == menuWindowID {
-			c.menu.Store(nil)
-			_ = c.sendInventoryContents()
-		}
+		c.onCloseContainer(winID)
 
 	default:
 		slog.Debug("unknown play packet",
@@ -720,32 +215,4 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			"length", packet.Len())
 	}
 	return nil
-}
-
-// isChestBlock reports whether b is a chest the player can open
-// (chest / trapped_chest / ender_chest). Matched by name suffix so all
-// chest variants count.
-func isChestBlock(b world.Block) bool {
-	return strings.HasSuffix(b.Name, "chest")
-}
-
-// offsetByFace returns the neighbor block position on the given face of p.
-// Used to compute placement when the client right-clicks a face: the new
-// block sits on the side they clicked.
-func offsetByFace(p world.Position, face int) world.Position {
-	switch face {
-	case 0: // -Y (bottom face → block below)
-		return world.Position{X: p.X, Y: p.Y - 1, Z: p.Z}
-	case 1: // +Y (top face → block above)
-		return world.Position{X: p.X, Y: p.Y + 1, Z: p.Z}
-	case 2: // -Z (north face)
-		return world.Position{X: p.X, Y: p.Y, Z: p.Z - 1}
-	case 3: // +Z (south face)
-		return world.Position{X: p.X, Y: p.Y, Z: p.Z + 1}
-	case 4: // -X (west face)
-		return world.Position{X: p.X - 1, Y: p.Y, Z: p.Z}
-	case 5: // +X (east face)
-		return world.Position{X: p.X + 1, Y: p.Y, Z: p.Z}
-	}
-	return p
 }

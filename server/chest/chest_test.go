@@ -30,3 +30,18 @@ func TestChestsArePerPosition(t *testing.T) {
 		t.Fatal("IsEnder")
 	}
 }
+
+func TestIsChestBlock(t *testing.T) {
+	chests := []world.Block{world.Chest, world.EnderChest,
+		{Name: "minecraft:trapped_chest"}}
+	for _, b := range chests {
+		if !IsChestBlock(b) {
+			t.Errorf("%s should be a chest", b.Name)
+		}
+	}
+	for _, b := range []world.Block{world.Stone, world.Air, world.RedBed} {
+		if IsChestBlock(b) {
+			t.Errorf("%s should not be a chest", b.Name)
+		}
+	}
+}

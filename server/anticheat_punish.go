@@ -20,84 +20,61 @@ import (
 // punishTimeout bounds the store round-trips of one punishment.
 const punishTimeout = 5 * time.Second
 
-// detection is what a punishment needs from the connection, captured on the
-// goroutine that flagged it (the store I/O then runs on its own goroutine).
-type detection struct {
-	check    string
-	uuid     string
-	name     string
-	instance string
-	reasons  []anticheat.Violation
-}
-
 // detect is called by flag when check's level reaches its threshold. Only
 // the first detection of a session counts.
 func (c *ClientConnection) detect(check string) {
 	if c.player == nil || !c.ac.Detected.CompareAndSwap(false, true) {
 		return
 	}
-	d := detection{
-		check:   check,
-		uuid:    protocol.UUIDString(c.player.UUID),
-		name:    c.playerName,
-		reasons: c.ac.Violations.Recent(),
+	d := anticheat.Detection{
+		Check:   check,
+		UUID:    protocol.UUIDString(c.player.UUID),
+		Name:    c.playerName,
+		Reasons: c.ac.Violations.Recent(),
 	}
 	if c.instance != nil {
-		d.instance = c.instance.ID
+		d.Instance = c.instance.ID
 	}
 	if c.server == nil || !c.server.AnticheatEnforce || c.server.AnticheatLog == nil {
 		slog.Warn("anticheat detection (log only; ANTICHEAT=enforce punishes)",
-			"player", d.name, "check", check, "reasons", len(d.reasons))
+			"player", d.Name, "check", check, "reasons", len(d.Reasons))
 		return
 	}
 	go c.punish(d)
 }
 
-// punish applies the ladder step for d: ban (if the step bans), the log
-// record, the admin notice, then the kick. A store that can't answer still
-// gets the player kicked — the ladder just doesn't move.
-func (c *ClientConnection) punish(d detection) {
+// punish applies the ladder step for d (anticheat.Punish): ban (if the step
+// bans), the log record, the admin notice, then the kick. A store that can't
+// answer still gets the player kicked — the ladder just doesn't move.
+func (c *ClientConnection) punish(d anticheat.Detection) {
 	s := c.server
 	ctx, cancel := context.WithTimeout(context.Background(), punishTimeout)
 	defer cancel()
 
-	before, err := s.AnticheatLog.Status(ctx, d.uuid)
+	before, err := s.AnticheatLog.Status(ctx, d.UUID)
 	if err != nil {
 		slog.Error("anticheat status lookup failed; kicking without escalation",
-			"player", d.name, "check", d.check, "err", err)
-		c.kickFor("Disconnected: suspected cheating", "anticheat: "+d.check)
+			"player", d.Name, "check", d.Check, "err", err)
+		c.kickFor(anticheat.KickMessage, "anticheat: "+d.Check)
 		return
 	}
-	step := anticheat.Escalate(before)
-	now := time.Now()
-	rec := anticheat.Record{
-		UUID: d.uuid, Name: d.name, At: now, Instance: d.instance,
-		Before: before, After: step.Next, Action: step.Action,
-		FlagAdmin: step.NotifyAdmins, Reasons: d.reasons, By: anticheat.IssuedByAnticheat,
-	}
-	reason := fmt.Sprintf("anticheat: %s (status %s)", d.check, step.Next)
-	// The player only sees a generic message: naming the check helps a
-	// cheat tune itself. Admins get the details.
-	msg := "Disconnected: suspected cheating"
-	if step.Action == anticheat.ActionBan {
-		rec.BanUntil = now.Add(step.Ban)
-		if err := s.Bans.Add(ctx, d.name, reason, anticheat.IssuedByAnticheat, rec.BanUntil); err != nil {
-			slog.Error("anticheat ban write failed", "player", d.name, "err", err)
+	p := anticheat.Punish(d, before, time.Now())
+	rec := p.Record
+	if rec.Action == anticheat.ActionBan {
+		if err := s.Bans.Add(ctx, d.Name, p.Reason, anticheat.IssuedByAnticheat, rec.BanUntil); err != nil {
+			slog.Error("anticheat ban write failed", "player", d.Name, "err", err)
 		}
-		msg = fmt.Sprintf("You are banned for suspected cheating (until %s)",
-			rec.BanUntil.Format("2006-01-02 15:04:05"))
 	}
 	if err := s.AnticheatLog.Record(ctx, rec); err != nil {
-		slog.Error("anticheat record write failed", "player", d.name, "err", err)
+		slog.Error("anticheat record write failed", "player", d.Name, "err", err)
 	}
 	slog.Warn("anticheat punishment",
-		"player", d.name, "check", d.check, "status", fmt.Sprintf("%s→%s", before, step.Next),
-		"action", step.Action, "ban_until", rec.BanUntil)
-	if step.NotifyAdmins {
-		s.notifyOps(fmt.Sprintf("§c[AC] %s: %s → %s (%s, %s). /ac info %s",
-			d.name, before, step.Next, step.Action, d.check, d.name))
+		"player", d.Name, "check", d.Check, "status", fmt.Sprintf("%s→%s", before, rec.After),
+		"action", rec.Action, "ban_until", rec.BanUntil)
+	if p.Notice != "" {
+		s.notifyOps(p.Notice)
 	}
-	c.kickFor(msg, reason)
+	c.kickFor(p.Kick, p.Reason)
 }
 
 // notifyOps sends msg to every online operator.
@@ -189,21 +166,8 @@ func acInfo(ctx context.Context, c *ClientConnection, uuid, name string) {
 		_ = c.sendSystemMessage("Anticheat store error: " + err.Error())
 		return
 	}
-	_ = c.sendSystemMessage(fmt.Sprintf("§e%s§r: status §c%s§r (%d), %d record(s) shown",
-		name, status, int(status), len(recs)))
-	for _, r := range recs {
-		line := fmt.Sprintf("§7%s§r %s→%s §f%s§r by %s",
-			r.At.Format("2006-01-02 15:04"), r.Before, r.After, r.Action, r.By)
-		if !r.BanUntil.IsZero() {
-			line += " until " + r.BanUntil.Format("2006-01-02 15:04")
-		}
-		if r.Instance != "" {
-			line += " in " + r.Instance
-		}
+	for _, line := range anticheat.InfoLines(name, status, recs) {
 		_ = c.sendSystemMessage(line)
-		for _, v := range r.Reasons {
-			_ = c.sendSystemMessage(fmt.Sprintf("   §8- %s: %s (vl %.1f)", v.Check, v.Detail, v.VL))
-		}
 	}
 }
 
@@ -214,14 +178,8 @@ func acReset(ctx context.Context, c *ClientConnection, uuid, name, reason string
 		_ = c.sendSystemMessage("Anticheat store error: " + err.Error())
 		return
 	}
-	rec := anticheat.Record{
-		UUID: uuid, Name: name, At: time.Now(), Before: before, After: anticheat.StatusClean,
-		Action: anticheat.ActionReset, By: c.playerName,
-		Reasons: []anticheat.Violation{{Check: "manual", Detail: reason, At: time.Now()}},
-	}
-	if c.instance != nil {
-		rec.Instance = c.instance.ID
-	}
+	rec := anticheat.AdminRecord(uuid, name, c.instanceID(), c.playerName, reason,
+		anticheat.ActionReset, before, anticheat.StatusClean, time.Time{}, time.Now())
 	if err := s.AnticheatLog.Record(ctx, rec); err != nil {
 		_ = c.sendSystemMessage("Anticheat store error: " + err.Error())
 		return
@@ -245,15 +203,17 @@ func (s *Server) recordManualBan(admin *ClientConnection, target, reason string,
 	if err != nil || status != anticheat.StatusMax {
 		return
 	}
-	rec := anticheat.Record{
-		UUID: uuid, Name: name, At: time.Now(), Before: status, After: status,
-		Action: anticheat.ActionBan, BanUntil: until, By: admin.playerName,
-		Reasons: []anticheat.Violation{{Check: "manual", Detail: reason, At: time.Now()}},
-	}
-	if admin.instance != nil {
-		rec.Instance = admin.instance.ID
-	}
+	rec := anticheat.AdminRecord(uuid, name, admin.instanceID(), admin.playerName, reason,
+		anticheat.ActionBan, status, status, until, time.Now())
 	if err := s.AnticheatLog.Record(ctx, rec); err != nil {
 		slog.Error("anticheat manual ban record failed", "target", target, "err", err)
 	}
+}
+
+// instanceID is the id of the instance c is in ("" when none).
+func (c *ClientConnection) instanceID() string {
+	if c.instance == nil {
+		return ""
+	}
+	return c.instance.ID
 }

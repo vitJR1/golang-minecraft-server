@@ -2,7 +2,6 @@ package server
 
 import (
 	"bytes"
-	"crypto/rsa"
 	"errors"
 	"fmt"
 	"io"
@@ -24,6 +23,7 @@ import (
 	"minecraft-server/server/enderchest"
 	"minecraft-server/server/inventory"
 	"minecraft-server/server/lobby"
+	"minecraft-server/server/login"
 	"minecraft-server/server/moderation"
 	"minecraft-server/server/scoreboard"
 	"minecraft-server/server/visibility"
@@ -36,18 +36,15 @@ import (
 	"time"
 )
 
-var (
-	private   *rsa.PrivateKey
-	publicKey []byte
-)
+// keys is the process-global RSA keypair for online-mode logins.
+var keys login.Keys
 
 func init() {
-	pub, priv, err := NewEncryptionRequest()
+	k, err := login.NewKeys()
 	if err != nil {
 		panic(fmt.Errorf("init encryption: %w", err))
 	}
-	publicKey = pub
-	private = priv
+	keys = k
 }
 
 // Server holds process-wide shared state across all instances: the op

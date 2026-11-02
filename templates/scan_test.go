@@ -1,4 +1,4 @@
-package server
+package templates
 
 import (
 	"os"
@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-func TestScanTemplatesEmpty(t *testing.T) {
-	got, err := scanTemplates(t.TempDir())
+func TestScanEmpty(t *testing.T) {
+	got, err := Scan(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -17,8 +17,8 @@ func TestScanTemplatesEmpty(t *testing.T) {
 	}
 }
 
-func TestScanTemplatesMissingDir(t *testing.T) {
-	got, err := scanTemplates(filepath.Join(t.TempDir(), "does-not-exist"))
+func TestScanMissingDir(t *testing.T) {
+	got, err := Scan(filepath.Join(t.TempDir(), "does-not-exist"))
 	if err != nil {
 		t.Errorf("missing dir should not error: %v", err)
 	}
@@ -27,7 +27,7 @@ func TestScanTemplatesMissingDir(t *testing.T) {
 	}
 }
 
-func TestScanTemplatesFindsSchemFiles(t *testing.T) {
+func TestScanFindsSchemFiles(t *testing.T) {
 	root := t.TempDir()
 	// Layout:
 	//   root/spawn.schem
@@ -39,7 +39,7 @@ func TestScanTemplatesFindsSchemFiles(t *testing.T) {
 	mustWrite(t, filepath.Join(root, "arenas", "bedwars.SCHEM"))
 	mustWrite(t, filepath.Join(root, "notes.txt"))
 
-	got, err := scanTemplates(root)
+	got, err := Scan(root)
 	if err != nil {
 		t.Fatal(err)
 	}

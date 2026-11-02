@@ -2,11 +2,10 @@ package server
 
 import (
 	"fmt"
-	"io/fs"
-	"path/filepath"
 	"sort"
 	"strings"
 
+	"minecraft-server/server/command"
 	"minecraft-server/templates"
 	"minecraft-server/world"
 )
@@ -78,7 +77,7 @@ func cmdInstanceSet(c *ClientConnection, args []string) {
 		return
 	}
 	property := strings.ToLower(args[0])
-	value, ok := parseOnOff(args[1])
+	value, ok := command.ParseOnOff(args[1])
 	if !ok {
 		_ = c.sendSystemMessage("Value must be on or off")
 		return
@@ -107,26 +106,7 @@ func cmdInstanceSet(c *ClientConnection, args []string) {
 		return
 	}
 	_ = c.sendSystemMessage(fmt.Sprintf("%s on instance %s is now %s",
-		property, inst.ID, onOff(value)))
-}
-
-// parseOnOff accepts the usual truthy/falsy words for a boolean argument.
-func parseOnOff(s string) (value, ok bool) {
-	switch strings.ToLower(s) {
-	case "on", "true", "yes", "1", "enable", "enabled":
-		return true, true
-	case "off", "false", "no", "0", "disable", "disabled":
-		return false, true
-	default:
-		return false, false
-	}
-}
-
-func onOff(v bool) string {
-	if v {
-		return "on"
-	}
-	return "off"
+		property, inst.ID, command.OnOff(value)))
 }
 
 func cmdInstanceCreate(c *ClientConnection, args []string) {
@@ -261,7 +241,7 @@ func cmdTemplate(c *ClientConnection, args []string) {
 // directory and missing-directory both return a friendly message
 // rather than an error since they're normal states on a fresh checkout.
 func cmdTemplateList(c *ClientConnection) {
-	names, err := scanTemplates(templatesRoot)
+	names, err := templates.Scan(templatesRoot)
 	if err != nil {
 		_ = c.sendSystemMessage("Failed to scan " + templatesRoot + ": " + err.Error())
 		return
@@ -274,32 +254,4 @@ func cmdTemplateList(c *ClientConnection) {
 	for _, n := range names {
 		_ = c.sendSystemMessage("  " + n)
 	}
-}
-
-// scanTemplates returns every *.schem path under root, relative to root
-// and with the .schem extension stripped. Sorted alphabetically. A
-// missing root returns (nil, nil) — equivalent to "no templates".
-func scanTemplates(root string) ([]string, error) {
-	var names []string
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			// Surface the root-missing case as "no templates", not error.
-			if path == root {
-				return filepath.SkipAll
-			}
-			return err
-		}
-		if d.IsDir() || !templates.IsSchem(path) {
-			return nil
-		}
-		if name, ok := templates.Name(root, path); ok {
-			names = append(names, name)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	sort.Strings(names)
-	return names, nil
 }

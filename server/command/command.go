@@ -8,6 +8,8 @@
 package command
 
 import (
+	"bytes"
+	"minecraft-server/protocol"
 	"sort"
 	"strings"
 )
@@ -179,4 +181,20 @@ func (r *Registry[S]) Suggest(s S, text string) (start, length int32, matches []
 	}
 	sort.Strings(matches)
 	return wordStart, int32(len(prefix)), matches
+}
+
+// SuggestionsPayload builds Command Suggestions Response (Cb 0x11, 1.20.1):
+// VarInt(txID) + VarInt(start) + VarInt(length) + VarInt(count) + for each
+// match String(match) + Bool(hasTooltip = false).
+func SuggestionsPayload(txID, start, length int32, matches []string) []byte {
+	var buf bytes.Buffer
+	protocol.WriteVarInt32ToBuffer(&buf, txID)
+	protocol.WriteVarInt32ToBuffer(&buf, start)
+	protocol.WriteVarInt32ToBuffer(&buf, length)
+	protocol.WriteVarInt32ToBuffer(&buf, int32(len(matches)))
+	for _, m := range matches {
+		buf.Write(protocol.WriteString(m))
+		buf.WriteByte(0) // hasTooltip = false
+	}
+	return buf.Bytes()
 }

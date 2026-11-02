@@ -14,21 +14,6 @@ import (
 	"minecraft-server/world"
 )
 
-func TestIsChestBlock(t *testing.T) {
-	chests := []world.Block{world.Chest, world.EnderChest,
-		{Name: "minecraft:trapped_chest"}}
-	for _, b := range chests {
-		if !isChestBlock(b) {
-			t.Errorf("%s should be a chest", b.Name)
-		}
-	}
-	for _, b := range []world.Block{world.Stone, world.Air, world.RedBed} {
-		if isChestBlock(b) {
-			t.Errorf("%s should not be a chest", b.Name)
-		}
-	}
-}
-
 func TestRightClickChestOpens(t *testing.T) {
 	s := New()
 	chest := world.Position{X: 1, Y: 64, Z: 1}

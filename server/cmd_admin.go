@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"minecraft-server/player"
+	"minecraft-server/server/command"
 	"minecraft-server/server/effect"
 )
 
@@ -86,7 +86,7 @@ func cmdGamemode(c *ClientConnection, args []string) {
 		_ = c.sendSystemMessage("Usage: /gamemode <survival|creative|adventure|spectator> [player]")
 		return
 	}
-	mode, ok := parseGamemode(args[0])
+	mode, ok := command.ParseGamemode(args[0])
 	if !ok {
 		_ = c.sendSystemMessage("Unknown gamemode: " + args[0])
 		return
@@ -106,20 +106,6 @@ func cmdGamemode(c *ClientConnection, args []string) {
 	if target != c {
 		_ = target.sendSystemMessage("Your gamemode is now " + args[0])
 	}
-}
-
-func parseGamemode(s string) (player.Gamemode, bool) {
-	switch strings.ToLower(s) {
-	case "survival", "s", "0":
-		return player.Survival, true
-	case "creative", "c", "1":
-		return player.Creative, true
-	case "adventure", "a", "2":
-		return player.Adventure, true
-	case "spectator", "sp", "3":
-		return player.Spectator, true
-	}
-	return 0, false
 }
 
 // --- /tp ---
@@ -143,19 +129,9 @@ func cmdTp(c *ClientConnection, args []string) {
 		_ = c.sendSystemMessage("Teleported to " + target.player.Name)
 	case 3:
 		// /tp <x> <y> <z>
-		x, err := strconv.ParseFloat(args[0], 64)
+		x, y, z, err := command.ParseCoords(args)
 		if err != nil {
-			_ = c.sendSystemMessage("Bad X: " + args[0])
-			return
-		}
-		y, err := strconv.ParseFloat(args[1], 64)
-		if err != nil {
-			_ = c.sendSystemMessage("Bad Y: " + args[1])
-			return
-		}
-		z, err := strconv.ParseFloat(args[2], 64)
-		if err != nil {
-			_ = c.sendSystemMessage("Bad Z: " + args[2])
+			_ = c.sendSystemMessage(err.Error())
 			return
 		}
 		teleportConnTo(c, x, y, z)

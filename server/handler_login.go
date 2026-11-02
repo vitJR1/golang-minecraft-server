@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/rand"
-	"crypto/rsa"
 	"fmt"
 	"log/slog"
 	"minecraft-server/cfg"
@@ -14,8 +13,9 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/login"
+	"minecraft-server/server/packets"
 	"net"
-	"time"
 )
 
 func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error {
@@ -24,9 +24,9 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 		return nil
 	}
 
-	name, err := protocol.ReadStringFromBuf(packet)
+	name, err := packets.ReadLoginStart(packet)
 	if err != nil {
-		return fmt.Errorf("reading player name: %w", err)
+		return err
 	}
 	c.playerName = name
 	slog.Info("player connecting", "player", c.playerName)
@@ -42,9 +42,7 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 		if until, allowed := authStore.CheckIPAllowed(c.link.RemoteAddr()); !allowed {
 			slog.Info("auth: IP banned, rejecting",
 				"player", c.playerName, "until", until)
-			msg := []byte(`{"text":"IP banned (auth failures) until ` +
-				until.Format("2006-01-02 15:04:05") + `"}`)
-			_ = c.safeWrite(packetid.CbLoginDisconnect, protocol.WriteString(string(msg)))
+			_ = c.safeWrite(packetid.CbLoginDisconnect, login.DisconnectPayload(login.IPBanned(until)))
 			c.cleanup()
 			return nil
 		}
@@ -58,9 +56,7 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 		slog.Warn("ban lookup failed, allowing login", "player", c.playerName, "err", err)
 	}
 	if banned != nil {
-		msg := []byte(`{"text":"You are banned from this server.\nReason: ` + banned.Reason +
-			`. Expires: ` + banned.ExpiresAt.Format(time.RFC1123) + `"}`)
-		if err := c.safeWrite(packetid.CbLoginDisconnect, protocol.WriteString(string(msg))); err != nil {
+		if err := c.safeWrite(packetid.CbLoginDisconnect, login.DisconnectPayload(login.Banned(banned.Reason, banned.ExpiresAt))); err != nil {
 			return fmt.Errorf("sending ban message: %w", err)
 		}
 		c.cleanup()
@@ -80,10 +76,7 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 			"player", c.playerName,
 			"online", c.server.PlayerCount(),
 			"max", cfg.MaxPlayers)
-		msg := []byte(`{"text":"Server is full (` +
-			fmt.Sprintf("%d/%d", c.server.PlayerCount(), cfg.MaxPlayers) +
-			`)"}`)
-		_ = c.safeWrite(packetid.CbLoginDisconnect, protocol.WriteString(string(msg)))
+		_ = c.safeWrite(packetid.CbLoginDisconnect, login.DisconnectPayload(login.ServerFull(c.server.PlayerCount(), cfg.MaxPlayers)))
 		c.cleanup()
 		return nil
 	}
@@ -146,27 +139,18 @@ func (c *ClientConnection) enableCompression() error {
 // runOfflineLogin skips Mojang verification: derives a v3 UUID from the
 // player's name and immediately sends LoginSuccess in plaintext.
 func (c *ClientConnection) runOfflineLogin() error {
-	uuidStr := protocol.OfflineUUID(c.playerName)
-	slog.Debug("offline uuid resolved", "player", c.playerName, "uuid", uuidStr)
-
-	uuidBytes, err := protocol.WriteUUID(uuidStr)
+	uuid, err := login.OfflineUUID(c.playerName)
 	if err != nil {
-		return fmt.Errorf("writing UUID: %w", err)
+		return err
 	}
-	var uuid [16]byte
-	copy(uuid[:], uuidBytes)
+	slog.Debug("offline uuid resolved", "player", c.playerName, "uuid", protocol.UUIDString(uuid))
 	c.player = player.New(c.server.nextEntityID.Add(1), c.playerName, uuid)
 
 	if err := c.enableCompression(); err != nil {
 		return err
 	}
 
-	payload := make([]byte, 0, 32+len(c.playerName))
-	payload = append(payload, uuid[:]...)
-	payload = append(payload, protocol.WriteString(c.playerName)...)
-	payload = append(payload, protocol.WriteVarInt32(0)...) // properties count = 0
-
-	if err := c.safeWrite(packetid.CbLoginSuccess, payload); err != nil {
+	if err := c.safeWrite(packetid.CbLoginSuccess, login.SuccessPayload(uuid, c.playerName)); err != nil {
 		return fmt.Errorf("sending login success: %w", err)
 	}
 	return nil
@@ -189,11 +173,10 @@ func (c *ClientConnection) runOnlineLogin() error {
 		return err
 	}
 
-	profile, err := mojang.VerifyWithMojang(c.playerName, cfg.ServerId, sharedSecret, publicKey)
+	profile, err := mojang.VerifyWithMojang(c.playerName, cfg.ServerId, sharedSecret, keys.Public)
 	if err != nil {
 		slog.Warn("mojang verification failed", "player", c.playerName, "err", err)
-		msg := []byte(`{"text":"Authentication failed: ` + err.Error() + `"}`)
-		_ = c.safeWrite(packetid.CbLoginDisconnect, protocol.WriteString(string(msg)))
+		_ = c.safeWrite(packetid.CbLoginDisconnect, login.DisconnectPayload(login.AuthFailed(err)))
 		return fmt.Errorf("mojang verification: %w", err)
 	}
 	slog.Info("mojang verified", "player", profile.Name, "uuid", profile.ID)
@@ -202,50 +185,27 @@ func (c *ClientConnection) runOnlineLogin() error {
 		return err
 	}
 
-	parsedUUID, err := protocol.FormatUUID(profile.ID)
+	uuid, err := login.ProfileUUID(profile.ID)
 	if err != nil {
-		return fmt.Errorf("formatting UUID: %w", err)
+		return err
 	}
-	uuidBytes, err := protocol.WriteUUID(parsedUUID)
-	if err != nil {
-		return fmt.Errorf("writing UUID: %w", err)
-	}
-	var uuid [16]byte
-	copy(uuid[:], uuidBytes)
 	c.player = player.New(c.server.nextEntityID.Add(1), profile.Name, uuid)
 
 	if err := c.enableCompression(); err != nil {
 		return err
 	}
 
-	payload := make([]byte, 0, 32+len(profile.Name))
-	payload = append(payload, uuid[:]...)
-	payload = append(payload, protocol.WriteString(profile.Name)...)
-	payload = append(payload, protocol.WriteVarInt32(0)...) // properties count = 0
-	if err := c.safeWrite(packetid.CbLoginSuccess, payload); err != nil {
+	if err := c.safeWrite(packetid.CbLoginSuccess, login.SuccessPayload(uuid, profile.Name)); err != nil {
 		return fmt.Errorf("sending login success: %w", err)
 	}
 	slog.Debug("login success sent", "player", profile.Name)
 	return nil
 }
 
-// Encryption Request (1.20.1 protocol 763) carries exactly three fields:
-//
-//	serverId    String
-//	publicKey   ByteArray (VarInt length + bytes)
-//	verifyToken ByteArray (VarInt length + bytes)
-//
-// A "should authenticate" boolean was added in 1.20.4 — DO NOT send it
-// here, the 1.20.1 client rejects the packet with "found 1 bytes extra".
+// sendEncryptionRequest sends Encryption Request with the server's public
+// key and this connection's verify token (login.EncryptionRequestPayload).
 func (c *ClientConnection) sendEncryptionRequest(verifyToken []byte) error {
-	payload := make([]byte, 0, 64)
-	payload = append(payload, protocol.WriteString(cfg.ServerId)...)
-	payload = append(payload, protocol.WriteVarInt32(int32(len(publicKey)))...)
-	payload = append(payload, publicKey...)
-	payload = append(payload, protocol.WriteVarInt32(int32(len(verifyToken)))...)
-	payload = append(payload, verifyToken...)
-
-	if err := c.safeWrite(packetid.CbLoginEncRequest, payload); err != nil {
+	if err := c.safeWrite(packetid.CbLoginEncRequest, login.EncryptionRequestPayload(cfg.ServerId, keys.Public, verifyToken)); err != nil {
 		return fmt.Errorf("sending encryption request: %w", err)
 	}
 	return nil
@@ -268,28 +228,11 @@ func (c *ClientConnection) recvAndVerifyEncryptionResponse(verifyToken []byte) (
 		return nil, fmt.Errorf("expected encryption response (0x01), got 0x%02X", id)
 	}
 
-	buf := bytes.NewBuffer(data)
-	sharedEnc, err := protocol.ReadByteArrayFromBuf(buf)
+	resp, err := packets.ReadEncryptionResponse(bytes.NewBuffer(data))
 	if err != nil {
-		return nil, fmt.Errorf("reading shared secret: %w", err)
+		return nil, err
 	}
-	verifyEnc, err := protocol.ReadByteArrayFromBuf(buf)
-	if err != nil {
-		return nil, fmt.Errorf("reading verify token: %w", err)
-	}
-
-	sharedSecret, err := rsa.DecryptPKCS1v15(rand.Reader, private, sharedEnc)
-	if err != nil {
-		return nil, fmt.Errorf("decrypting shared secret: %w", err)
-	}
-	verifyBack, err := rsa.DecryptPKCS1v15(rand.Reader, private, verifyEnc)
-	if err != nil {
-		return nil, fmt.Errorf("decrypting verify token: %w", err)
-	}
-	if !bytes.Equal(verifyBack, verifyToken) {
-		return nil, fmt.Errorf("verify token mismatch")
-	}
-	return sharedSecret, nil
+	return keys.Decrypt(resp, verifyToken)
 }
 
 func (c *ClientConnection) enableEncryption(sharedSecret []byte) error {

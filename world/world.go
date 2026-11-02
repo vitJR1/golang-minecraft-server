@@ -140,3 +140,24 @@ func (w *MemoryWorld) Range(fn func(p Position, b Block)) {
 		fn(p, b)
 	}
 }
+
+// Neighbor returns the block next to p on face (the Use Item On Block face
+// enum: 0 -Y, 1 +Y, 2 -Z north, 3 +Z south, 4 -X west, 5 +X east); p itself
+// for any other value. A block placed against a face goes there.
+func (p Position) Neighbor(face int) Position {
+	switch face {
+	case 0:
+		return p.Add(0, -1, 0)
+	case 1:
+		return p.Add(0, 1, 0)
+	case 2:
+		return p.Add(0, 0, -1)
+	case 3:
+		return p.Add(0, 0, 1)
+	case 4:
+		return p.Add(-1, 0, 0)
+	case 5:
+		return p.Add(1, 0, 0)
+	}
+	return p
+}

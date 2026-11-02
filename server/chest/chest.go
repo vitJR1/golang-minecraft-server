@@ -6,6 +6,7 @@
 package chest
 
 import (
+	"strings"
 	"sync"
 
 	"minecraft-server/server/inventory"
@@ -89,3 +90,8 @@ func (b Block) Contents() Slots                     { return b.chests.Contents(b
 func (b Block) SetSlot(idx int, st inventory.Stack) { b.chests.SetSlot(b.pos, idx, st) }
 func (b Block) Update(fn func(*Slots))              { b.chests.Update(b.pos, fn) }
 func (b Block) Title() string                       { return "Chest" }
+
+// IsChestBlock reports whether b is a chest the player can open (chest /
+// trapped_chest / ender_chest). Matched by name suffix so all chest
+// variants count.
+func IsChestBlock(b world.Block) bool { return strings.HasSuffix(b.Name, "chest") }

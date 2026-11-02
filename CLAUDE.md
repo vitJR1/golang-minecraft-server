@@ -52,7 +52,9 @@ anticheat/     Per-connection anticheat bookkeeping and the checks' maths,
                Violations (per-check VL with decay + recent reasons),
                RateLimiter (packet budget), validators, the punishment
                ladder (Escalate, Threshold) + Store (MemoryStore /
-               FileStore; Postgres impl is store.AnticheatRepo). Plan and
+               FileStore; Postgres impl is store.AnticheatRepo), and what
+               a detection / admin action writes (report.go: Punish →
+               record + kick text + ops notice, AdminRecord, InfoLines). Plan and
                audit: anticheat.md.
 mojang/        sessionserver.mojang.com client (hasJoined endpoint).
 ban/           Player-ban Store interface + MemoryStore / FileStore
@@ -63,7 +65,8 @@ templates/     Schematic-template locations + canonical names. The single
                source of truth for the templates Root, the name constants
                (Spawn, BedwarsDotaMap, *Lobby), and OS-independent path
                helpers (SchemFile/ConfigFile/Name) — names are forward-slash,
-               disk paths use the OS separator (fixes Windows lookups).
+               disk paths use the OS separator (fixes Windows lookups) —
+               and Scan (every .schem under a root, for /template list).
 db/            PostgreSQL connection layer (pgx/v5 pool; config from env,
                ping, graceful close).
 redisc/        Redis connection layer (go-redis/v9; config from env, ping,
@@ -91,11 +94,25 @@ server/inventory/
 server/command/ Slash-command engine, generic over the sender: Registry
                (names, aliases, op-only, plugin commands, "//" names),
                Suggest (tab completion — each Command completes its own
-               arguments via Complete), Tree (Declare Commands payload).
-               The commands themselves stay in server: cmd_admin.go,
+               arguments via Complete), Tree (Declare Commands payload),
+               the Command Suggestions Response payload, and the shared
+               argument parsers (args.go: ParseOnOff/OnOff, ParseGamemode,
+               ParseCoords). The commands themselves stay in server: cmd_admin.go,
                cmd_instance.go, cmd_game.go, cmd_moderation.go, and the
                domain files (arena.go, bot.go, spectate.go, fly.go, auth.go,
                anticheat_punish.go, bw_commands.go) each register theirs.
+server/packets/ Serverbound decoding: Handshake, Login Start, Encryption
+               Response, and the play packets with more than one field
+               (Move from Set Pos / Pos+Rot / Rot, UseItemOn, PlayerAction,
+               Interact, PlayerCommand, Click head, held slot, suggestion
+               request) + their enum constants. Exactly as lenient as the
+               handlers were.
+server/login/  The pure half of login: RSA Keys (+ Decrypt of the
+               response), Encryption Request / Login Success payloads,
+               offline / Mojang-profile UUIDs, Login Disconnect texts
+               (JSON-escaped).
+server/status/ The server-list Status Response JSON (version, count +
+               hover sample, centred MOTD, favicon).
 server/combat/ PvP maths: Config (1.8 / 1.9), cooldown + charge, knockback,
                the armor + Protection formula, combat payloads.
 server/sound/  Sound Effect payload, sound categories, audible range.
@@ -218,7 +235,7 @@ State machine: `StateHandshake` → `StateStatus` *or* `StateLogin` → `StatePl
 - `handler_handshake.go` (`handshake.go`)
 - `handler_status.go`
 - `handler_login.go`
-- `handler_play.go`
+- `handler_play.go` — decodes through `server/packets` and dispatches; the bodies are per-packet methods in `handler_play_world.go` (`onUseItemOn`, `onPlayerAction`, `onInteract`, `onUseItem`) and `handler_play_player.go` (`onMove`, `onPlayerCommand`, `onSetHeldItem`, `onChat`, `onClickContainer`, `onCloseContainer`)
 
 The transport is **`server/conn`** (`c.link`, a `*conn.Conn`): socket, framing (compression once switched on), the outbound queue + the writer goroutine that batches it into one writev, the encryption swap, closing, keep-alive bookkeeping. Three goroutines per client:
 1. **readLoop** (`server.go`) — `c.link.Read` with a 30s deadline, dispatches.
@@ -246,7 +263,7 @@ Flow in `handler_login.go`:
 4. `enableEncryption` — `c.link.Encrypt` wraps the socket with `encryption.WrapEncryptedConn` (AES-128 CFB8). Shared secret doubles as AES key and IV.
 5. `LoginSuccess` sent over the encrypted connection. Properties array count (VarInt 0) is required for both online and offline.
 
-The RSA keypair is process-global, generated in `server.init()` via `NewEncryptionRequest`. Errors panic immediately (not silently dropped).
+The RSA keypair is process-global, generated in `server.init()` via `login.NewKeys` (`server/login`). Errors panic immediately (not silently dropped).
 
 CFB8 in `encryption/cfb8.go` is a hand-optimized ring-buffer variant. The wrapping `Write` in `encryption/encrypt_connection.go` chunks at 4 KiB and guarantees full writes — **do not collapse to a single `XORKeyStream + Write`**; a partial write desyncs the cipher permanently.
 
@@ -351,5 +368,5 @@ After LoginSuccess + state transition to play, `sendPlayPackets` (in `server.go`
 
 - Comments and log messages are a mix of Russian and English — match the surrounding file's language.
 - Errors wrap with `%w` and use a noun-phrase prefix (`"reading packet ID: %w"`).
-- File names are `snake_case.go`. Handlers are `handler_<state>.go`. Per-direction play helpers are `play_read.go` / `play_send.go`.
+- File names are `snake_case.go`. Handlers are `handler_<state>.go` (play split into `handler_play_*.go`); packet decoding is `server/packets`, play senders `play_send.go`.
 - No structured logging — everything is `fmt.Printf`. Per-packet write logging is gated behind `protocol.DebugPackets = true`.

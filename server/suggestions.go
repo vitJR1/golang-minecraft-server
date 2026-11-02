@@ -1,12 +1,11 @@
 package server
 
 import (
-	"bytes"
 	"strings"
 
 	"minecraft-server/game"
-	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/command"
 	"minecraft-server/server/effect"
 )
 
@@ -128,18 +127,7 @@ func completePlay(c *ClientConnection, args []string) []string {
 	return nil
 }
 
-// sendCommandSuggestionsResponse writes Cb 0x11. Per the 1.20.1 spec:
-// VarInt(txID) + VarInt(start) + VarInt(length) + VarInt(count) +
-// for each match: String(match) + Bool(hasTooltip [+ Chat tooltip]).
+// sendCommandSuggestionsResponse writes Cb 0x11 (command.SuggestionsPayload).
 func (c *ClientConnection) sendCommandSuggestionsResponse(txID, start, length int32, matches []string) error {
-	var buf bytes.Buffer
-	protocol.WriteVarInt32ToBuffer(&buf, txID)
-	protocol.WriteVarInt32ToBuffer(&buf, start)
-	protocol.WriteVarInt32ToBuffer(&buf, length)
-	protocol.WriteVarInt32ToBuffer(&buf, int32(len(matches)))
-	for _, m := range matches {
-		buf.Write(protocol.WriteString(m))
-		buf.WriteByte(0) // hasTooltip = false
-	}
-	return c.safeWrite(packetid.CbPlayCommandSuggestResp, buf.Bytes())
+	return c.safeWrite(packetid.CbPlayCommandSuggestResp, command.SuggestionsPayload(txID, start, length, matches))
 }
