@@ -53,7 +53,7 @@ func (m connMob) ID() int32                 { return m.c.player.EntityID }
 func (m connMob) Snapshot() player.Snapshot { return m.c.player.Snapshot() }
 func (m connMob) Sneaking() bool            { return m.c.ac.Sneaking.Load() }
 func (m connMob) Valid() bool               { return !m.c.isClosed() && m.c.player != nil }
-func (m connMob) Handle() game.PlayerHandle { return playerBridge{conn: m.c} }
+func (m connMob) Handle() game.PlayerHandle { return handle(m.c) }
 func (m connMob) Bot() *botai.Bot           { return m.c.bot }
 
 // mobOf is c as a Mob.

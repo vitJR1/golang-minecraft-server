@@ -59,7 +59,7 @@ func TestAbsorptionEffectSyncsYellowHearts(t *testing.T) {
 	if a := c.player.Absorption(); a != 8 {
 		t.Errorf("re-apply shrank the pool to %v", a)
 	}
-	c.removeEffect(effect.Absorption)
+	c.RemoveEffect(effect.Absorption)
 	if a := c.player.Absorption(); a != 0 {
 		t.Errorf("removing the effect should empty the pool, got %v", a)
 	}

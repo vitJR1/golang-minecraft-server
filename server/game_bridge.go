@@ -2,10 +2,10 @@ package server
 
 import (
 	"fmt"
-	"log/slog"
 	"minecraft-server/game"
-	"minecraft-server/player"
+	"minecraft-server/server/gamebridge"
 	"minecraft-server/server/inventory"
+	"minecraft-server/server/sound"
 	"minecraft-server/world"
 	"time"
 )
@@ -49,7 +49,7 @@ func (b instanceBridge) Players() []game.PlayerHandle {
 	conns := b.inst.Players.snapshot()
 	out := make([]game.PlayerHandle, 0, len(conns))
 	for _, c := range conns {
-		out = append(out, playerBridge{conn: c})
+		out = append(out, handle(c))
 	}
 	return out
 }
@@ -59,7 +59,30 @@ func (b instanceBridge) PlayerByName(name string) (game.PlayerHandle, bool) {
 	if !ok {
 		return nil, false
 	}
-	return playerBridge{conn: c}, true
+	return handle(c), true
+}
+
+func (b instanceBridge) SetCustomRespawn(enabled bool)    { b.inst.SetCustomRespawn(enabled) }
+func (b instanceBridge) SetWeaponDamage(enabled bool)     { b.inst.SetWeaponDamage(enabled) }
+func (b instanceBridge) SetTNTAutoPrime(enabled bool)     { b.inst.SetTNTAutoPrime(enabled) }
+func (b instanceBridge) SetExplosionDamage(scale float64) { b.inst.SetExplosionDamage(scale) }
+func (b instanceBridge) FreezeTime(dayTime int64)         { b.inst.FreezeTime(dayTime) }
+
+func (b instanceBridge) PlaySound(name string, x, y, z float64, volume, pitch float32) {
+	b.inst.playSound(name, sound.CategoryPlayer, x, y, z, volume, pitch)
+}
+
+// ThrowProjectile launches item from p (a handle of this server).
+func (b instanceBridge) ThrowProjectile(p game.PlayerHandle, item string, speed float64, hooks game.ProjectileHooks) {
+	gp, ok := p.(gamebridge.Player)
+	if !ok {
+		return
+	}
+	c, ok := gp.C.(*ClientConnection)
+	if !ok {
+		return
+	}
+	b.inst.launchProjectile(c, item, speed, hooks.OnTick, hooks.OnImpact)
 }
 
 // EndGame moves every player in the instance to the hub, then removes the
@@ -85,75 +108,8 @@ func (b instanceBridge) EndGame() {
 	}()
 }
 
-// playerBridge implements game.PlayerHandle over *ClientConnection.
-type playerBridge struct {
-	conn *ClientConnection
-}
-
-func (b playerBridge) Name() string { return b.conn.player.Name }
-func (b playerBridge) CountItem(itemName string) int {
-	id, ok := world.ItemByName(itemName)
-	if !ok {
-		return 0
-	}
-	return b.conn.countItem(id)
-}
-
-func (b playerBridge) TakeItem(itemName string, count int) bool {
-	id, ok := world.ItemByName(itemName)
-	if !ok {
-		return false
-	}
-	return b.conn.takeItem(id, count)
-}
-
-func (b playerBridge) OpenMenu(title string, rows int, items []game.MenuItem, onClick func(click game.MenuClick)) {
-	b.conn.openPluginMenu(title, rows, items, onClick)
-}
-
-func (b playerBridge) IsOp() bool {
-	return b.conn.server != nil && b.conn.server.Ops.Has(b.conn.playerName)
-}
-func (b playerBridge) EntityID() int32       { return b.conn.player.EntityID }
-func (b playerBridge) Pose() player.Snapshot { return b.conn.player.Snapshot() }
-func (b playerBridge) SendMessage(text string) {
-	_ = b.conn.sendSystemMessage(text)
-}
-
-func (b playerBridge) Teleport(x, y, z float64) {
-	b.conn.player.MoveTo(x, y, z, false)
-	_ = b.conn.sendSyncPlayerPosition(x, y, z)
-	b.conn.broadcastEntityTeleport()
-}
-
-func (b playerBridge) SetGamemode(g player.Gamemode) {
-	b.conn.player.SetGamemode(g)
-	_ = b.conn.sendGameModeChange(g)
-}
-
-// SetFlight grants or revokes flight (fly.go), with the anticheat aware.
-func (b playerBridge) SetFlight(allowed bool) { b.conn.setFlight(allowed) }
-
-// GiveItem resolves the namespaced item id and hands it to the connection's
-// inventory model, which stacks it and syncs the changed slots to the client.
-// An unknown id is a silent no-op.
-func (b playerBridge) GiveItem(itemName string, count int) {
-	id, ok := world.ItemByName(itemName)
-	if !ok {
-		return
-	}
-	b.conn.giveItem(id, count)
-}
-
-// Kick closes the player's connection. The reason is logged but not (yet)
-// sent on the wire as a Play Disconnect — that needs CbPlayDisconnect
-// which we haven't wired up. Client will see a generic "Connection lost".
-func (b playerBridge) Kick(reason string) {
-	if reason != "" {
-		slog.Info("kicking player", "player", b.conn.playerName, "reason", reason)
-	}
-	go b.conn.cleanup()
-}
+// handle is c as the plugin API's player.
+func handle(c *ClientConnection) game.PlayerHandle { return gamebridge.Player{C: c} }
 
 // AttachLogic wires a game's Logic to an Instance's hooks. Call this
 // right after creating the instance and before any player joins.
@@ -168,22 +124,22 @@ func (s *Server) AttachLogic(inst *Instance, logic game.Logic) *game.Ctx {
 		logic.OnTick(ctx, tick)
 	})
 	inst.OnPlayerJoin = func(c *ClientConnection) {
-		logic.OnPlayerJoin(ctx, playerBridge{conn: c})
+		logic.OnPlayerJoin(ctx, handle(c))
 	}
 	inst.OnPlayerLeave = func(c *ClientConnection) {
-		logic.OnPlayerLeave(ctx, playerBridge{conn: c})
+		logic.OnPlayerLeave(ctx, handle(c))
 	}
 	inst.OnBlockBreak = func(c *ClientConnection, pos world.Position) bool {
-		return logic.OnBlockBreak(ctx, playerBridge{conn: c}, pos)
+		return logic.OnBlockBreak(ctx, handle(c), pos)
 	}
 	inst.OnBlockPlace = func(c *ClientConnection, pos world.Position, blk world.Block) bool {
-		return logic.OnBlockPlace(ctx, playerBridge{conn: c}, pos, blk)
+		return logic.OnBlockPlace(ctx, handle(c), pos, blk)
 	}
 	if ev, ok := logic.(game.ExplosionBreakVeto); ok {
 		inst.OnExplosionBreak = func(c *ClientConnection, pos world.Position) bool {
 			var igniter game.PlayerHandle
 			if c != nil {
-				igniter = playerBridge{conn: c}
+				igniter = handle(c)
 			}
 			return ev.OnExplosionBreak(ctx, igniter, pos)
 		}
@@ -196,35 +152,35 @@ func (s *Server) AttachLogic(inst *Instance, logic game.Logic) *game.Ctx {
 	}
 	if rw, ok := logic.(game.PlacementRewriter); ok {
 		inst.OnRewritePlace = func(c *ClientConnection, pos world.Position, blk world.Block) world.Block {
-			return rw.RewritePlacedBlock(ctx, playerBridge{conn: c}, pos, blk)
+			return rw.RewritePlacedBlock(ctx, handle(c), pos, blk)
 		}
 	}
 	inst.OnBlockInteract = func(c *ClientConnection, click game.BlockInteraction) bool {
-		return logic.OnBlockInteract(ctx, playerBridge{conn: c}, click)
+		return logic.OnBlockInteract(ctx, handle(c), click)
 	}
 	inst.OnEntityInteract = func(c *ClientConnection, ei game.EntityInteraction) bool {
-		return logic.OnEntityInteract(ctx, playerBridge{conn: c}, ei)
+		return logic.OnEntityInteract(ctx, handle(c), ei)
 	}
 	inst.OnChat = func(c *ClientConnection, msg string) (string, bool) {
-		return logic.OnChat(ctx, playerBridge{conn: c}, msg)
+		return logic.OnChat(ctx, handle(c), msg)
 	}
 	inst.OnPlayerAttack = func(attacker, target *ClientConnection) bool {
-		return logic.OnPlayerAttack(ctx, playerBridge{conn: attacker}, playerBridge{conn: target})
+		return logic.OnPlayerAttack(ctx, handle(attacker), handle(target))
 	}
 	inst.OnPlayerDeath = func(victim, killer *ClientConnection) {
 		// killer is nil for environmental deaths — pass a nil PlayerHandle
-		// (not a playerBridge wrapping nil) so the game's nil check works.
+		// (not a handle wrapping nil) so the game's nil check works.
 		var killerHandle game.PlayerHandle
 		if killer != nil {
-			killerHandle = playerBridge{conn: killer}
+			killerHandle = handle(killer)
 		}
-		logic.OnPlayerDeath(ctx, playerBridge{conn: victim}, killerHandle)
+		logic.OnPlayerDeath(ctx, handle(victim), killerHandle)
 	}
 	inst.OnItemUse = func(c *ClientConnection, use game.ItemUse) bool {
-		return logic.OnItemUse(ctx, playerBridge{conn: c}, use)
+		return logic.OnItemUse(ctx, handle(c), use)
 	}
 	inst.OnItemConsume = func(c *ClientConnection, st inventory.Stack) bool {
-		return logic.OnItemConsume(ctx, playerBridge{conn: c}, toGameStack(st, -1))
+		return logic.OnItemConsume(ctx, handle(c), gamebridge.ToGame(st, -1))
 	}
 	inst.OnStop = func() {
 		logic.OnInstanceEnd(ctx)

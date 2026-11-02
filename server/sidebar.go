@@ -13,10 +13,10 @@ import (
 // re-sent on resync; MovePlayer clears the sidebar before the next instance
 // may set one.
 
-// setSidebar shows (or updates) the sidebar with title and lines, top
+// SetSidebar shows (or updates) the sidebar with title and lines, top
 // first; only what changed goes to the client. More than
 // scoreboard.SidebarMaxLines lines are cut.
-func (c *ClientConnection) setSidebar(title string, lines []string) {
+func (c *ClientConnection) SetSidebar(title string, lines []string) {
 	if c.player == nil {
 		return
 	}
@@ -27,8 +27,8 @@ func (c *ClientConnection) setSidebar(title string, lines []string) {
 	c.sidebar = next
 }
 
-// clearSidebar takes the sidebar down (no-op when none is shown).
-func (c *ClientConnection) clearSidebar() {
+// ClearSidebar takes the sidebar down (no-op when none is shown).
+func (c *ClientConnection) ClearSidebar() {
 	c.sidebarMu.Lock()
 	defer c.sidebarMu.Unlock()
 	prev := c.sidebar

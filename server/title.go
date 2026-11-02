@@ -7,12 +7,12 @@ import (
 )
 
 // title.go: on-screen titles ("You died!", trap alerts) — the packet
-// rules are server/title; sendTitle sends times → subtitle → title.
+// rules are server/title; SendTitle sends times → subtitle → title.
 
-// sendTitle shows text (big) and subtitle (small; "" for none) to this
+// SendTitle shows text (big) and subtitle (small; "" for none) to this
 // client with the given fade-in / stay / fade-out ticks (≤0 → vanilla
 // defaults).
-func (c *ClientConnection) sendTitle(text, subtitle string, fadeIn, stay, fadeOut int) error {
+func (c *ClientConnection) SendTitle(text, subtitle string, fadeIn, stay, fadeOut int) error {
 	if err := c.safeWrite(packetid.CbPlaySetTitleAnimationTimes, title.TimesPayload(fadeIn, stay, fadeOut)); err != nil {
 		return err
 	}

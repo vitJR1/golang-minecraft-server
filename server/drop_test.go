@@ -227,11 +227,11 @@ func TestNoDropDoesNotMergeWithPlainStack(t *testing.T) {
 func TestGameNoDropReachesTheModel(t *testing.T) {
 	inst := bareInstance(New(), world.NewMemoryWorld())
 	c := offlineConn(inst, "Bridged", player.Adventure, 0, 64, 0)
-	playerBridge{conn: c}.SetSlot(game.SlotHotbar0, game.ItemStack{Item: "minecraft:white_wool", Count: 1, NoDrop: true})
+	handle(c).SetSlot(game.SlotHotbar0, game.ItemStack{Item: "minecraft:white_wool", Count: 1, NoDrop: true})
 	if !c.inv.Get(inventory.HotbarStart).NoDrop {
 		t.Fatal("NoDrop lost on the way in")
 	}
-	if inv := (playerBridge{conn: c}).Inventory(); len(inv) == 0 || !inv[0].NoDrop {
+	if inv := (handle(c)).Inventory(); len(inv) == 0 || !inv[0].NoDrop {
 		t.Fatalf("NoDrop lost on the way out: %+v", inv)
 	}
 }

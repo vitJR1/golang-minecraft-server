@@ -75,7 +75,7 @@ func (c *ClientConnection) shootBow(u *useState) {
 			return
 		}
 	default:
-		if !c.takeItem(arrowItemID(), 1) {
+		if !c.TakeItem(arrowItemID(), 1) {
 			return
 		}
 	}

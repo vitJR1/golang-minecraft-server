@@ -96,7 +96,7 @@ func TestStartGameUsesRegisteredDefinition(t *testing.T) {
 	}
 }
 
-// playerBridge / instanceBridge surface checks — make sure the wrappers
+// handle / instanceBridge surface checks — make sure the wrappers
 // expose what the interfaces claim without panic.
 func TestPlayerBridgeSurface(t *testing.T) {
 	s := New()
@@ -111,7 +111,7 @@ func TestPlayerBridgeSurface(t *testing.T) {
 			Name:     "Wrapped",
 		},
 	}
-	var h game.PlayerHandle = playerBridge{conn: c}
+	var h game.PlayerHandle = handle(c)
 	if h.Name() != "Wrapped" {
 		t.Errorf("Name: got %q", h.Name())
 	}

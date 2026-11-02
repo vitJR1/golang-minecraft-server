@@ -71,14 +71,14 @@ func TestCountAndTakeItem(t *testing.T) {
 	if got := c.countItem(iron); got != 30 {
 		t.Fatalf("count: %d, want 30", got)
 	}
-	if c.takeItem(iron, 31) {
+	if c.TakeItem(iron, 31) {
 		t.Error("taking more than held must fail")
 	}
 	if got := c.countItem(iron); got != 30 {
 		t.Errorf("failed take must not change inventory, got %d", got)
 	}
 	// Main inventory is drained before the hotbar.
-	if !c.takeItem(iron, 25) {
+	if !c.TakeItem(iron, 25) {
 		t.Fatal("take 25 should succeed")
 	}
 	if st := c.inv.Get(inventory.MainStart + 3); !st.Empty() {

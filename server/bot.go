@@ -84,7 +84,7 @@ func (s *Server) AddBot(inst *Instance, team string, diff botai.Difficulty) (*Cl
 	inst.JoinAndAnnounce(c)
 	c.bot.Place(c.feet())
 
-	if err := inst.botGuide.BotJoin(inst.pluginCtx(), playerBridge{conn: c}, team); err != nil {
+	if err := inst.botGuide.BotJoin(inst.pluginCtx(), handle(c), team); err != nil {
 		c.cleanup()
 		return nil, err
 	}

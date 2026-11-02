@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"minecraft-server/game"
+	"minecraft-server/server/gamebridge"
 	"minecraft-server/server/inventory"
 	"minecraft-server/world"
 )
@@ -64,7 +65,7 @@ func (i *Instance) fireJoin(c *ClientConnection) {
 	if c.watching(i) {
 		return // a watcher isn't in the game (spectate.go)
 	}
-	ctx, p := i.pluginCtx(), playerBridge{conn: c}
+	ctx, p := i.pluginCtx(), handle(c)
 	for _, l := range i.listeners {
 		l := l
 		safeHook(i, "listener "+l.Name+" OnPlayerJoin", func() { l.Logic.OnPlayerJoin(ctx, p) })
@@ -78,7 +79,7 @@ func (i *Instance) fireLeave(c *ClientConnection) {
 	if c.watching(i) {
 		return
 	}
-	ctx, p := i.pluginCtx(), playerBridge{conn: c}
+	ctx, p := i.pluginCtx(), handle(c)
 	for _, l := range i.listeners {
 		l := l
 		safeHook(i, "listener "+l.Name+" OnPlayerLeave", func() { l.Logic.OnPlayerLeave(ctx, p) })
@@ -90,7 +91,7 @@ func (i *Instance) fireLeave(c *ClientConnection) {
 
 // allowBlockBreak: listeners first, then the instance hook. nil hook = allow.
 func (i *Instance) allowBlockBreak(c *ClientConnection, pos world.Position) bool {
-	ctx, p := i.pluginCtx(), playerBridge{conn: c}
+	ctx, p := i.pluginCtx(), handle(c)
 	for _, l := range i.listeners {
 		if !safeVeto(i, "listener "+l.Name+" OnBlockBreak", func() bool { return l.Logic.OnBlockBreak(ctx, p, pos) }) {
 			return false
@@ -109,7 +110,7 @@ func (i *Instance) allowExplosionBreakVeto(c *ClientConnection, pos world.Positi
 	ctx := i.pluginCtx()
 	var igniter game.PlayerHandle
 	if c != nil {
-		igniter = playerBridge{conn: c}
+		igniter = handle(c)
 	}
 	for _, l := range i.listeners {
 		ev, ok := l.Logic.(game.ExplosionBreakVeto)
@@ -130,7 +131,7 @@ func (i *Instance) allowExplosionBreakVeto(c *ClientConnection, pos world.Positi
 // block about to be placed (game.PlacementRewriter). Listeners that don't
 // implement the interface are skipped.
 func (i *Instance) rewritePlacedBlock(c *ClientConnection, pos world.Position, blk world.Block) world.Block {
-	ctx, p := i.pluginCtx(), playerBridge{conn: c}
+	ctx, p := i.pluginCtx(), handle(c)
 	for _, l := range i.listeners {
 		rw, ok := l.Logic.(game.PlacementRewriter)
 		if !ok {
@@ -145,7 +146,7 @@ func (i *Instance) rewritePlacedBlock(c *ClientConnection, pos world.Position, b
 }
 
 func (i *Instance) allowBlockPlace(c *ClientConnection, pos world.Position, blk world.Block) bool {
-	ctx, p := i.pluginCtx(), playerBridge{conn: c}
+	ctx, p := i.pluginCtx(), handle(c)
 	for _, l := range i.listeners {
 		if !safeVeto(i, "listener "+l.Name+" OnBlockPlace", func() bool { return l.Logic.OnBlockPlace(ctx, p, pos, blk) }) {
 			return false
@@ -161,7 +162,7 @@ func (i *Instance) allowBlockPlace(c *ClientConnection, pos world.Position, blk 
 // consumed: the caller must not dig/place/open and should roll back the
 // client's prediction.
 func (i *Instance) allowBlockInteract(c *ClientConnection, click game.BlockInteraction) bool {
-	ctx, p := i.pluginCtx(), playerBridge{conn: c}
+	ctx, p := i.pluginCtx(), handle(c)
 	for _, l := range i.listeners {
 		if !safeVeto(i, "listener "+l.Name+" OnBlockInteract", func() bool { return l.Logic.OnBlockInteract(ctx, p, click) }) {
 			return false
@@ -176,7 +177,7 @@ func (i *Instance) allowBlockInteract(c *ClientConnection, click game.BlockInter
 // allowEntityInteract fires OnEntityInteract for a right-click on a world
 // entity. false = consumed.
 func (i *Instance) allowEntityInteract(c *ClientConnection, ei game.EntityInteraction) bool {
-	ctx, p := i.pluginCtx(), playerBridge{conn: c}
+	ctx, p := i.pluginCtx(), handle(c)
 	for _, l := range i.listeners {
 		if !safeVeto(i, "listener "+l.Name+" OnEntityInteract", func() bool { return l.Logic.OnEntityInteract(ctx, p, ei) }) {
 			return false
@@ -191,7 +192,7 @@ func (i *Instance) allowEntityInteract(c *ClientConnection, ei game.EntityIntera
 // allowItemUse fires OnItemUse for a right-click in the air. false =
 // consumed: the caller must not run bucket/throw/eat behaviour.
 func (i *Instance) allowItemUse(c *ClientConnection, use game.ItemUse) bool {
-	ctx, p := i.pluginCtx(), playerBridge{conn: c}
+	ctx, p := i.pluginCtx(), handle(c)
 	for _, l := range i.listeners {
 		if !safeVeto(i, "listener "+l.Name+" OnItemUse", func() bool { return l.Logic.OnItemUse(ctx, p, use) }) {
 			return false
@@ -207,8 +208,8 @@ func (i *Instance) allowItemUse(c *ClientConnection, use game.ItemUse) bool {
 // some hook handled the effect, so the caller skips the vanilla default.
 // Listeners run first; the first handler wins.
 func (i *Instance) fireItemConsume(c *ClientConnection, st inventory.Stack) bool {
-	ctx, p := i.pluginCtx(), playerBridge{conn: c}
-	gs := toGameStack(st, -1)
+	ctx, p := i.pluginCtx(), handle(c)
+	gs := gamebridge.ToGame(st, -1)
 	for _, l := range i.listeners {
 		handled := false
 		safeHook(i, "listener "+l.Name+" OnItemConsume", func() { handled = l.Logic.OnItemConsume(ctx, p, gs) })
@@ -224,7 +225,7 @@ func (i *Instance) fireItemConsume(c *ClientConnection, st inventory.Stack) bool
 
 func (i *Instance) allowAttack(attacker, target *ClientConnection) bool {
 	ctx := i.pluginCtx()
-	a, t := playerBridge{conn: attacker}, playerBridge{conn: target}
+	a, t := handle(attacker), handle(target)
 	for _, l := range i.listeners {
 		if !safeVeto(i, "listener "+l.Name+" OnPlayerAttack", func() bool { return l.Logic.OnPlayerAttack(ctx, a, t) }) {
 			return false
@@ -239,7 +240,7 @@ func (i *Instance) allowAttack(attacker, target *ClientConnection) bool {
 // filterChat threads the message through every listener's OnChat (each
 // sees the previous rewrite), then the instance hook. false = drop.
 func (i *Instance) filterChat(c *ClientConnection, msg string) (string, bool) {
-	ctx, p := i.pluginCtx(), playerBridge{conn: c}
+	ctx, p := i.pluginCtx(), handle(c)
 	for _, l := range i.listeners {
 		rewrite, allow := msg, true
 		safeHook(i, "listener "+l.Name+" OnChat", func() { rewrite, allow = l.Logic.OnChat(ctx, p, msg) })
@@ -258,10 +259,10 @@ func (i *Instance) filterChat(c *ClientConnection, msg string) (string, bool) {
 // be nil (environmental death).
 func (i *Instance) fireDeath(victim, killer *ClientConnection) {
 	ctx := i.pluginCtx()
-	v := playerBridge{conn: victim}
+	v := handle(victim)
 	var k game.PlayerHandle
 	if killer != nil {
-		k = playerBridge{conn: killer}
+		k = handle(killer)
 	}
 	for _, l := range i.listeners {
 		l := l
@@ -306,7 +307,7 @@ func pluginCommand(pc *game.Command) *Command {
 					_ = c.sendSystemMessage("Command failed: internal error")
 				}
 			}()
-			pc.Run(c.instance.pluginCtx(), playerBridge{conn: c}, args)
+			pc.Run(c.instance.pluginCtx(), handle(c), args)
 		},
 		Complete: func(c *ClientConnection, args []string) []string {
 			if pc.Complete == nil || c.instance == nil {
@@ -314,7 +315,7 @@ func pluginCommand(pc *game.Command) *Command {
 			}
 			var out []string
 			safeHook(c.instance, "plugin complete "+pc.Name, func() {
-				out = pc.Complete(c.instance.pluginCtx(), playerBridge{conn: c}, args)
+				out = pc.Complete(c.instance.pluginCtx(), handle(c), args)
 			})
 			return out
 		},

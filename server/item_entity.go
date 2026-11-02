@@ -135,7 +135,7 @@ func (i *Instance) itemTick(uint64) {
 		}
 		if it.Collectable() {
 			if c := i.pickupCandidate(it.X, it.Y, it.Z, players); c != nil {
-				remaining := c.giveStack(it.Stack)
+				remaining := c.GiveStack(it.Stack)
 				if taken := int(it.Stack.Count) - remaining; taken > 0 {
 					pickups = append(pickups, pickup{it: it, collector: c, taken: taken, remaining: remaining})
 					it.Stack.Count = byte(remaining)

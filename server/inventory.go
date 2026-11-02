@@ -83,10 +83,10 @@ func (c *ClientConnection) giveItem(itemID int32, count int) int {
 		return 0
 	}
 	remaining := count
-	// giveStack takes a byte count; feed it in stack-sized chunks.
+	// GiveStack takes a byte count; feed it in stack-sized chunks.
 	for remaining > 0 {
 		chunk := min(remaining, inventory.MaxStack)
-		left := c.giveStack(inventory.Stack{ID: itemID, Count: byte(chunk)})
+		left := c.GiveStack(inventory.Stack{ID: itemID, Count: byte(chunk)})
 		remaining -= chunk - left
 		if left > 0 {
 			break
@@ -95,10 +95,10 @@ func (c *ClientConnection) giveItem(itemID int32, count int) int {
 	return remaining
 }
 
-// giveStack adds st (with all its display / enchantment data) to the
+// GiveStack adds st (with all its display / enchantment data) to the
 // inventory (inventory.Player.Give) and syncs every touched slot with its
 // NBT. Returns the units that did not fit.
-func (c *ClientConnection) giveStack(st inventory.Stack) int {
+func (c *ClientConnection) GiveStack(st inventory.Stack) int {
 	if st.Empty() {
 		return 0
 	}
@@ -115,9 +115,9 @@ func (c *ClientConnection) syncSlots(slots []int16) {
 	}
 }
 
-// setSlot overwrites one window-0 slot in the model and on the client. An
+// SetSlot overwrites one window-0 slot in the model and on the client. An
 // empty stack clears it. Armour / held changes are broadcast as equipment.
-func (c *ClientConnection) setSlot(slot int16, st inventory.Stack) {
+func (c *ClientConnection) SetSlot(slot int16, st inventory.Stack) {
 	if slot < 0 || int(slot) >= inventory.PlayerSlots {
 		return
 	}
@@ -129,9 +129,9 @@ func (c *ClientConnection) setSlot(slot int16, st inventory.Stack) {
 	c.equipmentChanged()
 }
 
-// clearInventory empties every slot (armour, main, hotbar, offhand, cursor)
+// ClearInventory empties every slot (armour, main, hotbar, offhand, cursor)
 // and re-sends the whole window so the client agrees.
-func (c *ClientConnection) clearInventory() {
+func (c *ClientConnection) ClearInventory() {
 	for slot := int16(0); slot < inventory.PlayerSlots; slot++ {
 		c.inv.Set(slot, inventory.Stack{})
 	}
@@ -160,10 +160,10 @@ type indexedStack struct {
 // countItem sums the units of itemID across the main inventory + hotbar.
 func (c *ClientConnection) countItem(itemID int32) int { return c.inv.Count(itemID) }
 
-// takeItem removes count units of itemID (inventory.Player.Take), syncing
+// TakeItem removes count units of itemID (inventory.Player.Take), syncing
 // every changed slot. Removes nothing and returns false when the player
 // holds fewer than count.
-func (c *ClientConnection) takeItem(itemID int32, count int) bool {
+func (c *ClientConnection) TakeItem(itemID int32, count int) bool {
 	ok, changed := c.inv.Take(itemID, count)
 	c.syncSlots(changed)
 	return ok

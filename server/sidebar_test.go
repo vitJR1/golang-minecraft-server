@@ -75,7 +75,7 @@ func TestSidebarCreateUpdateClear(t *testing.T) {
 	inst := bareInstance(New(), world.NewMemoryWorld())
 	c := tntConn(inst, "Board", player.Survival, 0, 64, 0)
 
-	c.setSidebar("§eBED WARS", []string{"Kills: 0", "", "Beds: 0"})
+	c.SetSidebar("§eBED WARS", []string{"Kills: 0", "", "Beds: 0"})
 	pkts := drainPackets(t, c)
 	// Objective create, one team + one score per line, then display.
 	if countIDs(pkts, packetid.CbPlayUpdateObjectives) != 1 || countIDs(pkts, packetid.CbPlayUpdateTeams) != 3 ||
@@ -103,13 +103,13 @@ func TestSidebarCreateUpdateClear(t *testing.T) {
 	}
 
 	// Unchanged content → silence.
-	c.setSidebar("§eBED WARS", []string{"Kills: 0", "", "Beds: 0"})
+	c.SetSidebar("§eBED WARS", []string{"Kills: 0", "", "Beds: 0"})
 	if pkts := drainPackets(t, c); len(pkts) != 0 {
 		t.Errorf("unchanged sidebar sent %d packets", len(pkts))
 	}
 
 	// One line changes → one team prefix update, nothing else.
-	c.setSidebar("§eBED WARS", []string{"Kills: 1", "", "Beds: 0"})
+	c.SetSidebar("§eBED WARS", []string{"Kills: 1", "", "Beds: 0"})
 	pkts = drainPackets(t, c)
 	if len(pkts) != 1 || pkts[0].id != packetid.CbPlayUpdateTeams {
 		t.Fatalf("line update packets: %+v", pkts)
@@ -120,14 +120,14 @@ func TestSidebarCreateUpdateClear(t *testing.T) {
 
 	// Growing by a line re-scores everything (positions shift) and creates
 	// the new line's team.
-	c.setSidebar("§eBED WARS", []string{"Kills: 1", "", "Beds: 0", "Team: Red"})
+	c.SetSidebar("§eBED WARS", []string{"Kills: 1", "", "Beds: 0", "Team: Red"})
 	pkts = drainPackets(t, c)
 	if countIDs(pkts, packetid.CbPlayUpdateTeams) != 1 || countIDs(pkts, packetid.CbPlayUpdateScore) != 4 || countIDs(pkts, packetid.CbPlayUpdateObjectives) != 0 {
 		t.Errorf("grow packets: %+v", pkts)
 	}
 
 	// Shrinking removes the dropped line's score and team.
-	c.setSidebar("§eBED WARS", []string{"Kills: 1"})
+	c.SetSidebar("§eBED WARS", []string{"Kills: 1"})
 	pkts = drainPackets(t, c)
 	removedTeams := 0
 	for _, p := range pkts {
@@ -142,7 +142,7 @@ func TestSidebarCreateUpdateClear(t *testing.T) {
 	}
 
 	// Title change → objective update (mode 2).
-	c.setSidebar("§cBED WARS", []string{"Kills: 1"})
+	c.SetSidebar("§cBED WARS", []string{"Kills: 1"})
 	pkts = drainPackets(t, c)
 	if len(pkts) != 1 || pkts[0].id != packetid.CbPlayUpdateObjectives {
 		t.Fatalf("title packets: %+v", pkts)
@@ -154,17 +154,17 @@ func TestSidebarCreateUpdateClear(t *testing.T) {
 	}
 
 	// Clear: every team removed, then the objective; a second clear is silent.
-	c.clearSidebar()
+	c.ClearSidebar()
 	pkts = drainPackets(t, c)
 	if countIDs(pkts, packetid.CbPlayUpdateTeams) != 1 || pkts[len(pkts)-1].id != packetid.CbPlayUpdateObjectives {
 		t.Errorf("clear packets: %+v", pkts)
 	}
-	c.clearSidebar()
+	c.ClearSidebar()
 	if pkts := drainPackets(t, c); len(pkts) != 0 {
 		t.Error("clearing nothing must be silent")
 	}
 	// Showing again after a clear re-creates from scratch.
-	c.setSidebar("x", []string{"a"})
+	c.SetSidebar("x", []string{"a"})
 	if pkts := drainPackets(t, c); countIDs(pkts, packetid.CbPlayDisplayObjective) != 1 {
 		t.Error("re-show should display the objective again")
 	}
@@ -177,7 +177,7 @@ func TestSidebarCapsAtFifteenLines(t *testing.T) {
 	for i := range lines {
 		lines[i] = "line"
 	}
-	c.setSidebar("t", lines)
+	c.SetSidebar("t", lines)
 	if n := countIDs(drainPackets(t, c), packetid.CbPlayUpdateTeams); n != sidebarMaxLines {
 		t.Errorf("%d line teams, want %d", n, sidebarMaxLines)
 	}

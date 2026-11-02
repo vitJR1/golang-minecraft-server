@@ -15,7 +15,7 @@ import (
 func TestSendTitleSendsTimesSubtitleThenTitle(t *testing.T) {
 	inst := bareInstance(New(), world.NewMemoryWorld())
 	c := tntConn(inst, "Viewer", player.Survival, 0, 64, 0)
-	if err := c.sendTitle("You died!", "Respawning in 5…", 5, 40, 10); err != nil {
+	if err := c.SendTitle("You died!", "Respawning in 5…", 5, 40, 10); err != nil {
 		t.Fatal(err)
 	}
 	var ids []int32

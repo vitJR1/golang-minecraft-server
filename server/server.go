@@ -362,7 +362,7 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 	//    left up comes down with it, so the next game starts clean.
 	old.LeaveAndAnnounce(c)
 	c.endWatch(old)
-	c.clearSidebar()
+	c.ClearSidebar()
 
 	// 2. Wipe c's tab list. Respawn doesn't do this, and the next
 	//    JoinAndAnnounce will rebuild it for the new instance.

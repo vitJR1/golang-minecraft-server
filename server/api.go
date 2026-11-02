@@ -6,10 +6,12 @@ import (
 
 	"minecraft-server/game"
 	"minecraft-server/player"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/botai"
 	"minecraft-server/server/effect"
 	"minecraft-server/server/inventory"
 	"minecraft-server/server/lobby"
+	"minecraft-server/server/sound"
 )
 
 // api.go: what the feature packages built over the server (server/commands,
@@ -144,4 +146,57 @@ func (c *ClientConnection) GiveHotbarItem(slot int16, itemID int32, name string)
 		slog.Warn("give hotbar item failed",
 			"player", c.playerName, "item", name, "err", err)
 	}
+}
+
+// Slot is window-0 slot i of the inventory model (empty out of range).
+func (c *ClientConnection) Slot(i int16) inventory.Stack {
+	if i < 0 || int(i) >= inventory.PlayerSlots {
+		return inventory.Stack{}
+	}
+	return c.inv.Get(i)
+}
+
+// SetHealth sets the player's health (clamped by player.Player) and tells
+// the client.
+func (c *ClientConnection) SetHealth(h float32) {
+	c.player.SetHealth(h)
+	_ = c.sendSetHealth(c.player.Health())
+}
+
+// PlaySound plays a sound at the player's position, to that player only.
+func (c *ClientConnection) PlaySound(name string, volume, pitch float32) {
+	s := c.player.Snapshot()
+	_ = c.safeWrite(packetid.CbPlaySoundEffect,
+		sound.EffectPayload(name, sound.CategoryPlayer, s.X, s.Y, s.Z, volume, pitch))
+}
+
+// SetNameTag groups the player under tag in its instance (tab list + over
+// the head; name_tags.go).
+func (c *ClientConnection) SetNameTag(tag game.NameTag) {
+	if inst := c.instance; inst != nil {
+		inst.setNameTag(c.playerName, tag)
+	}
+}
+
+// Respawn brings a dead (or alive) player back at (x, y, z) with full
+// health: the game-driven counterpart of combat.go's respawn paths, for
+// instances running SetCustomRespawn.
+func (c *ClientConnection) Respawn(x, y, z float64) {
+	c.player.Respawn()
+	c.player.MoveTo(x, y, z, false)
+	_ = c.sendSetHealth(player.MaxHealth)
+	_ = c.sendSyncPlayerPosition(x, y, z)
+	c.broadcastEntityTeleport()
+	c.resendEffects()
+	c.equipmentChanged()
+}
+
+// Die kills the player outright — no armour, no combat switch — and runs
+// the death flow (games' Kill: the void). Kill is the armoured hit.
+func (c *ClientConnection) Die() {
+	if c.player == nil || c.player.IsDead() || c.instance == nil {
+		return
+	}
+	c.player.ApplyDamage(player.MaxHealth*10, c.instance.Tick(), 0)
+	c.die(nil)
 }

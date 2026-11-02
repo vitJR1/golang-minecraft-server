@@ -104,7 +104,7 @@ func (c *ClientConnection) returnCraftGrid() {
 			continue
 		}
 		c.inv.Set(i, inventory.Stack{})
-		if left := c.giveStack(st); left > 0 {
+		if left := c.GiveStack(st); left > 0 {
 			c.throwStack(inventory.WithCount(st, left))
 		}
 	}

@@ -41,9 +41,9 @@ func TestEffectAPIAndActiveList(t *testing.T) {
 		t.Errorf("effect id %d, want jump_boost %d", id, effect.JumpBoost.ID)
 	}
 
-	c.removeEffect(effect.Speed)
+	c.RemoveEffect(effect.Speed)
 	if c.effectLevel(effect.Speed) != 0 || lastPacket(t, c, packetid.CbPlayRemoveEntityEffect) == nil {
-		t.Error("removeEffect should end the effect and tell the client")
+		t.Error("RemoveEffect should end the effect and tell the client")
 	}
 	c.clearEffects()
 	if len(c.activeEffects()) != 0 {
@@ -199,8 +199,8 @@ func TestSpeedEffectSyncsMovementAttribute(t *testing.T) {
 
 	// Removal syncs an empty list (plus the sprint boost).
 	c.ac.Sprinting.Store(false)
-	c.removeEffect(effect.Speed)
-	c.removeEffect(effect.Slowness)
+	c.RemoveEffect(effect.Speed)
+	c.RemoveEffect(effect.Slowness)
 	mods = readMovementAttribute(t, lastPacket(t, c, packetid.CbPlayUpdateAttributes))
 	if len(mods) != 0 {
 		t.Errorf("after removal: %v, want none", mods)

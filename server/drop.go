@@ -71,7 +71,7 @@ func (c *ClientConnection) dropCursor() {
 	c.cursor = inventory.Stack{}
 	if st.Undroppable() {
 		// Back into the inventory instead of onto the ground.
-		if left := c.giveStack(st); left > 0 {
+		if left := c.GiveStack(st); left > 0 {
 			c.cursor = inventory.WithCount(st, left) // nowhere to go: keep it carried
 		}
 		return

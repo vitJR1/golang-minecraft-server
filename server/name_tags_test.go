@@ -62,18 +62,18 @@ func TestNameTags(t *testing.T) {
 	drainPackets(t, b)
 	red := game.NameTag{Group: "red", Prefix: "§c● ", Colour: 'c'}
 
-	playerBridge{conn: a}.SetNameTag(red)
+	handle(a).SetNameTag(red)
 	if got := teamOps(t, drainPackets(t, b)); len(got) != 1 || !strings.HasPrefix(got[0], "nt_red:0:c12:") || !strings.HasSuffix(got[0], ":Alice") {
 		t.Fatalf("Bob sees %v, want nt_red created with Alice", got)
 	}
 	drainPackets(t, a)
 
-	playerBridge{conn: b}.SetNameTag(red)
+	handle(b).SetNameTag(red)
 	if got := teamOps(t, drainPackets(t, a)); strings.Join(got, " ") != "nt_red:3:Bob" {
 		t.Fatalf("Alice sees %v, want Bob added", got)
 	}
 	// Same tag again: nothing to send.
-	playerBridge{conn: b}.SetNameTag(red)
+	handle(b).SetNameTag(red)
 	if got := teamOps(t, drainPackets(t, a)); len(got) != 0 {
 		t.Fatalf("a repeat sent %v", got)
 	}
@@ -124,7 +124,7 @@ func TestBotRoleInNameTag(t *testing.T) {
 	watcher := offlineConn(inst, "Watcher", player.Spectator, 0.5, 70, 0.5)
 	inst.JoinAndAnnounce(watcher)
 	drainPackets(t, watcher)
-	playerBridge{conn: b}.SetNameTag(game.NameTag{Group: "bw_red", Prefix: "§c● ", Colour: 'c'})
+	handle(b).SetNameTag(game.NameTag{Group: "bw_red", Prefix: "§c● ", Colour: 'c'})
 	runTicks(inst, 20)
 	seen := map[string]string{}
 	tagPrefixes(t, drainPackets(t, watcher), seen)

@@ -121,8 +121,8 @@ func (c *ClientConnection) applyEffect(e effect.Effect, level int, d time.Durati
 	c.server.effects.apply(c, e, level, d)
 }
 
-// removeEffect ends e now (no-op when absent).
-func (c *ClientConnection) removeEffect(e effect.Effect) {
+// RemoveEffect ends e now (no-op when absent).
+func (c *ClientConnection) RemoveEffect(e effect.Effect) {
 	if c.server == nil || c.server.effects == nil {
 		return
 	}

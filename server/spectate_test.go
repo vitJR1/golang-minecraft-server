@@ -55,13 +55,13 @@ func TestBotMatchWatcher(t *testing.T) {
 	}
 	bots := s.Bots(inst)
 	ctx := inst.pluginCtx()
-	if len(bots) != 2 || !inst.botGuide.BotEnemy(ctx, playerBridge{conn: bots[0]}, playerBridge{conn: bots[1]}) {
+	if len(bots) != 2 || !inst.botGuide.BotEnemy(ctx, handle(bots[0]), handle(bots[1])) {
 		t.Fatal("the bots aren't playing each other")
 	}
-	if plan := inst.botGuide.BotPlan(ctx, playerBridge{conn: bots[0]}); plan.Idle {
+	if plan := inst.botGuide.BotPlan(ctx, handle(bots[0])); plan.Idle {
 		t.Fatal("the round didn't start")
 	}
-	if inst.botGuide.BotEnemy(ctx, playerBridge{conn: bots[0]}, playerBridge{conn: op}) {
+	if inst.botGuide.BotEnemy(ctx, handle(bots[0]), handle(op)) {
 		t.Fatal("the watcher is in the game")
 	}
 	if bt, ok := inst.botGuide.(game.BotTeams); !ok || len(bt.BotTeams(ctx)) != 2 {
