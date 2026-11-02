@@ -4,6 +4,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/lobby"
 	"minecraft-server/world"
 	"testing"
 	"time"
@@ -114,7 +115,7 @@ func leaveFrom(t *testing.T, name, gameID string) (*Server, *Instance) {
 func TestLeaveBedWarsGoesToBedWarsLobby(t *testing.T) {
 	for _, kind := range []string{"bedwars", "bedwars-1x1"} {
 		s, landed := leaveFrom(t, "Quitter", kind)
-		if landed != s.GetInstance(LobbyBedWars) {
+		if landed != s.GetInstance(lobby.BedWars) {
 			t.Errorf("/leave from %s landed in %s, want the BedWars lobby", kind, landed.ID)
 		}
 	}
@@ -122,7 +123,7 @@ func TestLeaveBedWarsGoesToBedWarsLobby(t *testing.T) {
 
 func TestLeaveFFAGoesToFFALobby(t *testing.T) {
 	s, landed := leaveFrom(t, "Duelist", "ffa")
-	if landed != s.GetInstance(LobbyFFA) {
+	if landed != s.GetInstance(lobby.FFA) {
 		t.Errorf("/leave from ffa landed in %s, want the FFA lobby", landed.ID)
 	}
 }
@@ -145,23 +146,6 @@ func TestLeaveInHubIsNoop(t *testing.T) {
 	drainExpect(t, ch, "not-in-a-game reply", packetid.CbPlaySystemChat)
 	if _, inst, _ := s.FindPlayer("Homebody"); inst != s.Hub {
 		t.Error("Homebody should still be in the hub")
-	}
-}
-
-func TestLobbyForGame(t *testing.T) {
-	cases := map[string]string{
-		"bedwars": LobbyBedWars, "bedwars-1x1": LobbyBedWars, "bedwars-2x5": LobbyBedWars,
-		"ffa": LobbyFFA, "skywars-solo": LobbySkyWars,
-	}
-	for game, want := range cases {
-		if got, ok := lobbyForGame(game); !ok || got != want {
-			t.Errorf("lobbyForGame(%q) = %q %v, want %q", game, got, ok, want)
-		}
-	}
-	for _, game := range []string{"", "bedwarsish", "parkour"} {
-		if got, ok := lobbyForGame(game); ok {
-			t.Errorf("lobbyForGame(%q) = %q, want none", game, got)
-		}
 	}
 }
 

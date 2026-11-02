@@ -156,7 +156,7 @@ func TestFluidsCannotBeBroken(t *testing.T) {
 	for _, gm := range []player.Gamemode{player.Survival, player.Creative} {
 		c.player.SetGamemode(gm)
 		digAt(t, c, pos, 0)
-		inst.tickCount.Add(1000)
+		inst.ticks.Advance(1000)
 		digAt(t, c, pos, 2)
 		if got := inst.World.GetBlock(pos); got != world.Water {
 			t.Errorf("gamemode %d: water was broken: %+v", gm, got)
@@ -172,7 +172,7 @@ func lavaArena(t *testing.T) (*Instance, *ClientConnection) {
 	t.Helper()
 	inst := bareInstance(New(), world.NewMemoryWorld())
 	inst.Combat = combat.DefaultConfig()
-	inst.combatEnabled.Store(true)
+	inst.SetPvP(true)
 	inst.World.SetBlock(world.Position{X: 0, Y: 64, Z: 0}, world.Lava)
 	c := tntConn(inst, "Swimmer", player.Survival, 0.5, 64, 0.5)
 	return inst, c

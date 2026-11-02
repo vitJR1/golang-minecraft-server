@@ -64,49 +64,22 @@ func (s *Server) CreateArena(kind, templateName, name string) (string, error) {
 	s.AddInstance(inst)
 	s.AttachLogic(inst, logic)
 
-	s.mu.Lock()
-	s.arenas[name] = kind
-	s.mu.Unlock()
+	s.arenas.Add(name, kind)
 	return name, nil
 }
 
 // nextArenaName picks the next free auto name for a kind ("bw-1", "bw-2", …
 // for bedwars; "bw-1x1-1", … for the bedwars-1x1 duel kind).
 func (s *Server) nextArenaName(kind string) string {
-	prefix := kind
-	if strings.HasPrefix(kind, "bedwars") {
-		prefix = "bw" + strings.TrimPrefix(kind, "bedwars")
-	}
-	for {
-		name := fmt.Sprintf("%s-%d", prefix, s.arenaSerial.Add(1))
-		if s.GetInstance(name) == nil {
-			return name
-		}
-	}
+	return s.arenas.NextName(kind, func(name string) bool { return s.GetInstance(name) != nil })
 }
 
 // IsArena reports whether name is a created arena.
-func (s *Server) IsArena(name string) bool {
-	s.mu.RLock()
-	_, ok := s.arenas[name]
-	s.mu.RUnlock()
-	return ok
-}
+func (s *Server) IsArena(name string) bool { return s.arenas.Is(name) }
 
 // ArenasOfKind returns the names of created arenas for a kind, sorted. kind ""
 // returns every arena.
-func (s *Server) ArenasOfKind(kind string) []string {
-	s.mu.RLock()
-	var out []string
-	for name, k := range s.arenas {
-		if kind == "" || k == kind {
-			out = append(out, name)
-		}
-	}
-	s.mu.RUnlock()
-	sort.Strings(out)
-	return out
-}
+func (s *Server) ArenasOfKind(kind string) []string { return s.arenas.OfKind(kind) }
 
 // baseGameIDs returns registered game IDs that are base games (not created
 // arenas), sorted — for /play tab-completion.

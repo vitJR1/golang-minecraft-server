@@ -136,7 +136,7 @@ func TestTNTChainReaction(t *testing.T) {
 
 func TestTNTExplosionHurtsSurvivalNotCreative(t *testing.T) {
 	inst := bareInstance(New(), tntWorld())
-	inst.combatEnabled.Store(true)
+	inst.SetPvP(true)
 	// 5 blocks out: vanilla deals ~15 of 20 hp there (2 blocks would kill).
 	victim := tntConn(inst, "Victim", player.Survival, 5.5, 64, 0.5)
 	builder := tntConn(inst, "Builder", player.Creative, -2.5, 64, 0.5)
@@ -209,7 +209,7 @@ func lastPacket(t *testing.T, c *ClientConnection, want int32) []byte {
 
 func TestExplosionPacketSkipsDistantPlayers(t *testing.T) {
 	inst := bareInstance(New(), tntWorld())
-	inst.combatEnabled.Store(true)
+	inst.SetPvP(true)
 	near := tntConn(inst, "Near", player.Survival, 30, 64, 0.5)
 	distant := tntConn(inst, "Distant", player.Survival, 100, 64, 0.5)
 	inst.explode(0.5, 64.06, 0.5, world.TNTPower, nil)
@@ -241,7 +241,7 @@ func TestBroadcastNearFiltersByDistance(t *testing.T) {
 
 func TestTNTExplosionNeedsCombat(t *testing.T) {
 	inst := bareInstance(New(), tntWorld())
-	inst.combatEnabled.Store(false)
+	inst.SetPvP(false)
 	victim := tntConn(inst, "Safe", player.Survival, 1.5, 64, 0.5)
 	inst.explode(0.5, 64.06, 0.5, world.TNTPower, nil)
 	if h := victim.player.Snapshot().Health; h != player.MaxHealth {
@@ -290,7 +290,7 @@ func TestFlintAndSteelIgnitesTNT(t *testing.T) {
 func TestExplosionBehindWoolWallWithArmor(t *testing.T) {
 	inst := bareInstance(New(), tntWorld())
 	inst.Combat = combat.DefaultConfig()
-	inst.combatEnabled.Store(true)
+	inst.SetPvP(true)
 	for y := 64; y <= 65; y++ {
 		inst.World.SetBlock(world.Position{X: 0, Y: y, Z: 2}, world.Block{StateID: 1384, Name: "minecraft:white_wool"})
 	}

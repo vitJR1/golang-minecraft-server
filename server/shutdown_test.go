@@ -2,6 +2,7 @@ package server
 
 import (
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/tickloop"
 	"testing"
 	"time"
 )
@@ -34,7 +35,7 @@ func TestShutdownKicksPlayersAndStopsTicks(t *testing.T) {
 
 	// Tick loops are stopped: the hub's counter freezes.
 	tick := s.Hub.Tick()
-	time.Sleep(3 * tickInterval)
+	time.Sleep(3 * tickloop.Interval)
 	if got := s.Hub.Tick(); got != tick {
 		t.Errorf("hub tick advanced after shutdown: %d -> %d", tick, got)
 	}

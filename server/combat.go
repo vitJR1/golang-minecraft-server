@@ -8,6 +8,7 @@ import (
 	"minecraft-server/server/effect"
 	"minecraft-server/server/enchant"
 	"minecraft-server/server/sound"
+	"minecraft-server/server/tickloop"
 	"minecraft-server/world"
 )
 
@@ -41,7 +42,7 @@ func (c *ClientConnection) handleAttack(victim *ClientConnection) {
 	var strength float32 = 1
 	if cfg.Version == combat.PvP19 {
 		prev := ap.AttackCooldownTick(now)
-		strength = combat.AttackStrengthScale(now-prev, combat.CooldownTicks(cfg.AttackSpeed, TickRate))
+		strength = combat.AttackStrengthScale(now-prev, combat.CooldownTicks(cfg.AttackSpeed, tickloop.Rate))
 	}
 
 	aSnap := ap.Snapshot()

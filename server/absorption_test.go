@@ -88,7 +88,7 @@ func TestAbsorptionEffectSyncsYellowHearts(t *testing.T) {
 // absorption value; resyncView re-pushes it after a Respawn.
 func TestDamageDrainsAbsorptionAndSyncs(t *testing.T) {
 	inst := bareInstance(New(), world.NewMemoryWorld())
-	inst.combatEnabled.Store(true)
+	inst.SetPvP(true)
 	c := tntConn(inst, "Burnt", player.Survival, 0, 64, 0)
 	c.applyEffect(effect.Absorption, 1, time.Minute)
 	drain(c)

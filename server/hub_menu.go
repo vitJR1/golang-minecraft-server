@@ -10,6 +10,7 @@ import (
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/chest"
 	"minecraft-server/server/inventory"
+	"minecraft-server/server/lobby"
 	"minecraft-server/templates"
 	"minecraft-server/world"
 	"strings"
@@ -148,35 +149,6 @@ func (e menuEntry) stack() inventory.Stack {
 		count = 1
 	}
 	return inventory.Stack{ID: e.itemID, Count: count, Name: e.name, Lore: e.lore, Glint: e.glint}
-}
-
-// hubMenuTargets maps a menu icon's `key` to the lobby instance ID the
-// click teleports the player into. Mirror LobbyFFA / LobbyBedWars /
-// LobbySkyWars from lobbies.go.
-var hubMenuTargets = map[string]string{
-	"ffa": LobbyFFA,
-	"bw":  LobbyBedWars,
-	"sw":  LobbySkyWars,
-}
-
-// lobbyArenas maps each lobby instance ID to the list of arena names
-// shown in that lobby's ender-pearl menu. Membership in this map also
-// doubles as "is this instance a game lobby" — see arenasForLobby.
-//
-// Names are placeholders; future matchmaker dispatch will look them up
-// in the game's Definition.
-var lobbyArenas = map[string][]string{
-	LobbyFFA:     {"The Pit", "Coliseum", "Sandbox", "Backalley", "Rooftop", "Tomb"},
-	LobbyBedWars: {"Garden", "Aquarium", "Volcano", "Junkyard", "Stronghold", "Lighthouse"},
-	LobbySkyWars: {"Cumulus", "Stratos", "Nebula", "Vesper", "Aurora", "Eclipse"},
-}
-
-// arenasForLobby returns (arenas, true) if instanceID is a game lobby,
-// else (nil, false). The boolean is also the predicate "should this
-// instance hand out an ender-pearl arena selector".
-func arenasForLobby(instanceID string) ([]string, bool) {
-	arenas, ok := lobbyArenas[instanceID]
-	return arenas, ok
 }
 
 // SetupHubMenu wires the hub instance: gives the blaze rod on join and
@@ -404,7 +376,7 @@ func (c *ClientConnection) joinArena(name string) {
 // is dismissed implicitly by the Respawn that MovePlayer sends; we
 // only have to clear the server-side menu state.
 func hubMainOnClick(c *ClientConnection, e menuEntry, _ menuClick) {
-	lobbyID, ok := hubMenuTargets[e.key]
+	lobbyID, ok := lobby.MenuTarget(e.key)
 	if !ok {
 		return
 	}

@@ -54,8 +54,8 @@ func (s *Server) statsSnapshot() serverStats {
 		n := i.Players.Count()
 		perInstance[i.ID] = n
 		players += n
-		worstTick = max(worstTick, i.maxTickNanos.Load())
-		lastTick = max(lastTick, i.lastTickNanos.Load())
+		worstTick = max(worstTick, int64(i.ticks.Max()))
+		lastTick = max(lastTick, int64(i.ticks.Last()))
 	}
 
 	var mem runtime.MemStats

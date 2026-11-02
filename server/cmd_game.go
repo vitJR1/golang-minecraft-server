@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"minecraft-server/game"
+	"minecraft-server/server/lobby"
 )
 
 // cmd_game.go: getting into and out of games — /play /hub /leave
@@ -151,14 +152,14 @@ func cmdLeave(c *ClientConnection, _ []string) {
 		_ = c.sendSystemMessage("You're not in a game.")
 		return
 	}
-	if _, inLobby := arenasForLobby(inst.ID); inLobby {
+	if lobby.Is(inst.ID) {
 		_ = c.sendSystemMessage("You're not in a game — /hub to go back to the hub.")
 		return
 	}
 	target := c.server.Hub
-	if id, ok := lobbyForGame(inst.GameID); ok {
-		if lobby := c.server.GetInstance(id); lobby != nil {
-			target = lobby
+	if id, ok := lobby.ForGame(inst.GameID); ok {
+		if dest := c.server.GetInstance(id); dest != nil {
+			target = dest
 		}
 	}
 	if err := c.server.MovePlayer(c, target, 0.5, 67, 0.5); err != nil {

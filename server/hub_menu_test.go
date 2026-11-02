@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/lobby"
 	"testing"
 	"time"
 )
@@ -91,7 +92,7 @@ func TestClickGameTeleportsToLobby(t *testing.T) {
 
 	waitFor(t, 2*time.Second, func() bool {
 		_, inst, ok := s.FindPlayer("Clicker")
-		return ok && inst != nil && inst.ID == LobbyFFA
+		return ok && inst != nil && inst.ID == lobby.FFA
 	}, "Clicker to be teleported into the FFA lobby")
 	if m := conn.menu.Load(); m != nil {
 		t.Errorf("menu state should be cleared after teleport, got %+v", m)

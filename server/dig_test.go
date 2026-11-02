@@ -16,7 +16,7 @@ func digWorld(t *testing.T, blk world.Block) (*Instance, *ClientConnection, worl
 	pos := world.Position{X: 5, Y: 70, Z: 5}
 	inst := bareInstance(New(), world.NewMemoryWorld())
 	inst.World.SetBlock(pos, blk)
-	inst.tickCount.Store(1000)
+	inst.ticks.Set(1000)
 	// The floor the miner stands on: airborne digging is 5× slower, and the
 	// server decides "airborne" from the blocks, not the packet's flag.
 	inst.World.SetBlock(world.Position{X: 3, Y: 68, Z: 3}, world.Stone)
@@ -40,7 +40,7 @@ func TestSurvivalDigNeedsTime(t *testing.T) {
 	if c.digPos == nil {
 		t.Fatal("dig should have started")
 	}
-	inst.tickCount.Add(200) // > 150 ticks by hand
+	inst.ticks.Advance(200) // > 150 ticks by hand
 	digAt(t, c, stone, 2)
 	if got := inst.World.GetBlock(stone); got != world.Air {
 		t.Fatalf("stone should break after its time, got %+v", got)
@@ -55,7 +55,7 @@ func TestSurvivalDigWithToolDrops(t *testing.T) {
 	hold(c, "minecraft:wooden_pickaxe") // 23 ticks
 
 	digAt(t, c, stone, 0)
-	inst.tickCount.Add(30)
+	inst.ticks.Advance(30)
 	digAt(t, c, stone, 2)
 	cobble, _ := world.ItemByName("minecraft:cobblestone")
 	if itemsIn(inst)[cobble] != 1 {
@@ -74,7 +74,7 @@ func TestSurvivalDigFinishTooEarlyIsRejected(t *testing.T) {
 		t.Fatal("finish on the start tick must be rejected")
 	}
 	digAt(t, c, pos, 0)
-	inst.tickCount.Add(2)
+	inst.ticks.Advance(2)
 	digAt(t, c, pos, 2)
 	if inst.World.GetBlock(pos) != world.Air {
 		t.Error("finish after the dig time should break the block")
@@ -108,7 +108,7 @@ func TestBedBreakRemovesPartnerAndDropsOne(t *testing.T) {
 	}
 
 	digAt(t, c, head, 0) // hardness 0.2 by hand = 4 ticks
-	inst.tickCount.Add(10)
+	inst.ticks.Advance(10)
 	digAt(t, c, head, 2)
 	if inst.World.GetBlock(head) != world.Air || inst.World.GetBlock(foot) != world.Air {
 		t.Error("both bed halves should go")

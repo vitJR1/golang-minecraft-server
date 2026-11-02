@@ -18,9 +18,7 @@ func registerArenaOfKind(t *testing.T, s *Server, id, kind string, players int) 
 	inst := NewInstance(id, s, world.NewMemoryWorld())
 	t.Cleanup(inst.Stop)
 	s.AddInstance(inst)
-	s.mu.Lock()
-	s.arenas[id] = kind
-	s.mu.Unlock()
+	s.arenas.Add(id, kind)
 	for i := 0; i < players; i++ {
 		inst.Players.Add(&ClientConnection{player: player.New(int32(i+1), "P", [16]byte{})})
 	}

@@ -23,7 +23,7 @@ func pvpInstance() *Instance {
 	inst := bareInstance(New(), world.NewMemoryWorld())
 	inst.Combat = combat.DefaultConfig()
 	inst.SetPvP(true)
-	inst.tickCount.Store(1000)
+	inst.ticks.Set(1000)
 	return inst
 }
 
@@ -235,7 +235,7 @@ func TestAdventureCannotBuild(t *testing.T) {
 	stone := world.Position{X: 2, Y: 64, Z: 0}
 	inst.World.SetBlock(stone, world.Stone)
 	digAt(t, c, stone, 0)
-	inst.tickCount.Add(500)
+	inst.ticks.Advance(500)
 	digAt(t, c, stone, 2)
 	if inst.World.GetBlock(stone) != world.Stone {
 		t.Fatal("adventure broke a block")

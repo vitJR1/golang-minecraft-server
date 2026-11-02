@@ -98,7 +98,7 @@ func addTestBot(t *testing.T, inst *Instance, guide *fakeGuide, diff botai.Diffi
 // runs ticks back to back), so results don't depend on the machine's load.
 func runTicks(inst *Instance, n int, players ...*ClientConnection) {
 	for i := 0; i < n; i++ {
-		tick := inst.tickCount.Add(1)
+		tick := inst.ticks.Advance(1)
 		inst.Players.Range(func(c *ClientConnection) {
 			if !c.isBot() {
 				return

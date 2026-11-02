@@ -41,7 +41,7 @@ func TestBotOnDotaMap(t *testing.T) {
 	}
 	start := -1
 	for tick := 0; tick < 6000; tick++ {
-		inst.runTick()
+		inst.ticks.Step()
 		// A route search runs off the tick; on a live server it gets 50 ms
 		// a tick. Here, wait for it, so the result doesn't depend on how fast
 		// the machine (or the race detector) is.

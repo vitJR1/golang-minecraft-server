@@ -19,7 +19,7 @@ func TestGoldenAppleEffectsAfterEating(t *testing.T) {
 	c.player.SetHealth(10)
 	apple, _ := world.ItemByName("minecraft:golden_apple")
 	c.inv.Set(inventory.HotbarStart, inventory.Stack{ID: apple, Count: 2})
-	inst.tickCount.Store(100)
+	inst.ticks.Set(100)
 
 	c.startUse("minecraft:golden_apple")
 	for tick := uint64(101); tick < 100+consume.Ticks; tick++ {
@@ -104,7 +104,7 @@ func TestPearlAndFireChargeAreConsumed(t *testing.T) {
 
 func TestFireballFliesStraightAndExplodes(t *testing.T) {
 	inst := bareInstance(New(), tntWorld())
-	inst.combatEnabled.Store(true)
+	inst.SetPvP(true)
 	c := tntConn(inst, "Mage", player.Survival, 0.5, 64, 0.5)
 	c.player.MoveAndLook(0.5, 64, 0.5, 0, 0, true)                      // looking +Z, level
 	inst.World.SetBlock(world.Position{X: 0, Y: 65, Z: 6}, world.Stone) // a wall 6 blocks ahead at eye height

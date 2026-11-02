@@ -15,6 +15,7 @@ import (
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/redisc"
+	"minecraft-server/server/arena"
 	"minecraft-server/server/botai"
 	"minecraft-server/server/chat"
 	"minecraft-server/server/conn"
@@ -22,6 +23,7 @@ import (
 	"minecraft-server/server/enchant"
 	"minecraft-server/server/enderchest"
 	"minecraft-server/server/inventory"
+	"minecraft-server/server/lobby"
 	"minecraft-server/server/moderation"
 	"minecraft-server/server/scoreboard"
 	"minecraft-server/server/visibility"
@@ -107,7 +109,6 @@ type Server struct {
 
 	nextEntityID       atomic.Int32
 	instanceSerialNext atomic.Uint64
-	arenaSerial        atomic.Uint64
 
 	// Enchantments / Effects supply dig and durability modifiers
 	// (modifiers.go). Defaults read item NBT and the /effect table; swap for
@@ -123,13 +124,14 @@ type Server struct {
 
 	// instances is the registry of all live instances (including Hub).
 	// templates is the registry of read-only world snapshots that
-	// /instance create can clone from. arenas maps a created arena's name to
-	// its game kind ("bedwars"); the playable Definition itself lives in the
-	// game registry under the same name.
+	// /instance create can clone from.
 	mu        sync.RWMutex
 	instances map[string]*Instance
 	templates map[string]*world.Template
-	arenas    map[string]string
+	// arenas maps a created arena's name to its game kind ("bedwars"); the
+	// playable Definition itself lives in the game registry under the same
+	// name. Has its own lock.
+	arenas arena.Registry
 
 	// connLimit gates every accepted socket (per-IP caps + global cap)
 	// before any protocol work happens. See conn_limit.go.
@@ -162,7 +164,6 @@ func New() *Server {
 		AnticheatLog: anticheat.NewMemoryStore(),
 		instances:    make(map[string]*Instance),
 		templates:    make(map[string]*world.Template),
-		arenas:       make(map[string]string),
 		TemplateDir:  templates.Root,
 		connLimit:    connlimit.New(),
 		janitorStop:  make(chan struct{}),
@@ -304,8 +305,8 @@ func (s *Server) RemoveInstance(id string) error {
 		return fmt.Errorf("instance %s still has %d players", id, inst.Players.Count())
 	}
 	delete(s.instances, id)
-	delete(s.arenas, id) // clear arena tracking if this was a created arena
 	s.mu.Unlock()
+	s.arenas.Remove(id) // clear arena tracking if this was a created arena
 
 	inst.Stop()
 	return nil
@@ -370,8 +371,7 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 	//     player: shed whatever it left behind (spectator mode, the kit,
 	//     effects, a pending death) BEFORE the Respawn, which carries the
 	//     gamemode the client will be in.
-	_, lobby := arenasForLobby(target.ID)
-	toHub := target == s.Hub || lobby
+	toHub := target == s.Hub || lobby.Is(target.ID)
 	if toHub {
 		c.resetForHub()
 	}

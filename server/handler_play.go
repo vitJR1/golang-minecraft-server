@@ -12,6 +12,7 @@ import (
 	"minecraft-server/server/consume"
 	"minecraft-server/server/enderchest"
 	"minecraft-server/server/inventory"
+	"minecraft-server/server/lobby"
 	"minecraft-server/server/projectile"
 	"minecraft-server/world"
 	"strings"
@@ -548,7 +549,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		// inventory model (wherever the player moved them), so a plain ender
 		// pearl is still throwable while the "Arena selector" opens a menu.
 		held := c.inv.Held(c.heldSlot.Load())
-		_, inLobby := arenasForLobby(c.instance.ID)
+		inLobby := lobby.Is(c.instance.ID)
 		switch {
 		case held.Name == inventory.NavigatorName:
 			if c.instance == c.server.Hub || inLobby {
@@ -557,9 +558,9 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		case held.Name == inventory.SelectorName:
 			// BedWars lobby gets the live DOTA arena browser (create/join);
 			// other lobbies keep the placeholder arena list for now.
-			if c.instance.ID == LobbyBedWars {
+			if c.instance.ID == lobby.BedWars {
 				c.openBedwarsArenaMenu()
-			} else if arenas, ok := arenasForLobby(c.instance.ID); ok {
+			} else if arenas, ok := lobby.Arenas(c.instance.ID); ok {
 				c.openArenaMenu(c.instance.ID, arenas)
 			}
 		default:

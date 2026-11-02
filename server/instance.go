@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"log/slog"
-	"math"
 	"minecraft-server/game"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
@@ -15,24 +14,13 @@ import (
 	"minecraft-server/server/fluid"
 	"minecraft-server/server/inventory"
 	"minecraft-server/server/itementity"
+	"minecraft-server/server/rules"
+	"minecraft-server/server/tickloop"
 	"minecraft-server/server/visibility"
 	"minecraft-server/world"
 	"sync"
 	"sync/atomic"
-	"time"
 )
-
-// TickRate is the per-instance tick frequency in Hz. Matches vanilla.
-const TickRate = 20
-
-// tickInterval is the wall-clock duration between ticks.
-var tickInterval = time.Second / TickRate
-
-// TickHandler fires once per tick. tick is the monotonically-increasing
-// counter since the instance started. Handlers should be fast — if any
-// handler takes longer than tickInterval, the next tick is dropped (the
-// ticker doesn't queue), so a slow handler stretches game time visibly.
-type TickHandler func(tick uint64)
 
 // Spawn is a respawn/teleport target. Defaults to the world origin column.
 type Spawn struct {
@@ -70,26 +58,11 @@ type Instance struct {
 
 	// Combat holds the numeric PvP tuning for this instance (damage, speed,
 	// knockback). Set at construction (combat.DefaultConfig) and safe to
-	// tweak before traffic arrives; the live on/off toggles below are
-	// separate atomics so they can flip mid-fight without a data race.
+	// tweak before traffic arrives; the live on/off toggles are the
+	// embedded rules.Switches (PvPEnabled/SetPvP, InstantRespawn, …), atomics
+	// so they can flip mid-fight without a data race.
 	Combat combat.Config
-
-	// combatEnabled gates the whole PvP system; instantRespawn picks the
-	// death behavior (instant heal+teleport vs death screen). Atomic so
-	// /instance set and game logic can toggle them while players fight.
-	combatEnabled  atomic.Bool
-	instantRespawn atomic.Bool
-	// customRespawn: death leaves the player dead for the game to respawn
-	// (game.Instance.SetCustomRespawn). weaponDamage: melee damage from the
-	// held weapon + armour instead of the flat combat.Config value.
-	// tntAutoPrime: a placed TNT block ignites at once.
-	customRespawn atomic.Bool
-	weaponDamage  atomic.Bool
-	tntAutoPrime  atomic.Bool
-	// explosionDamage: multiplier on explosion player damage, stored as
-	// float64 bits + 1 so that 0 means "never set" (reads as 1) while an
-	// explicit 0 still round-trips.
-	explosionDamage atomic.Uint64
+	rules.Switches
 
 	// SpawnPoint is where players respawn after death (and the world spawn
 	// for this instance). Defaults to the origin column.
@@ -137,18 +110,9 @@ type Instance struct {
 	// the same instance.
 	joinMu sync.Mutex
 
-	// Tick loop state.
-	tickCount    atomic.Uint64
-	tickMu       sync.RWMutex
-	tickHandlers []TickHandler
-	stopTick     chan struct{} // closed by Stop()
-	stopOnce     sync.Once
-
-	// Tick timing for /stats: duration of the most recent tick and the
-	// slowest tick since the instance started, in nanoseconds. Written by
-	// the tick loop, read by metrics.
-	lastTickNanos atomic.Int64
-	maxTickNanos  atomic.Int64
+	// ticks is the instance's clock (server/tickloop): handlers, counter,
+	// /stats timings.
+	ticks tickloop.Loop
 
 	// Event hooks. Set at construction, read from handler goroutines.
 	// Don't reassign after the instance starts taking traffic — there's no
@@ -168,7 +132,7 @@ type Instance struct {
 	// OnPlayerAttack fires when attacker sends SbPlayInteract type=attack
 	// targeting another player in the same instance. Returning false vetoes
 	// the hit; true lets the core combat system resolve damage/knockback
-	// (when PvP is enabled — see combatEnabled).
+	// (when PvP is enabled — see PvPEnabled).
 	OnPlayerAttack func(attacker, target *ClientConnection) bool
 
 	// OnPlayerDeath fires when the combat system kills a player. killer is
@@ -244,9 +208,9 @@ func NewInstance(id string, srv *Server, w world.World) *Instance {
 		Players:    NewPlayerList(),
 		Combat:     combat.DefaultConfig(),
 		SpawnPoint: Spawn{X: 0.5, Y: 67, Z: 0.5},
-		stopTick:   make(chan struct{}),
 	}
-	i.combatEnabled.Store(true) // instances default to PvP on (hub turns it off)
+	i.ticks.Label = id
+	i.SetPvP(true) // instances default to PvP on (hub turns it off)
 	i.loadWorldEntities()
 	i.OnTick(i.combatTick)
 	i.OnTick(i.projectileTick)
@@ -259,116 +223,23 @@ func NewInstance(id string, srv *Server, w world.World) *Instance {
 	i.OnTick(i.anticheatTick)
 	i.OnTick(i.botTick)
 	i.initListeners()
-	go i.tickLoop()
+	go i.ticks.Run()
 	return i
-}
-
-// PvPEnabled reports whether the 1.9 combat system is active on this
-// instance. SetPvP toggles it (thread-safe, may be called mid-fight).
-func (i *Instance) PvPEnabled() bool    { return i.combatEnabled.Load() }
-func (i *Instance) SetPvP(enabled bool) { i.combatEnabled.Store(enabled) }
-
-// InstantRespawn reports the death behavior: true = heal+teleport on the
-// spot, false = vanilla death screen. SetInstantRespawn toggles it.
-func (i *Instance) InstantRespawn() bool           { return i.instantRespawn.Load() }
-func (i *Instance) SetInstantRespawn(enabled bool) { i.instantRespawn.Store(enabled) }
-
-// CustomRespawn / WeaponDamage / TNTAutoPrime are the game-tunable rule
-// switches (see game.Instance). All default to off.
-func (i *Instance) CustomRespawn() bool           { return i.customRespawn.Load() }
-func (i *Instance) SetCustomRespawn(enabled bool) { i.customRespawn.Store(enabled) }
-func (i *Instance) WeaponDamage() bool            { return i.weaponDamage.Load() }
-func (i *Instance) SetWeaponDamage(enabled bool)  { i.weaponDamage.Store(enabled) }
-func (i *Instance) TNTAutoPrime() bool            { return i.tntAutoPrime.Load() }
-func (i *Instance) SetTNTAutoPrime(enabled bool)  { i.tntAutoPrime.Store(enabled) }
-
-// ExplosionDamage is the multiplier applied to explosion player damage
-// (game.Instance.SetExplosionDamage); 1 until a game sets it.
-func (i *Instance) ExplosionDamage() float64 {
-	v := i.explosionDamage.Load()
-	if v == 0 {
-		return 1
-	}
-	return math.Float64frombits(v - 1)
-}
-
-// SetExplosionDamage sets the explosion damage multiplier (negative → 0).
-func (i *Instance) SetExplosionDamage(scale float64) {
-	i.explosionDamage.Store(math.Float64bits(max(scale, 0)) + 1)
 }
 
 // OnTick registers a callback fired once per tick (20 Hz). Concurrent-safe.
 // There is no Unsubscribe yet — destroy the whole instance via Stop when
 // you want everything to go away.
-func (i *Instance) OnTick(h TickHandler) {
-	i.tickMu.Lock()
-	i.tickHandlers = append(i.tickHandlers, h)
-	i.tickMu.Unlock()
-}
+func (i *Instance) OnTick(h tickloop.Handler) { i.ticks.Handle(h) }
 
 // Tick returns the current tick count (0 immediately after NewInstance).
-func (i *Instance) Tick() uint64 {
-	return i.tickCount.Load()
-}
+func (i *Instance) Tick() uint64 { return i.ticks.Count() }
 
 // Stop halts the tick loop and fires listeners' OnInstanceEnd + OnStop
 // (under panic recovery). Safe to call multiple times. Does not affect
 // connected players or pending broadcasts — those continue running on their
 // own goroutines.
-func (i *Instance) Stop() {
-	i.stopOnce.Do(func() {
-		i.fireStop()
-		close(i.stopTick)
-	})
-}
-
-func (i *Instance) tickLoop() {
-	ticker := time.NewTicker(tickInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-i.stopTick:
-			return
-		case <-ticker.C:
-			i.runTick()
-		}
-	}
-}
-
-func (i *Instance) runTick() {
-	tick := i.tickCount.Add(1)
-	start := time.Now()
-
-	// Snapshot the handler list so a handler can OnTick a new subscriber
-	// without deadlocking, and so we don't hold the lock during user code.
-	i.tickMu.RLock()
-	handlers := make([]TickHandler, len(i.tickHandlers))
-	copy(handlers, i.tickHandlers)
-	i.tickMu.RUnlock()
-
-	for _, h := range handlers {
-		// Isolate panics: one buggy game shouldn't freeze the instance.
-		safeTick(i, h, tick)
-	}
-
-	elapsed := int64(time.Since(start))
-	i.lastTickNanos.Store(elapsed)
-	if elapsed > i.maxTickNanos.Load() {
-		// Plain store, not CAS: only the tick loop writes, so a lost
-		// race can't happen.
-		i.maxTickNanos.Store(elapsed)
-	}
-}
-
-func safeTick(i *Instance, h TickHandler, tick uint64) {
-	defer func() {
-		if r := recover(); r != nil {
-			slog.Error("tick handler panic",
-				"instance", i.ID, "tick", tick, "panic", fmt.Sprint(r))
-		}
-	}()
-	h(tick)
-}
+func (i *Instance) Stop() { i.ticks.Stop(i.fireStop) }
 
 // JoinAndAnnounce registers c in this instance's player list and sends the
 // visibility packets that make c and the existing players mutually

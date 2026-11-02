@@ -30,7 +30,7 @@ func archery(t *testing.T, arrows int) (*Instance, *ClientConnection, *ClientCon
 
 func fire(inst *Instance, a *ClientConnection, drawTicks uint64) {
 	a.startDraw()
-	inst.tickCount.Add(drawTicks)
+	inst.ticks.Advance(drawTicks)
 	a.releaseUse()
 	for i := 0; i < 40; i++ {
 		inst.projectileTick(uint64(i))
@@ -62,7 +62,7 @@ func TestShortDrawIsWeakerAndPowerIsStronger(t *testing.T) {
 	}
 
 	v.player.SetHealth(player.MaxHealth)
-	inst.tickCount.Add(100)
+	inst.ticks.Advance(100)
 	bow, _ := world.ItemByName("minecraft:bow")
 	a.inv.Set(inventory.HotbarStart, inventory.Stack{ID: bow, Count: 1, Enchantments: map[string]int{enchant.Power: 2}})
 	fire(inst, a, 25)
@@ -89,7 +89,7 @@ func TestArrowSticksInBlockThenVanishes(t *testing.T) {
 	inst, a, _ := archery(t, 1)
 	inst.World.SetBlock(world.Position{X: 0, Y: 65, Z: 3}, world.Stone) // wall before the target
 	a.startDraw()
-	inst.tickCount.Add(25)
+	inst.ticks.Advance(25)
 	a.releaseUse()
 	for i := 0; i < 10; i++ {
 		inst.projectileTick(uint64(i))
@@ -125,7 +125,7 @@ func TestArrowSpawnCarriesOwnerAndFacing(t *testing.T) {
 	a.player.MoveAndLook(0.5, 64, 0.5, -90, -30, true) // look +X, 30° up
 	_ = lastPacket(t, v, packetid.CbPlaySpawnEntity)
 	a.startDraw()
-	inst.tickCount.Add(25)
+	inst.ticks.Advance(25)
 	a.releaseUse()
 
 	body := lastPacket(t, v, packetid.CbPlaySpawnEntity)
@@ -167,7 +167,7 @@ func TestDrawPoseBroadcastToOthers(t *testing.T) {
 	if lastPacket(t, a, packetid.CbPlaySetEntityMetadata) != nil {
 		t.Error("the shooter's own client tracks its draw; no metadata to self")
 	}
-	inst.tickCount.Add(25)
+	inst.ticks.Advance(25)
 	a.releaseUse()
 	if got := handStateOf(t, lastPacket(t, v, packetid.CbPlaySetEntityMetadata)); got != 0 {
 		t.Errorf("after release hand state %#x, want idle", got)
@@ -209,7 +209,7 @@ func TestFullDrawArrowDoesNotTunnelThroughThinWall(t *testing.T) {
 	// end-point test jumped from z≈0.5 to z≈3.5 and never saw the wall.
 	inst.World.SetBlock(world.Position{X: 0, Y: 65, Z: 2}, world.Stone)
 	a.startDraw()
-	inst.tickCount.Add(25)
+	inst.ticks.Advance(25)
 	a.releaseUse()
 	inst.projectileTick(1)
 
@@ -233,7 +233,7 @@ func stickArrow(t *testing.T, inst *Instance, a *ClientConnection) *projectileEn
 	t.Helper()
 	inst.World.SetBlock(world.Position{X: 0, Y: 65, Z: 2}, world.Stone)
 	a.startDraw()
-	inst.tickCount.Add(25)
+	inst.ticks.Advance(25)
 	a.releaseUse()
 	inst.projectileTick(1)
 	inst.projMu.Lock()
@@ -308,7 +308,7 @@ func TestInfinityBowKeepsArrowAndMakesItCreativeOnly(t *testing.T) {
 	// No arrows at all: Infinity still needs one in the quiver.
 	a.inv.Set(inventory.MainStart, inventory.Stack{})
 	a.startDraw()
-	inst.tickCount.Add(25)
+	inst.ticks.Advance(25)
 	a.releaseUse()
 	if projectileCount(inst) != 0 {
 		t.Error("Infinity with an empty quiver must not shoot")

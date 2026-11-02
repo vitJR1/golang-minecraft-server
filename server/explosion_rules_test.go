@@ -15,7 +15,7 @@ import (
 func explosionLoss(t *testing.T, scale float64) float32 {
 	t.Helper()
 	inst := bareInstance(New(), tntWorld())
-	inst.combatEnabled.Store(true)
+	inst.SetPvP(true)
 	if scale != 1 {
 		inst.SetExplosionDamage(scale)
 	}
@@ -111,7 +111,7 @@ func TestExplosionBreakVetoKeepsBlock(t *testing.T) {
 // predicted fire back — this is the Hypixel "fireball jump" at your feet.
 func TestFireballThrownAtOwnFeet(t *testing.T) {
 	inst := bareInstance(New(), tntWorld())
-	inst.combatEnabled.Store(true)
+	inst.SetPvP(true)
 	c := offlineConn(inst, "Jumper", player.Survival, 0.5, 64, 0.5)
 	c.player.MoveAndLook(0.5, 64, 0.5, 0, 90, true) // looking straight down
 	charge, _ := world.ItemByName("minecraft:fire_charge")

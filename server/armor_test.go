@@ -82,8 +82,8 @@ func duel(t *testing.T) (*Instance, *ClientConnection, *ClientConnection) {
 	t.Helper()
 	inst := bareInstance(New(), world.NewMemoryWorld())
 	inst.Combat = combat.DefaultConfig()
-	inst.combatEnabled.Store(true)
-	inst.tickCount.Store(1000) // long since any previous swing → full charge
+	inst.SetPvP(true)
+	inst.ticks.Set(1000) // long since any previous swing → full charge
 	a := tntConn(inst, "Attacker", player.Survival, 0, 64, 0)
 	v := tntConn(inst, "Victim", player.Survival, 1, 64, 0)
 	return inst, a, v
@@ -102,14 +102,14 @@ func TestWeaponDamageSwitch(t *testing.T) {
 
 	// On: the diamond sword's 7, then Sharpness II adds 1.5.
 	v.player.SetHealth(player.MaxHealth)
-	a.instance.tickCount.Add(1000)
+	a.instance.ticks.Advance(1000)
 	a.instance.SetWeaponDamage(true)
 	a.handleAttack(v)
 	if got := player.MaxHealth - v.player.Health(); got != 7 {
 		t.Errorf("diamond sword: dealt %v, want 7", got)
 	}
 	v.player.SetHealth(player.MaxHealth)
-	a.instance.tickCount.Add(1000)
+	a.instance.ticks.Advance(1000)
 	sword, _ := world.ItemByName("minecraft:diamond_sword")
 	a.inv.Set(inventory.HotbarStart, inventory.Stack{ID: sword, Count: 1, Enchantments: map[string]int{enchant.Sharpness: 2}})
 	a.handleAttack(v)
@@ -119,7 +119,7 @@ func TestWeaponDamageSwitch(t *testing.T) {
 
 	// Armor on the victim reduces it.
 	v.player.SetHealth(player.MaxHealth)
-	a.instance.tickCount.Add(1000)
+	a.instance.ticks.Advance(1000)
 	wear(v, inventory.ChestplateSlot, "minecraft:iron_chestplate", nil) // 6 points
 	a.handleAttack(v)
 	// 8.5 × (1 − max(1.2, 6 − 8.5/2 = 1.75)/25) = 8.5 × 0.93 = 7.905
@@ -136,7 +136,7 @@ func TestKnockbackEnchantAddsHorizontalStrength(t *testing.T) {
 	plain := lastPacket(t, v, packetid.CbPlayEntityVelocity)
 
 	v.player.SetHealth(player.MaxHealth)
-	a.instance.tickCount.Add(1000)
+	a.instance.ticks.Advance(1000)
 	a.inv.Set(inventory.HotbarStart, inventory.Stack{ID: stick, Count: 1, Enchantments: map[string]int{enchant.Knockback: 2}})
 	a.handleAttack(v)
 	boosted := lastPacket(t, v, packetid.CbPlayEntityVelocity)

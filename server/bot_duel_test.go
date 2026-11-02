@@ -53,7 +53,7 @@ func botDuel(t *testing.T, diff botai.Difficulty) (int, uint64) {
 	for tick := uint64(1); tick <= 2400; tick++ {
 		// Not runTicks: a duel never needs a far route, and a bot knocked
 		// off the arena starts a long (failing) one runTicks would wait for.
-		inst.botTick(inst.tickCount.Add(1))
+		inst.botTick(inst.ticks.Advance(1))
 		for i, b := range bots {
 			if s := b.player.Snapshot(); s.Dead || s.Y < 40 { // knocked into the void
 				return i, tick

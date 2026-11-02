@@ -51,7 +51,7 @@ func TestBotMatchWatcher(t *testing.T) {
 		t.Fatalf("watcher in %v, mode %v", op.instance.ID, op.gamemode())
 	}
 	for i := 0; i < 40; i++ {
-		inst.runTick()
+		inst.ticks.Step()
 	}
 	bots := s.botsIn(inst)
 	ctx := inst.pluginCtx()

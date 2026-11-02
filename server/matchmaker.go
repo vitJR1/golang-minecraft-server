@@ -4,33 +4,25 @@ import (
 	"fmt"
 	"log/slog"
 	"minecraft-server/game"
-	"sync"
+	"minecraft-server/server/matchmaker"
 )
 
-// Matchmaker holds the per-game waiting queues. When a queue reaches a
-// game's MinPlayers it spawns a fresh Instance via Server.StartGame and
-// moves the waiting players in.
+// Matchmaker holds the per-game waiting queues (server/matchmaker). When a
+// queue reaches a game's MinPlayers it spawns a fresh Instance via
+// Server.StartGame and moves the waiting players in.
 //
 // Concurrency: the public methods (Queue, Dequeue, …) are safe to call from
-// any goroutine. Internally a single mutex guards both `queues` and
-// `member`; the work that crosses goroutines (StartGame, MovePlayer) runs
-// outside the lock to avoid blocking other queue mutations.
+// any goroutine. The queues have their own lock; the work that crosses
+// goroutines (StartGame, MovePlayer) runs outside it.
 type Matchmaker struct {
 	server *Server
-
-	mu     sync.Mutex
-	queues map[string][]*ClientConnection // gameID → waiting players (FIFO)
-	member map[*ClientConnection]string   // c → gameID it's currently queued for
+	queues matchmaker.Queues[*ClientConnection]
 }
 
 // NewMatchmaker constructs a Matchmaker bound to a Server. Called by
 // Server.New; not intended for direct use.
 func NewMatchmaker(s *Server) *Matchmaker {
-	return &Matchmaker{
-		server: s,
-		queues: make(map[string][]*ClientConnection),
-		member: make(map[*ClientConnection]string),
-	}
+	return &Matchmaker{server: s}
 }
 
 // Queue adds c to gameID's waiting list. Errors when the game isn't
@@ -47,36 +39,10 @@ func (m *Matchmaker) Queue(c *ClientConnection, gameID string) error {
 	if !ok {
 		return fmt.Errorf("no such game: %s", gameID)
 	}
-
-	m.mu.Lock()
-	if existing, alreadyQueued := m.member[c]; alreadyQueued {
-		m.mu.Unlock()
-		return fmt.Errorf("already queued for %s", existing)
+	toStart, err := m.queues.Join(c, gameID, def.MinPlayers, def.MaxPlayers)
+	if err != nil {
+		return err
 	}
-	q := m.queues[gameID]
-	if def.MaxPlayers > 0 && len(q) >= def.MaxPlayers {
-		m.mu.Unlock()
-		return fmt.Errorf("queue for %s is full", gameID)
-	}
-	q = append(q, c)
-	m.queues[gameID] = q
-	m.member[c] = gameID
-
-	var toStart []*ClientConnection
-	if def.MinPlayers > 0 && len(q) >= def.MinPlayers {
-		n := len(q)
-		if def.MaxPlayers > 0 && n > def.MaxPlayers {
-			n = def.MaxPlayers
-		}
-		toStart = make([]*ClientConnection, n)
-		copy(toStart, q[:n])
-		m.queues[gameID] = q[n:]
-		for _, picked := range toStart {
-			delete(m.member, picked)
-		}
-	}
-	m.mu.Unlock()
-
 	if len(toStart) == 0 {
 		return nil
 	}
@@ -116,35 +82,11 @@ func (m *Matchmaker) startGame(def *game.Definition, players []*ClientConnection
 
 // Dequeue removes c from whatever queue it's in, if any. Safe to call
 // when c is not queued. Called by cleanup on disconnect.
-func (m *Matchmaker) Dequeue(c *ClientConnection) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	gameID, ok := m.member[c]
-	if !ok {
-		return
-	}
-	delete(m.member, c)
-	q := m.queues[gameID]
-	for i, qc := range q {
-		if qc == c {
-			m.queues[gameID] = append(q[:i], q[i+1:]...)
-			break
-		}
-	}
-}
+func (m *Matchmaker) Dequeue(c *ClientConnection) { m.queues.Leave(c) }
 
 // QueueSize returns how many players are currently waiting for gameID.
-func (m *Matchmaker) QueueSize(gameID string) int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return len(m.queues[gameID])
-}
+func (m *Matchmaker) QueueSize(gameID string) int { return m.queues.Size(gameID) }
 
 // PlayerQueue returns the game ID c is queued for, or ("", false) if c
 // isn't waiting.
-func (m *Matchmaker) PlayerQueue(c *ClientConnection) (string, bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	gameID, ok := m.member[c]
-	return gameID, ok
-}
+func (m *Matchmaker) PlayerQueue(c *ClientConnection) (string, bool) { return m.queues.Of(c) }

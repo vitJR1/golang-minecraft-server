@@ -12,7 +12,7 @@ import (
 func TestBwGiveAndKillOnlyInWeaponDamageInstances(t *testing.T) {
 	inst := bareInstance(New(), world.NewMemoryWorld())
 	inst.Combat = combat.DefaultConfig()
-	inst.combatEnabled.Store(true)
+	inst.SetPvP(true)
 	c := tntConn(inst, "QA", player.Survival, 0, 64, 0)
 	inst.Server.Ops.Add("QA")
 	iron, _ := world.ItemByName("minecraft:iron_ingot")

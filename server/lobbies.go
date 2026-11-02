@@ -2,45 +2,12 @@ package server
 
 import (
 	"log/slog"
-	"minecraft-server/templates"
+	"minecraft-server/server/lobby"
 	"minecraft-server/world"
-	"strings"
 )
 
-// Lobby IDs. Used both as Instance.ID and as the keys the hub menu
-// teleports into. Exported so tests / future game packages can move
-// players in/out without hard-coding magic strings.
-const (
-	LobbyFFA     = "ffa"
-	LobbyBedWars = "bedwars"
-	LobbySkyWars = "skywars"
-)
-
-// lobbyTemplateNames maps each lobby ID to the world.Template name the
-// loadTemplates walk produces for its .schem file under
-// schem/templates/<game>/<file>.schem. Keep in sync with the on-disk
-// layout — renaming a file means renaming this map.
-var lobbyTemplateNames = map[string]string{
-	LobbyFFA:     templates.FFALobby,
-	LobbyBedWars: templates.BedwarsLobby,
-	LobbySkyWars: templates.SkywarsLobby,
-}
-
-// lobbyForGame maps a game ID (a Definition ID or arena kind) to its mode's
-// lobby: every "bedwars…" mode (bedwars, bedwars-1x1, …) to the BedWars
-// lobby, and so on. ok is false for a game with no lobby.
-func lobbyForGame(gameID string) (string, bool) {
-	for _, id := range lobbyIDs {
-		if gameID == id || strings.HasPrefix(gameID, id+"-") {
-			return id, true
-		}
-	}
-	return "", false
-}
-
-// lobbyIDs is the iteration order at startup. Keep stable — the order
-// determines log output and tests can rely on it.
-var lobbyIDs = []string{LobbyFFA, LobbyBedWars, LobbySkyWars}
+// lobbies.go: the per-mode lobby instances. Their ids, map templates and
+// which game returns to which lobby are server/lobby.
 
 // SetupLobbies creates the FFA / BedWars / SkyWars holding-pen
 // instances and registers them on s. Each is a read-only lobby
@@ -52,12 +19,12 @@ var lobbyIDs = []string{LobbyFFA, LobbyBedWars, LobbySkyWars}
 // already registered is left alone (won't overwrite an existing one
 // that a test may have prepared).
 func SetupLobbies(s *Server) {
-	for _, id := range lobbyIDs {
+	for _, id := range lobby.IDs() {
 		if s.GetInstance(id) != nil {
 			continue
 		}
-		w := buildLobbyWorld()
-		templateName := lobbyTemplateNames[id]
+		w := lobby.DefaultWorld()
+		templateName := lobby.TemplateName(id)
 		if tmpl := s.GetTemplate(templateName); tmpl != nil {
 			w = tmpl.Instantiate()
 			slog.Info("lobby ready", "id", id, "template", templateName)
@@ -66,24 +33,11 @@ func SetupLobbies(s *Server) {
 		}
 		inst := NewInstance(id, s, w)
 		installLobbyProtection(inst)
-		if id == LobbyBedWars {
+		if id == lobby.BedWars {
 			inst.FreezeTime(6000) // like its arenas: always noon
 		}
 		s.AddInstance(inst)
 	}
-}
-
-// buildLobbyWorld returns a fresh MemoryWorld with an 11×11 stone
-// platform one block below the default spawn (y=66). Centred on origin
-// so players spawning at (0.5, 67, 0.5) land on a stone block.
-func buildLobbyWorld() world.World {
-	w := world.NewMemoryWorld()
-	for x := -5; x <= 5; x++ {
-		for z := -5; z <= 5; z++ {
-			w.SetBlock(world.Position{X: x, Y: 66, Z: z}, world.Stone)
-		}
-	}
-	return w
 }
 
 // installLobbyProtection wires the standard hooks: no breaking, no
