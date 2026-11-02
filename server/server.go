@@ -60,6 +60,10 @@ type Server struct {
 	Ops        *moderation.OpSet
 	Mutes      *moderation.MuteSet
 	Matchmaker *Matchmaker
+	// MenuItems, when set, handles a right click with a server-given menu
+	// item (inventory.NavigatorName / SelectorName, by name): server/hub
+	// opens its menus there.
+	MenuItems func(c *ClientConnection, item string)
 	// ChatModerator, when non-nil, gets a chance to inspect every chat
 	// line before it broadcasts. See chat_moderation.go for the contract.
 	ChatModerator ChatModerator

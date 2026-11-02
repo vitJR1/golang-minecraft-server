@@ -61,7 +61,7 @@ func TestQDropsOneThenCtrlQDropsStack(t *testing.T) {
 
 func TestNavigatorNotDroppable(t *testing.T) {
 	s := New()
-	SetupHubMenu(s)
+	navigatorHub(s)
 	c := offlineHub(s, "Keeper")
 	if c.inv.Get(inventory.HotbarStart).Name != inventory.NavigatorName {
 		t.Fatal("hub join should hand out the navigator")
@@ -233,5 +233,13 @@ func TestGameNoDropReachesTheModel(t *testing.T) {
 	}
 	if inv := (playerBridge{conn: c}).Inventory(); len(inv) == 0 || !inv[0].NoDrop {
 		t.Fatalf("NoDrop lost on the way out: %+v", inv)
+	}
+}
+
+// navigatorHub hands the navigator out on hub joins, as server/hub does.
+func navigatorHub(s *Server) {
+	s.Hub.OnPlayerJoin = func(c *ClientConnection) {
+		id, _ := world.ItemByName("minecraft:blaze_rod")
+		c.GiveHotbarItem(inventory.HotbarStart, id, inventory.NavigatorName)
 	}
 }

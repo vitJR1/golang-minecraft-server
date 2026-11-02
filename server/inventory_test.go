@@ -94,7 +94,7 @@ func TestCountAndTakeItem(t *testing.T) {
 
 func TestNavigatorStrippedOnGameJoinAndKeptInHub(t *testing.T) {
 	s := New()
-	SetupHubMenu(s)
+	navigatorHub(s)
 	arena := NewInstance("arena", s, world.NewMemoryWorld())
 	t.Cleanup(arena.Stop)
 	s.AddInstance(arena)
@@ -134,7 +134,7 @@ func TestNavigatorStrippedOnGameJoinAndKeptInHub(t *testing.T) {
 
 func TestReturnToHubResetsSpectatorAndState(t *testing.T) {
 	s := New()
-	SetupHubMenu(s)
+	navigatorHub(s)
 	arena := NewInstance("arena", s, world.NewMemoryWorld())
 	t.Cleanup(arena.Stop)
 	s.AddInstance(arena)

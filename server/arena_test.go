@@ -87,3 +87,13 @@ func TestNextArenaNameBedwarsPrefix(t *testing.T) {
 		t.Errorf("bedwars auto name = %q, want bw- prefix", got)
 	}
 }
+
+func TestNextArenaNameBedwarsKinds(t *testing.T) {
+	s := New()
+	if n := s.nextArenaName("bedwars"); !strings.HasPrefix(n, "bw-") || strings.HasPrefix(n, "bw-1x1-") {
+		t.Errorf("full kind name = %q, want bw-<n>", n)
+	}
+	if n := s.nextArenaName("bedwars-1x1"); !strings.HasPrefix(n, "bw-1x1-") {
+		t.Errorf("duel kind name = %q, want bw-1x1-<n>", n)
+	}
+}

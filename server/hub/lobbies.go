@@ -1,7 +1,8 @@
-package server
+package hub
 
 import (
 	"log/slog"
+	"minecraft-server/server"
 	"minecraft-server/server/lobby"
 	"minecraft-server/world"
 )
@@ -18,7 +19,7 @@ import (
 // Calls into SetupLobbies are idempotent: an instance with the same ID
 // already registered is left alone (won't overwrite an existing one
 // that a test may have prepared).
-func SetupLobbies(s *Server) {
+func SetupLobbies(s *server.Server) {
 	for _, id := range lobby.IDs() {
 		if s.GetInstance(id) != nil {
 			continue
@@ -31,7 +32,7 @@ func SetupLobbies(s *Server) {
 		} else {
 			slog.Info("lobby ready", "id", id, "template", "(default platform)")
 		}
-		inst := NewInstance(id, s, w)
+		inst := server.NewInstance(id, s, w)
 		installLobbyProtection(inst)
 		if id == lobby.BedWars {
 			inst.FreezeTime(6000) // like its arenas: always noon
@@ -41,28 +42,28 @@ func SetupLobbies(s *Server) {
 }
 
 // installLobbyProtection wires the standard hooks: no breaking, no
-// placing, no PvP. Same shape as SetupHubMenu's hub-protection block.
+// placing, no PvP. Same shape as Setup's hub-protection block.
 // Also installs OnPlayerJoin so every entry to the lobby restocks the
 // hotbar with the navigator (slot 0) + the arena selector (slot 1).
 // MovePlayer doesn't send Set Container Slot itself, so without this
 // the player's hotbar would be empty after the Respawn.
-func installLobbyProtection(inst *Instance) {
-	inst.OnBlockBreak = func(c *ClientConnection, _ world.Position) bool {
-		_ = c.sendSystemMessage("Lobbies are read-only. Pick a game first.")
+func installLobbyProtection(inst *server.Instance) {
+	inst.OnBlockBreak = func(c *server.ClientConnection, _ world.Position) bool {
+		_ = c.SendMessage("Lobbies are read-only. Pick a game first.")
 		return false
 	}
-	inst.OnBlockPlace = func(c *ClientConnection, _ world.Position, _ world.Block) bool {
-		_ = c.sendSystemMessage("Lobbies are read-only. Pick a game first.")
+	inst.OnBlockPlace = func(c *server.ClientConnection, _ world.Position, _ world.Block) bool {
+		_ = c.SendMessage("Lobbies are read-only. Pick a game first.")
 		return false
 	}
-	inst.OnPlayerAttack = func(_, _ *ClientConnection) bool { return false }
+	inst.OnPlayerAttack = func(_, _ *server.ClientConnection) bool { return false }
 
 	prevJoin := inst.OnPlayerJoin
-	inst.OnPlayerJoin = func(c *ClientConnection) {
+	inst.OnPlayerJoin = func(c *server.ClientConnection) {
 		if prevJoin != nil {
 			prevJoin(c)
 		}
-		giveBlazeRod(c)
-		giveArenaSelector(c)
+		giveNavigator(c)
+		giveSelector(c)
 	}
 }

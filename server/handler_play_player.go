@@ -151,7 +151,7 @@ func (c *ClientConnection) onClickContainer(k packets.Click, packet *bytes.Buffe
 				c.server.saveEnderChest(e)
 			}
 		case m.kind == menuKindPlugin:
-			// Plugin GUI (shops): dispatch, then re-send the whole window
+			// Callback menus (plugin shops, the hub's navigation): dispatch, then re-send the whole window
 			// so the client's ghost pickup / local inventory moves are
 			// undone and the menu stays open for the next click.
 			if entry, ok := m.entries[slot]; ok && m.onClick != nil {
@@ -159,12 +159,6 @@ func (c *ClientConnection) onClickContainer(k packets.Click, packet *bytes.Buffe
 			}
 			if c.menu.Load() == m {
 				_ = c.sendChestContents(m.rows, m.entries)
-			}
-		default:
-			// Navigation menu: dispatch the clicked icon. The rest of the
-			// packet (changed slots, carried item) is discarded.
-			if entry, ok := m.entries[slot]; ok && m.onClick != nil {
-				m.onClick(c, entry, click)
 			}
 		}
 	}

@@ -1,11 +1,14 @@
 package server
 
 import (
+	"log/slog"
 	"time"
 
+	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/server/botai"
 	"minecraft-server/server/effect"
+	"minecraft-server/server/inventory"
 	"minecraft-server/server/lobby"
 )
 
@@ -118,4 +121,27 @@ func (c *ClientConnection) Kill() {
 		return
 	}
 	c.hurtEnvironment(player.MaxHealth*50, 0, c.instance.Tick())
+}
+
+// OpenMenu shows a rows×9 chest GUI with items; each click goes to onClick
+// (the window is re-sent after it while the menu stays open). Plugins reach
+// it through game.PlayerHandle.OpenMenu.
+func (c *ClientConnection) OpenMenu(title string, rows int, items []game.MenuItem, onClick func(game.MenuClick)) {
+	c.openPluginMenu(title, rows, items, onClick)
+}
+
+// CloseMenu forgets the open menu server-side (a move's Respawn closes the
+// window on the client); MenuOpen reports whether one is open.
+func (c *ClientConnection) CloseMenu()     { c.menu.Store(nil) }
+func (c *ClientConnection) MenuOpen() bool { return c.menu.Load() != nil }
+
+// GiveHotbarItem puts a named single item in window-0 slot (36..44 are the
+// hotbar) and sends that one slot: the hub's navigator and selector.
+func (c *ClientConnection) GiveHotbarItem(slot int16, itemID int32, name string) {
+	st := inventory.Stack{ID: itemID, Count: 1, Name: name}
+	c.inv.Set(slot, st)
+	if err := c.sendSetSlot(0, slot, st); err != nil {
+		slog.Warn("give hotbar item failed",
+			"player", c.playerName, "item", name, "err", err)
+	}
 }

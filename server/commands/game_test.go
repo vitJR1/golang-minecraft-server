@@ -4,6 +4,7 @@ import (
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server"
+	"minecraft-server/server/hub"
 	"minecraft-server/server/lobby"
 	"minecraft-server/server/servertest"
 	"minecraft-server/world"
@@ -70,7 +71,7 @@ func TestCmdHubClearsMatchmakerQueue(t *testing.T) {
 func leaveFrom(t *testing.T, name, gameID string) (*server.Server, *server.Instance) {
 	t.Helper()
 	s := server.New()
-	server.SetupLobbies(s)
+	hub.SetupLobbies(s)
 	s.Ops.Add(name)
 	game := server.NewInstance("round-1", s, world.NewMemoryWorld())
 	game.GameID = gameID

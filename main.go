@@ -17,6 +17,8 @@ import (
 	"minecraft-server/server"
 	"minecraft-server/server/enderchest"
 	"minecraft-server/server/favicon"
+	"minecraft-server/server/hub"
+	"minecraft-server/server/metrics"
 	"minecraft-server/store"
 	"minecraft-server/templates"
 	"net"
@@ -72,13 +74,13 @@ func main() {
 	}
 	loadTemplates(srv)
 	mountHubFromTemplate(srv, hubTemplateName)
-	server.SetupLobbies(srv)
-	server.SetupHubMenu(srv)
+	hub.SetupLobbies(srv)
+	hub.Setup(srv)
 
 	// Ops endpoint (pprof + /stats JSON). Unauthenticated — keep it on
 	// loopback and reach it via SSH; "off" disables entirely.
 	if maddr := getEnv("METRICS_ADDR", "127.0.0.1:6060"); maddr != "off" {
-		if _, err := server.StartMetrics(srv, maddr); err != nil {
+		if _, err := metrics.Start(srv, maddr); err != nil {
 			slog.Warn("metrics endpoint failed to start", "addr", maddr, "err", err)
 		} else {
 			slog.Info("metrics endpoint up", "addr", maddr)

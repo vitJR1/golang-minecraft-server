@@ -1,4 +1,7 @@
-package server
+// Package metrics serves the ops endpoints: /stats (a JSON snapshot of the
+// server's state, taken by whatever implements Source — server.Server) and
+// Go's pprof.
+package metrics
 
 import (
 	"encoding/json"
@@ -7,15 +10,13 @@ import (
 	"net"
 	"net/http"
 	"net/http/pprof"
-	"runtime"
-	"time"
 )
 
-// serverStats is the /stats JSON shape — a point-in-time operational
+// Stats is the /stats JSON shape — a point-in-time operational
 // snapshot. Field set is intentionally small: what an operator needs to
 // judge "is the server healthy" at a glance and what a dashboard can
 // scrape cheaply.
-type serverStats struct {
+type Stats struct {
 	UptimeSeconds int64 `json:"uptime_seconds"`
 
 	Players   int            `json:"players"`
@@ -39,50 +40,20 @@ type serverStats struct {
 	HeapAllocMB float64 `json:"heap_alloc_mb"`
 }
 
-func (s *Server) statsSnapshot() serverStats {
-	s.mu.RLock()
-	instances := make([]*Instance, 0, len(s.instances))
-	for _, i := range s.instances {
-		instances = append(instances, i)
-	}
-	s.mu.RUnlock()
-
-	perInstance := make(map[string]int, len(instances))
-	players := 0
-	var worstTick, lastTick int64
-	for _, i := range instances {
-		n := i.Players.Count()
-		perInstance[i.ID] = n
-		players += n
-		worstTick = max(worstTick, int64(i.ticks.Max()))
-		lastTick = max(lastTick, int64(i.ticks.Last()))
-	}
-
-	var mem runtime.MemStats
-	runtime.ReadMemStats(&mem)
-
-	return serverStats{
-		UptimeSeconds:  int64(time.Since(s.startTime).Seconds()),
-		Players:        players,
-		Instances:      perInstance,
-		ConnsRejected:  s.connsRejected.Load(),
-		QueueFullKicks: s.queueFullKicks.Load(),
-		WorstTickMs:    float64(worstTick) / 1e6,
-		LastTickMs:     float64(lastTick) / 1e6,
-		Goroutines:     runtime.NumGoroutine(),
-		HeapAllocMB:    float64(mem.HeapAlloc) / (1 << 20),
-	}
+// Source takes a Stats snapshot (server.Server.Stats).
+type Source interface {
+	Stats() Stats
 }
 
-// StartMetrics serves the ops endpoints on addr and returns the bound
+// Start serves the ops endpoints on addr and returns the bound
 // listener (so callers can learn the port when addr uses :0):
 //
-//	/stats          — JSON snapshot of live server state (serverStats)
+//	/stats          — JSON snapshot of live server state (Stats)
 //	/debug/pprof/*  — Go profiling (CPU, heap, goroutines, …)
 //
 // There is NO authentication — bind to loopback (the default) and reach it
 // over SSH; never expose this port to the internet.
-func StartMetrics(s *Server, addr string) (net.Listener, error) {
+func Start(src Source, addr string) (net.Listener, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
 	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
@@ -91,7 +62,7 @@ func StartMetrics(s *Server, addr string) (net.Listener, error) {
 	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 	mux.HandleFunc("/stats", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(s.statsSnapshot())
+		_ = json.NewEncoder(w).Encode(src.Stats())
 	})
 
 	lis, err := net.Listen("tcp", addr)

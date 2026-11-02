@@ -7,7 +7,6 @@ import (
 	"minecraft-server/server/chest"
 	"minecraft-server/server/consume"
 	"minecraft-server/server/inventory"
-	"minecraft-server/server/lobby"
 	"minecraft-server/server/packets"
 	"minecraft-server/server/projectile"
 	"minecraft-server/world"
@@ -261,19 +260,11 @@ func (c *ClientConnection) onUseItem() {
 	// inventory model (wherever the player moved them), so a plain ender
 	// pearl is still throwable while the "Arena selector" opens a menu.
 	held := c.inv.Held(c.heldSlot.Load())
-	inLobby := lobby.Is(c.instance.ID)
 	switch {
-	case held.Name == inventory.NavigatorName:
-		if c.instance == c.server.Hub || inLobby {
-			c.openHubMainMenu()
-		}
-	case held.Name == inventory.SelectorName:
-		// BedWars lobby gets the live DOTA arena browser (create/join);
-		// other lobbies keep the placeholder arena list for now.
-		if c.instance.ID == lobby.BedWars {
-			c.openBedwarsArenaMenu()
-		} else if arenas, ok := lobby.Arenas(c.instance.ID); ok {
-			c.openArenaMenu(c.instance.ID, arenas)
+	case held.Name == inventory.NavigatorName || held.Name == inventory.SelectorName:
+		// The hub's menus (server/hub) open them.
+		if h := c.server.MenuItems; h != nil {
+			h(c, held.Name)
 		}
 	default:
 		name := c.heldItemName()
