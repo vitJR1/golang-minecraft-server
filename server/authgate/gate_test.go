@@ -1,4 +1,4 @@
-package server
+package authgate
 
 import (
 	"context"
@@ -10,17 +10,46 @@ import (
 	"minecraft-server/cfg"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server"
 	"minecraft-server/server/auth"
+	"minecraft-server/server/servertest"
 )
 
-// withAuth installs a fresh auth plugin against the given Server, then
-// restores authStore=nil on cleanup so later tests aren't gated.
-func withAuth(t *testing.T, s *Server) string {
+// withAuth installs a fresh auth gate on s.
+func withAuth(t *testing.T, s *server.Server) *Gate {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "auth.json")
-	EnableAuth(s, path)
-	t.Cleanup(func() { authStore = nil })
-	return path
+	return Enable(s, filepath.Join(t.TempDir(), "auth.json"))
+}
+
+// login logs name into s over a draining pipe client and returns its
+// connection.
+func login(t *testing.T, s *server.Server, name string) (*servertest.Client, *server.ClientConnection) {
+	t.Helper()
+	cli := servertest.Dial(t, s)
+	cli.Login(t, name)
+	cli.StartDiscardDrain()
+	return cli, findConn(t, s, name)
+}
+
+// findConn waits for name's connection to register.
+func findConn(t *testing.T, s *server.Server, name string) *server.ClientConnection {
+	t.Helper()
+	var c *server.ClientConnection
+	servertest.WaitFor(t, time.Second, func() bool {
+		conn, _, ok := s.FindPlayer(name)
+		c = conn
+		return ok
+	}, name+" to register")
+	return c
+}
+
+// gone waits for name to leave the server.
+func gone(t *testing.T, s *server.Server, name, msg string) {
+	t.Helper()
+	servertest.WaitFor(t, 2*time.Second, func() bool {
+		_, _, ok := s.FindPlayer(name)
+		return !ok
+	}, msg)
 }
 
 // withAuthTiming shrinks AuthTimeout for one test (30s in prod, ~ms here).
@@ -46,16 +75,16 @@ func withAuthAttempts(t *testing.T, max int, banDur time.Duration) {
 // --- Plugin wiring ----------------------------------------------------------
 
 func TestPluginHasIsCaseInsensitive(t *testing.T) {
-	withAuth(t, New()) // no DB → in-memory credential store
-	if err := authStore.svc.Creds.Set(context.Background(), protocol.OfflineUUID("Alice"), "Alice", "h"); err != nil {
+	g := withAuth(t, server.New()) // no DB → in-memory credential store
+	if err := g.svc.Creds.Set(context.Background(), protocol.OfflineUUID("Alice"), "Alice", "h"); err != nil {
 		t.Fatal(err)
 	}
 	for _, n := range []string{"alice", "ALICE", "Alice"} {
-		if !authStore.svc.Registered(n) {
+		if !g.svc.Registered(n) {
 			t.Errorf("has(%q) should be true", n)
 		}
 	}
-	if authStore.svc.Registered("bob") {
+	if g.svc.Registered("bob") {
 		t.Error("has(bob) should be false")
 	}
 }
@@ -63,24 +92,16 @@ func TestPluginHasIsCaseInsensitive(t *testing.T) {
 // TestCredStoreRoundTrip: a hash written via Set reads back via Hash through
 // the plugin's credential store (the in-memory backend used without a DB).
 func TestCredStoreRoundTrip(t *testing.T) {
-	withAuth(t, New())
+	g := withAuth(t, server.New())
 	hash, _ := auth.HashPassword("diskpass")
 	ctx := context.Background()
 	uuid := protocol.OfflineUUID("dan")
-	if err := authStore.svc.Creds.Set(ctx, uuid, "dan", hash); err != nil {
+	if err := g.svc.Creds.Set(ctx, uuid, "dan", hash); err != nil {
 		t.Fatal(err)
 	}
-	got, ok, err := authStore.svc.Creds.Hash(ctx, uuid, "dan")
+	got, ok, err := g.svc.Creds.Hash(ctx, uuid, "dan")
 	if err != nil || !ok || got != hash {
 		t.Fatalf("round trip failed: got=%q ok=%v err=%v", got, ok, err)
-	}
-}
-
-func TestGateAuthAllowsWhenDisabled(t *testing.T) {
-	c := &ClientConnection{playerName: "nobody"}
-	c.authed.Store(true) // default in real HandleConn
-	if !gateAuth(c, "blocked") {
-		t.Error("gateAuth should allow when auth plugin is disabled")
 	}
 }
 
@@ -89,17 +110,13 @@ func TestGateAuthAllowsWhenDisabled(t *testing.T) {
 // TestUnauthedLandsInAuthInstance: with auth enabled, freshly-logged-in
 // players go into srv.Auth, not srv.Hub.
 func TestUnauthedLandsInAuthInstance(t *testing.T) {
-	s := New()
+	s := server.New()
 	withAuth(t, s)
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "newcomer")
-	cli.StartDiscardDrain()
-
-	conn := findConn(t, s, "newcomer")
-	if conn.instance != s.Auth {
-		t.Errorf("conn.instance: got %v, want Auth", conn.instance.ID)
+	_, conn := login(t, s, "newcomer")
+	if conn.Instance() != s.Auth {
+		t.Errorf("conn.instance: got %v, want Auth", conn.Instance().ID)
 	}
-	if conn.authed.Load() {
+	if conn.Authed() {
 		t.Error("authed should be false in auth instance")
 	}
 }
@@ -107,42 +124,35 @@ func TestUnauthedLandsInAuthInstance(t *testing.T) {
 // TestRegisterMovesPlayerToHub: successful /register flips authed AND
 // migrates the connection into Hub.
 func TestRegisterMovesPlayerToHub(t *testing.T) {
-	s := New()
-	withAuth(t, s)
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "alice")
-	cli.StartDiscardDrain()
-
-	conn := findConn(t, s, "alice")
+	s := server.New()
+	g := withAuth(t, s)
+	cli, conn := login(t, s, "alice")
 	cli.Write(t, packetid.SbPlayChatCommand, protocol.WriteString("register hunter2 hunter2"))
 
-	waitFor(t, 2*time.Second, func() bool { return conn.authed.Load() },
+	servertest.WaitFor(t, 2*time.Second, func() bool { return conn.Authed() },
 		"alice to be authed")
-	waitFor(t, 2*time.Second, func() bool {
+	servertest.WaitFor(t, 2*time.Second, func() bool {
 		_, inst, ok := s.FindPlayer("alice")
 		return ok && inst == s.Hub
 	}, "alice to land in hub")
 
 	// Credential should be persisted in the store.
-	if !authStore.svc.Registered("alice") {
+	if !g.svc.Registered("alice") {
 		t.Error("alice missing from credential store after register")
 	}
 }
 
 func TestRegisterMismatchedPasswordsRejected(t *testing.T) {
-	s := New()
+	s := server.New()
 	withAuth(t, s)
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "bob")
-	cli.StartDiscardDrain()
-	conn := findConn(t, s, "bob")
+	cli, conn := login(t, s, "bob")
 
 	cli.Write(t, packetid.SbPlayChatCommand, protocol.WriteString("register foo bar"))
 	time.Sleep(100 * time.Millisecond)
-	if conn.authed.Load() {
+	if conn.Authed() {
 		t.Error("mismatched passwords must not authenticate")
 	}
-	if conn.instance != s.Auth {
+	if conn.Instance() != s.Auth {
 		t.Error("failed register should leave player in auth instance")
 	}
 }
@@ -150,31 +160,23 @@ func TestRegisterMismatchedPasswordsRejected(t *testing.T) {
 // TestLoginAfterPriorRegister: register-then-disconnect, reconnect,
 // /login → moves to hub.
 func TestLoginAfterPriorRegister(t *testing.T) {
-	s := New()
-	withAuth(t, s)
+	s := server.New()
+	g := withAuth(t, s)
 
-	c1 := pipeClientOn(t, s)
-	completeOfflineLogin(t, c1, "carol")
-	c1.StartDiscardDrain()
+	c1, _ := login(t, s, "carol")
 	c1.Write(t, packetid.SbPlayChatCommand, protocol.WriteString("register mypass mypass"))
-	waitFor(t, 2*time.Second, func() bool { return authStore.svc.Registered("carol") },
+	servertest.WaitFor(t, 2*time.Second, func() bool { return g.svc.Registered("carol") },
 		"carol registered")
 
 	_ = c1.Conn.Close()
-	waitFor(t, 2*time.Second, func() bool {
-		_, _, ok := s.FindPlayer("carol")
-		return !ok
-	}, "carol to disconnect")
+	gone(t, s, "carol", "carol to disconnect")
 
-	c2 := pipeClientOn(t, s)
-	completeOfflineLogin(t, c2, "carol")
-	c2.StartDiscardDrain()
-	conn2 := findConn(t, s, "carol")
+	c2, conn2 := login(t, s, "carol")
 
 	c2.Write(t, packetid.SbPlayChatCommand, protocol.WriteString("login mypass"))
-	waitFor(t, 2*time.Second, func() bool { return conn2.authed.Load() },
+	servertest.WaitFor(t, 2*time.Second, func() bool { return conn2.Authed() },
 		"carol re-login")
-	waitFor(t, 2*time.Second, func() bool {
+	servertest.WaitFor(t, 2*time.Second, func() bool {
 		_, inst, ok := s.FindPlayer("carol")
 		return ok && inst == s.Hub
 	}, "carol in hub")
@@ -182,18 +184,15 @@ func TestLoginAfterPriorRegister(t *testing.T) {
 
 // TestGatedCommandRejected: a command before auth is blocked.
 func TestGatedCommandRejected(t *testing.T) {
-	s := New()
+	s := server.New()
 	withAuth(t, s)
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "wally")
-	cli.StartDiscardDrain()
-	conn := findConn(t, s, "wally")
+	cli, conn := login(t, s, "wally")
 
 	var ran atomic.Bool
-	registerCommand(&Command{Name: "gatetest", Run: func(*ClientConnection, []string) { ran.Store(true) }})
+	server.RegisterCommand(&server.Command{Name: "gatetest", Run: func(*server.ClientConnection, []string) { ran.Store(true) }})
 	cli.Write(t, packetid.SbPlayChatCommand, protocol.WriteString("gatetest"))
 	time.Sleep(100 * time.Millisecond)
-	if conn.authed.Load() {
+	if conn.Authed() {
 		t.Error("wally should still be unauthed")
 	}
 	if ran.Load() {
@@ -207,16 +206,11 @@ func TestGatedCommandRejected(t *testing.T) {
 // kicked after cfg.AuthTimeout.
 func TestAuthTimeoutKicks(t *testing.T) {
 	withAuthTiming(t, 100*time.Millisecond)
-	s := New()
+	s := server.New()
 	withAuth(t, s)
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "slow")
-	cli.StartDiscardDrain()
+	login(t, s, "slow")
 
-	waitFor(t, 2*time.Second, func() bool {
-		_, _, ok := s.FindPlayer("slow")
-		return !ok
-	}, "slow to be kicked after timeout")
+	gone(t, s, "slow", "slow to be kicked after timeout")
 }
 
 // TestAuthTimeoutCancelledOnSuccess: registering before the timeout
@@ -225,15 +219,12 @@ func TestAuthTimeoutKicks(t *testing.T) {
 // detector and a slow CI enough headroom.
 func TestAuthTimeoutCancelledOnSuccess(t *testing.T) {
 	withAuthTiming(t, 1*time.Second)
-	s := New()
+	s := server.New()
 	withAuth(t, s)
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "fast")
-	cli.StartDiscardDrain()
-	conn := findConn(t, s, "fast")
+	cli, conn := login(t, s, "fast")
 
 	cli.Write(t, packetid.SbPlayChatCommand, protocol.WriteString("register racepass racepass"))
-	waitFor(t, 2*time.Second, func() bool { return conn.authed.Load() },
+	servertest.WaitFor(t, 2*time.Second, func() bool { return conn.Authed() },
 		"fast to register before timeout")
 
 	// Wait past the timeout window — fast must still be online.
@@ -249,34 +240,29 @@ func TestAuthTimeoutCancelledOnSuccess(t *testing.T) {
 // the IP ban and disconnects the player.
 func TestIPBannedAfterMaxAttempts(t *testing.T) {
 	withAuthAttempts(t, 2, 1*time.Hour)
-	s := New()
-	withAuth(t, s)
+	s := server.New()
+	g := withAuth(t, s)
 
 	// Seed a registered account so /login attempts can be made.
 	hash, err := auth.HashPassword("correctpass")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := authStore.svc.Creds.Set(context.Background(), protocol.OfflineUUID("target"), "target", hash); err != nil {
+	if err := g.svc.Creds.Set(context.Background(), protocol.OfflineUUID("target"), "target", hash); err != nil {
 		t.Fatal(err)
 	}
 
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "target")
-	cli.StartDiscardDrain()
+	cli, _ := login(t, s, "target")
 
 	// 1st wrong password.
 	cli.Write(t, packetid.SbPlayChatCommand, protocol.WriteString("login wrong1"))
 	time.Sleep(100 * time.Millisecond)
 	// 2nd wrong password → trips the ban.
 	cli.Write(t, packetid.SbPlayChatCommand, protocol.WriteString("login wrong2"))
-	waitFor(t, 2*time.Second, func() bool {
-		_, _, ok := s.FindPlayer("target")
-		return !ok
-	}, "target kicked after 2 fails")
+	gone(t, s, "target", "target kicked after 2 fails")
 
 	// IP should now be in ipBans.
-	if _, allowed := authStore.CheckIPAllowed(cli.Conn.RemoteAddr()); allowed {
+	if _, banned := g.IPBanned(server.ClientIP(cli.Conn.RemoteAddr())); !banned {
 		t.Error("IP should be banned after max attempts")
 	}
 }
@@ -286,30 +272,27 @@ func TestIPBannedAfterMaxAttempts(t *testing.T) {
 // banned later.
 func TestSuccessfulLoginClearsFailCounter(t *testing.T) {
 	withAuthAttempts(t, 2, 1*time.Hour)
-	s := New()
-	withAuth(t, s)
+	s := server.New()
+	g := withAuth(t, s)
 
 	hash, err := auth.HashPassword("correct")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := authStore.svc.Creds.Set(context.Background(), protocol.OfflineUUID("jane"), "jane", hash); err != nil {
+	if err := g.svc.Creds.Set(context.Background(), protocol.OfflineUUID("jane"), "jane", hash); err != nil {
 		t.Fatal(err)
 	}
 
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "jane")
-	cli.StartDiscardDrain()
-	conn := findConn(t, s, "jane")
+	cli, conn := login(t, s, "jane")
 
 	cli.Write(t, packetid.SbPlayChatCommand, protocol.WriteString("login wrong"))
 	time.Sleep(100 * time.Millisecond)
 	cli.Write(t, packetid.SbPlayChatCommand, protocol.WriteString("login correct"))
-	waitFor(t, 2*time.Second, func() bool { return conn.authed.Load() },
+	servertest.WaitFor(t, 2*time.Second, func() bool { return conn.Authed() },
 		"jane to log in")
 
 	// Fail counter should be cleared.
-	count := authStore.svc.IPs.Fails(clientIP(cli.Conn.RemoteAddr()))
+	count := g.svc.IPs.Fails(server.ClientIP(cli.Conn.RemoteAddr()))
 	if count != 0 {
 		t.Errorf("fail counter not cleared after success: got %d", count)
 	}

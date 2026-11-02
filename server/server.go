@@ -53,10 +53,12 @@ func init() {
 type Server struct {
 	Hub *Instance
 	// Auth is the holding-pen instance where unauthenticated players
-	// land in offline mode. Nil when the auth plugin is disabled — see
-	// EnableAuth. Players move to Hub via MovePlayer once /register or
-	// /login succeeds.
-	Auth       *Instance
+	// land in offline mode. Nil when the auth gate is off — see
+	// server/authgate. Players move to Hub via MovePlayer once /register
+	// or /login succeeds.
+	Auth *Instance
+	// authGate is the offline-mode auth gate (SetAuthGate); nil = none.
+	authGate   AuthGate
 	Ops        *moderation.OpSet
 	Mutes      *moderation.MuteSet
 	Matchmaker *Matchmaker
@@ -461,11 +463,11 @@ func (c *ClientConnection) resetForHub() {
 	c.cursor = inventory.Stack{}
 }
 
-// connectionsFromIP returns every currently-connected ClientConnection
+// ConnectionsFromIP returns every currently-connected ClientConnection
 // whose remote address matches ip. Used by /banip to evict matching
-// sessions on the spot. IP is matched via clientIP() so net.Pipe
+// sessions on the spot. IP is matched via ClientIP so net.Pipe
 // connections share the synthetic "pipe" key.
-func (s *Server) connectionsFromIP(ip string) []*ClientConnection {
+func (s *Server) ConnectionsFromIP(ip string) []*ClientConnection {
 	s.mu.RLock()
 	instances := make([]*Instance, 0, len(s.instances))
 	for _, i := range s.instances {
@@ -475,7 +477,7 @@ func (s *Server) connectionsFromIP(ip string) []*ClientConnection {
 	var out []*ClientConnection
 	for _, i := range instances {
 		i.Players.Range(func(c *ClientConnection) {
-			if clientIP(c.link.RemoteAddr()) == ip {
+			if c.IP() == ip {
 				out = append(out, c)
 			}
 		})
@@ -495,7 +497,7 @@ func (s *Server) HandleConn(sock net.Conn) {
 	// Connection-flood gate: reject before allocating any per-connection
 	// state or goroutines. A rejected socket is closed silently — at this
 	// point we don't even know the protocol state to say goodbye in.
-	release, reason := s.connLimit.Acquire(clientIP(sock.RemoteAddr()))
+	release, reason := s.connLimit.Acquire(ClientIP(sock.RemoteAddr()))
 	if release == nil {
 		s.connsRejected.Add(1)
 		slog.Warn("connection rejected",
@@ -507,8 +509,8 @@ func (s *Server) HandleConn(sock net.Conn) {
 
 	client := &ClientConnection{server: s, state: StateHandshake}
 	client.link = conn.New(sock, client.handleWriteError)
-	// Default: auth plugin disabled → no gate. EnableAuth flips this to
-	// false in handler_login so the player has to /register or /login.
+	// Default: no auth gate. With one, handler_login flips this to false
+	// so the player has to /register or /login.
 	client.authed.Store(true)
 	slog.Info("new connection", "addr", sock.RemoteAddr().String())
 	defer client.cleanup()
@@ -595,7 +597,7 @@ type ClientConnection struct {
 
 	// authed gates the connection through the offline-mode auth plugin.
 	// True = player has run /register or /login successfully (or auth
-	// is disabled — see auth.go EnableAuth). False = chat + commands
+	// is off — see auth_gate.go). False = chat + commands
 	// other than the whitelist are blocked.
 	authed atomic.Bool
 

@@ -42,8 +42,8 @@ func (s *Server) RunCommand(c *ClientConnection, raw string) {
 	// Auth gate: while unauthed only the whitelist (register/login/
 	// hub/help) is dispatchable. Keeps un-authed players from running
 	// /play, /tp etc. before they prove who they are.
-	if authStore != nil && !c.authed.Load() {
-		if _, allowed := authBypassCommands[name]; !allowed {
+	if g := s.authGate; g != nil && !c.authed.Load() {
+		if !g.Bypass(name) {
 			_ = c.sendSystemMessage("Please /login or /register first.")
 			return
 		}

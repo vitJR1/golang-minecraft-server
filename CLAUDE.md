@@ -122,9 +122,8 @@ server/command/ Slash-command engine, generic over the sender: Registry
                the Command Suggestions Response payload, and the shared
                argument parsers (args.go: ParseOnOff/OnOff, ParseGamemode,
                ParseCoords) + completers (ArgFrom, FixedArg). The built-in
-               commands are server/commands; only auth.go's (/register
-               /login /banip /unbanip, installed by EnableAuth) and /help
-               are still registered inside server.
+               commands are server/commands (auth's are server/authgate);
+               only /help is still registered inside server.
 server/packets/ Serverbound decoding: Handshake, Login Start, Encryption
                Response, and the play packets with more than one field
                (Move from Set Pos / Pos+Rot / Rot, UseItemOn, PlayerAction,
@@ -212,9 +211,14 @@ server/auth/    Offline-mode auth logic: bcrypt (HashPassword), Credentials
                (DBCredentials over store.PlayerRepo / MemCredentials),
                IPGuard (wrong-password counter + IP bans in
                <auth>.ipbans.json, name→last IP), Service (Register /
-               Verify / Registered). The connection side — auth instance,
-               /register /login /banip /unbanip, timeout kick, XP-bar
-               countdown — stays in server/auth.go.
+               Verify / Registered). The connection side is server/authgate.
+server/authgate/
+               The offline-mode auth gate over server.AuthGate
+               (server/auth_gate.go: IPBanned at Login Start, Joined after
+               the join, Bypass for commands; c.Authed/SetAuthed): Enable
+               (main.go) makes the auth instance, /register /login /banip
+               /unbanip, timeout kick, XP-bar countdown. Per server — no
+               package global.
 server/enderchest/
                Ender chests: the per-player Chest records (Chests.For loads,
                Save writes), persistence Store + FileStore, Encode/Decode.

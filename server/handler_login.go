@@ -38,8 +38,8 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 	// IP ban from the auth plugin's failure tracking. Engages before
 	// anything expensive (Mojang auth, ban-list lookup) so spammers
 	// get bounced fast.
-	if authStore != nil {
-		if until, allowed := authStore.CheckIPAllowed(c.link.RemoteAddr()); !allowed {
+	if g := c.server.authGate; g != nil {
+		if until, banned := g.IPBanned(c.IP()); banned {
 			slog.Info("auth: IP banned, rejecting",
 				"player", c.playerName, "until", until)
 			_ = c.safeWrite(packetid.CbLoginDisconnect, login.DisconnectPayload(login.IPBanned(until)))
@@ -95,7 +95,7 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 	// Default landing: hub. With the auth plugin enabled, players go
 	// to the dedicated auth instance instead — they're moved to hub
 	// once /register or /login succeeds.
-	if authStore != nil && c.server.Auth != nil {
+	if c.server.authGate != nil && c.server.Auth != nil {
 		c.instance = c.server.Auth
 	} else {
 		c.instance = c.server.Hub
@@ -118,8 +118,11 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 
 	// Auth gate: in offline mode with the plugin enabled, flip the
 	// connection's `authed` bool to false and tell the player how to
-	// proceed. No-op when authStore == nil.
-	promptAuth(c)
+	// proceed. No-op without a gate.
+	if g := c.server.authGate; g != nil {
+		c.authed.Store(false)
+		g.Joined(c)
+	}
 
 	slog.Info("player joined", "player", c.playerName, "instance", c.instance.ID)
 	return nil

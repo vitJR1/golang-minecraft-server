@@ -15,6 +15,7 @@ import (
 	"minecraft-server/redisc"
 	"minecraft-server/schem"
 	"minecraft-server/server"
+	"minecraft-server/server/authgate"
 	"minecraft-server/server/enderchest"
 	"minecraft-server/server/favicon"
 	"minecraft-server/server/hub"
@@ -70,7 +71,7 @@ func main() {
 	// Auth plugin install gated by cfg.AuthEnabled (defaulted from
 	// ONLINE_MODE in loadEnv, overridable via AUTH_ENABLED env).
 	if cfg.AuthEnabled {
-		server.EnableAuth(srv, "auth.json")
+		authgate.Enable(srv, "auth.json")
 	}
 	loadTemplates(srv)
 	mountHubFromTemplate(srv, hubTemplateName)
