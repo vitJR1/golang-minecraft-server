@@ -11,10 +11,10 @@ func TestShutdownKicksPlayersAndStopsTicks(t *testing.T) {
 	s := New()
 	cliA := pipeClientOn(t, s)
 	completeOfflineLogin(t, cliA, "Alice")
-	idsA := cliA.startDrain()
+	idsA := cliA.StartDrain()
 	cliB := pipeClientOn(t, s)
 	completeOfflineLogin(t, cliB, "Bob")
-	cliB.startDiscardDrain()
+	cliB.StartDiscardDrain()
 
 	s.Shutdown("Server is restarting")
 

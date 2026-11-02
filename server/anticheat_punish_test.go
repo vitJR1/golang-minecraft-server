@@ -30,7 +30,7 @@ func joinOn(t *testing.T, s *Server, name string) (*testClient, *ClientConnectio
 	t.Helper()
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, name)
-	cli.startDiscardDrain()
+	cli.StartDiscardDrain()
 	return cli, findConn(t, s, name)
 }
 
@@ -42,7 +42,7 @@ func cheat(cli *testClient, n int) {
 	p.Write(protocol.WriteFloat(180))
 	p.WriteByte(1)
 	for i := 0; i < n; i++ {
-		cli.tryWrite(packetid.SbPlaySetRot, p.Bytes())
+		cli.TryWrite(packetid.SbPlaySetRot, p.Bytes())
 	}
 }
 
@@ -128,7 +128,7 @@ func TestMaxStatusBansAndNotifiesAdmins(t *testing.T) {
 	s.Ops.Add("Admin")
 	adminCli := pipeClientOn(t, s)
 	completeOfflineLogin(t, adminCli, "Admin")
-	adminMsgs := adminCli.startDrain()
+	adminMsgs := adminCli.StartDrain()
 
 	cli, conn := joinOn(t, s, "Hopeless")
 	setStatus(t, s, conn, anticheat.StatusBanned7d)
@@ -261,7 +261,7 @@ func TestManualBanAtMaxIsLogged(t *testing.T) {
 	setStatusFor(t, s, uuid, "Final", anticheat.StatusMax)
 	admin := opConn(t, s, "Admin")
 
-	s.RunCommand(admin, "ban Final 30d repeated cheating")
+	s.RecordManualBan(admin, "Final", "repeated cheating", time.Now().Add(30*24*time.Hour))
 	rec := latestFor(t, s, uuid)
 	if rec.Action != anticheat.ActionBan || rec.By != "Admin" || rec.After != anticheat.StatusMax ||
 		rec.Reasons[0].Detail != "repeated cheating" {
@@ -277,7 +277,7 @@ func TestManualBanBelowMaxNotLogged(t *testing.T) {
 	uuid := offlineTarget("Grief")
 	setStatusFor(t, s, uuid, "Grief", anticheat.StatusSuspicious)
 	admin := opConn(t, s, "Admin")
-	s.RunCommand(admin, "ban Grief 1d griefing")
+	s.RecordManualBan(admin, "Grief", "griefing", time.Now().Add(24*time.Hour))
 	if rec := latestFor(t, s, uuid); rec.By == "Admin" {
 		t.Fatalf("an ordinary ban went into the anticheat log: %+v", rec)
 	}

@@ -18,11 +18,11 @@ func TestOnPlayerAttackHookFires(t *testing.T) {
 
 	attackerCli := pipeClientOn(t, s)
 	completeOfflineLogin(t, attackerCli, "Attacker")
-	attackerCli.startDiscardDrain()
+	attackerCli.StartDiscardDrain()
 
 	victimCli := pipeClientOn(t, s)
 	completeOfflineLogin(t, victimCli, "Victim")
-	victimCli.startDiscardDrain()
+	victimCli.StartDiscardDrain()
 
 	attackerConn := findConn(t, s, "Attacker")
 	victimConn := findConn(t, s, "Victim")
@@ -42,7 +42,7 @@ func TestOnPlayerAttackHookFires(t *testing.T) {
 	protocol.WriteVarInt32ToBuffer(&p, victimConn.player.EntityID)
 	protocol.WriteVarInt32ToBuffer(&p, 1) // attack
 	p.WriteByte(0)                        // not sneaking
-	attackerCli.write(t, packetid.SbPlayInteract, p.Bytes())
+	attackerCli.Write(t, packetid.SbPlayInteract, p.Bytes())
 
 	waitFor(t, time.Second, func() bool { return hookFired.Load() == 1 },
 		"OnPlayerAttack to fire")
@@ -63,7 +63,7 @@ func TestOnPlayerAttackSelfAttackIgnored(t *testing.T) {
 
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Loner")
-	cli.startDiscardDrain()
+	cli.StartDiscardDrain()
 	conn := findConn(t, s, "Loner")
 
 	var hookFired atomic.Int32
@@ -76,7 +76,7 @@ func TestOnPlayerAttackSelfAttackIgnored(t *testing.T) {
 	protocol.WriteVarInt32ToBuffer(&p, conn.player.EntityID) // target self
 	protocol.WriteVarInt32ToBuffer(&p, 1)
 	p.WriteByte(0)
-	cli.write(t, packetid.SbPlayInteract, p.Bytes())
+	cli.Write(t, packetid.SbPlayInteract, p.Bytes())
 
 	// Give it a moment — nothing should fire.
 	time.Sleep(100 * time.Millisecond)

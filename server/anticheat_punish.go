@@ -187,9 +187,9 @@ func acReset(ctx context.Context, c *ClientConnection, uuid, name, reason string
 	_ = c.sendSystemMessage(fmt.Sprintf("%s: status %s → clean", name, before))
 }
 
-// recordManualBan logs an admin's /ban of a player at the max status — the
+// RecordManualBan logs an admin's /ban of a player at the max status — the
 // ban the ladder leaves to the admins — with the admin's reason.
-func (s *Server) recordManualBan(admin *ClientConnection, target, reason string, until time.Time) {
+func (s *Server) RecordManualBan(admin *ClientConnection, target, reason string, until time.Time) {
 	if s.AnticheatLog == nil {
 		return
 	}

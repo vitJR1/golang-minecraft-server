@@ -12,7 +12,7 @@ func TestStatsEndpoint(t *testing.T) {
 	s := New()
 	cliA := pipeClientOn(t, s)
 	completeOfflineLogin(t, cliA, "Watcher")
-	cliA.startDiscardDrain()
+	cliA.StartDiscardDrain()
 
 	lis, err := StartMetrics(s, "127.0.0.1:0")
 	if err != nil {

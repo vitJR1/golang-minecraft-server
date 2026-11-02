@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"strings"
 	"time"
 
 	"minecraft-server/game"
@@ -81,9 +80,9 @@ func (s *Server) IsArena(name string) bool { return s.arenas.Is(name) }
 // returns every arena.
 func (s *Server) ArenasOfKind(kind string) []string { return s.arenas.OfKind(kind) }
 
-// baseGameIDs returns registered game IDs that are base games (not created
+// BaseGameIDs returns registered game IDs that are base games (not created
 // arenas), sorted — for /play tab-completion.
-func (s *Server) baseGameIDs() []string {
+func (s *Server) BaseGameIDs() []string {
 	var out []string
 	for _, d := range game.All() {
 		if !s.IsArena(d.ID) {
@@ -92,74 +91,4 @@ func (s *Server) baseGameIDs() []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-// --- /arena command ---------------------------------------------------------
-
-func cmdArena(c *ClientConnection, args []string) {
-	if len(args) == 0 {
-		arenaUsage(c)
-		return
-	}
-	switch strings.ToLower(args[0]) {
-	case "create", "new":
-		cmdArenaCreate(c, args[1:])
-	case "list", "ls":
-		cmdArenaList(c, args[1:])
-	default:
-		arenaUsage(c)
-	}
-}
-
-func arenaUsage(c *ClientConnection) {
-	_ = c.sendSystemMessage("Usage:")
-	_ = c.sendSystemMessage("  /arena create <game> <template> [name]")
-	_ = c.sendSystemMessage("  /arena list [game]")
-}
-
-func init() {
-	registerCommand(&Command{
-		Name:     "arena",
-		NeedsOp:  true,
-		Help:     "/arena create <game> <template> [name] | /arena list [game]",
-		Run:      cmdArena,
-		Complete: completeArena,
-	})
-}
-
-// cmdArenaCreate handles /arena create <game> <template> [name].
-func cmdArenaCreate(c *ClientConnection, args []string) {
-	if len(args) < 2 || len(args) > 3 {
-		_ = c.sendSystemMessage("Usage: /arena create <game> <template> [name]")
-		return
-	}
-	kind := strings.ToLower(args[0])
-	templateName := args[1]
-	name := ""
-	if len(args) == 3 {
-		name = args[2]
-	}
-
-	created, err := c.server.CreateArena(kind, templateName, name)
-	if err != nil {
-		_ = c.sendSystemMessage("Arena create failed: " + err.Error())
-		return
-	}
-	_ = c.sendSystemMessage(fmt.Sprintf("Created arena %q — /play %s %s", created, kind, created))
-}
-
-func cmdArenaList(c *ClientConnection, args []string) {
-	kind := ""
-	if len(args) >= 1 {
-		kind = strings.ToLower(args[0])
-	}
-	arenas := c.server.ArenasOfKind(kind)
-	if len(arenas) == 0 {
-		_ = c.sendSystemMessage("No arenas created yet.")
-		return
-	}
-	_ = c.sendSystemMessage(fmt.Sprintf("Arenas (%d):", len(arenas)))
-	for _, a := range arenas {
-		_ = c.sendSystemMessage("  " + a)
-	}
 }

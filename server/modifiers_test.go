@@ -67,20 +67,6 @@ func TestEfficiencyAndHasteShortenTheDig(t *testing.T) {
 	}
 }
 
-func TestEffectCommand(t *testing.T) {
-	s := New()
-	c := offlineHub(s, "Op")
-	s.Ops.Add("Op")
-	s.RunCommand(c, "effect Op haste 2 60")
-	if s.Effects.Level(c, effect.Haste) != 2 {
-		t.Errorf("/effect did not apply haste II: %d", s.Effects.Level(c, effect.Haste))
-	}
-	s.RunCommand(c, "effect Op clear")
-	if s.Effects.Level(c, effect.Haste) != 0 {
-		t.Error("/effect clear did not clear")
-	}
-}
-
 func TestAirAndWaterSlowTheDig(t *testing.T) {
 	inst := bareInstance(New(), world.NewMemoryWorld())
 	inst.World.SetBlock(world.Position{X: 0, Y: 63, Z: 0}, world.Stone) // floor

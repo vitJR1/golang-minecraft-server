@@ -25,11 +25,11 @@ func TestMaxPlayersAllowsUpToCap(t *testing.T) {
 
 	a := pipeClientOn(t, s)
 	completeOfflineLogin(t, a, "Alice")
-	a.startDiscardDrain()
+	a.StartDiscardDrain()
 
 	b := pipeClientOn(t, s)
 	completeOfflineLogin(t, b, "Bob")
-	b.startDiscardDrain()
+	b.StartDiscardDrain()
 
 	waitFor(t, time.Second, func() bool { return s.PlayerCount() == 2 },
 		"both Alice and Bob to be online")
@@ -43,20 +43,20 @@ func TestMaxPlayersRejectsOverCap(t *testing.T) {
 
 	a := pipeClientOn(t, s)
 	completeOfflineLogin(t, a, "Alice")
-	a.startDiscardDrain()
+	a.StartDiscardDrain()
 	b := pipeClientOn(t, s)
 	completeOfflineLogin(t, b, "Bob")
-	b.startDiscardDrain()
+	b.StartDiscardDrain()
 
 	waitFor(t, time.Second, func() bool { return s.PlayerCount() == 2 }, "2/2 online")
 
 	// Third tries to join — must be kicked with Login Disconnect.
 	c := pipeClientOn(t, s)
-	c.write(t, packetid.SbHandshake, buildHandshake(763, "localhost", 25565, 2))
-	c.write(t, packetid.SbLoginStart, protocol.WriteString("Charlie"))
+	c.Write(t, packetid.SbHandshake, buildHandshake(763, "localhost", 25565, 2))
+	c.Write(t, packetid.SbLoginStart, protocol.WriteString("Charlie"))
 
 	// First reply is the disconnect packet.
-	id, _ := c.read(t)
+	id, _ := c.Read(t)
 	if id != packetid.CbLoginDisconnect {
 		t.Fatalf("expected LoginDisconnect (0x%02X), got 0x%02X", packetid.CbLoginDisconnect, id)
 	}
@@ -80,13 +80,13 @@ func TestMaxPlayersOpsBypassCap(t *testing.T) {
 
 	a := pipeClientOn(t, s)
 	completeOfflineLogin(t, a, "Alice")
-	a.startDiscardDrain()
+	a.StartDiscardDrain()
 	waitFor(t, time.Second, func() bool { return s.PlayerCount() == 1 }, "1/1")
 
 	// AdminBob is op → bypass.
 	b := pipeClientOn(t, s)
 	completeOfflineLogin(t, b, "AdminBob")
-	b.startDiscardDrain()
+	b.StartDiscardDrain()
 
 	waitFor(t, time.Second, func() bool { return s.PlayerCount() == 2 },
 		"AdminBob to bypass cap")
@@ -100,7 +100,7 @@ func TestMaxPlayersZeroMeansUnlimited(t *testing.T) {
 	for _, name := range []string{"A", "B", "C", "D"} {
 		cli := pipeClientOn(t, s)
 		completeOfflineLogin(t, cli, name)
-		cli.startDiscardDrain()
+		cli.StartDiscardDrain()
 	}
 	waitFor(t, 2*time.Second, func() bool { return s.PlayerCount() == 4 },
 		"all 4 players to be online")

@@ -28,7 +28,7 @@ func TestMatchmakerQueueHoldsBelowMin(t *testing.T) {
 
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Solo")
-	cli.startDiscardDrain()
+	cli.StartDiscardDrain()
 
 	if err := s.Matchmaker.Queue(findConn(t, s, "Solo"), "mm-hold"); err != nil {
 		t.Fatalf("Queue: %v", err)
@@ -47,10 +47,10 @@ func TestMatchmakerStartsGameAtMin(t *testing.T) {
 
 	a := pipeClientOn(t, s)
 	completeOfflineLogin(t, a, "Alice")
-	a.startDiscardDrain()
+	a.StartDiscardDrain()
 	b := pipeClientOn(t, s)
 	completeOfflineLogin(t, b, "Bob")
-	b.startDiscardDrain()
+	b.StartDiscardDrain()
 
 	connA := findConn(t, s, "Alice")
 	connB := findConn(t, s, "Bob")
@@ -101,7 +101,7 @@ func TestMatchmakerDequeue(t *testing.T) {
 
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Quitter")
-	cli.startDiscardDrain()
+	cli.StartDiscardDrain()
 	conn := findConn(t, s, "Quitter")
 
 	_ = s.Matchmaker.Queue(conn, "mm-dequeue")
@@ -124,7 +124,7 @@ func TestMatchmakerDoubleQueueRejected(t *testing.T) {
 
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Greedy")
-	cli.startDiscardDrain()
+	cli.StartDiscardDrain()
 	conn := findConn(t, s, "Greedy")
 
 	if err := s.Matchmaker.Queue(conn, "mm-double-a"); err != nil {
@@ -139,7 +139,7 @@ func TestMatchmakerUnknownGameRejected(t *testing.T) {
 	s := New()
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Lost")
-	cli.startDiscardDrain()
+	cli.StartDiscardDrain()
 	conn := findConn(t, s, "Lost")
 
 	if err := s.Matchmaker.Queue(conn, "mm-nope-doesnt-exist"); err == nil {
@@ -153,7 +153,7 @@ func TestMatchmakerDisconnectDequeues(t *testing.T) {
 
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Ghost")
-	cli.startDiscardDrain()
+	cli.StartDiscardDrain()
 	conn := findConn(t, s, "Ghost")
 
 	_ = s.Matchmaker.Queue(conn, "mm-disconnect")
@@ -163,7 +163,7 @@ func TestMatchmakerDisconnectDequeues(t *testing.T) {
 
 	// Close from the client side — server's cleanup runs and should
 	// drop us from the queue.
-	_ = cli.conn.Close()
+	_ = cli.Conn.Close()
 	waitFor(t, time.Second, func() bool {
 		return s.Matchmaker.QueueSize("mm-disconnect") == 0
 	}, "cleanup to dequeue")

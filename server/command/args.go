@@ -59,3 +59,24 @@ func ParseCoords(args []string) (x, y, z float64, err error) {
 	}
 	return v[0], v[1], v[2], nil
 }
+
+// ArgFrom completes argument n (1-based) with list(sender); other
+// positions get nothing.
+func ArgFrom[S any](n int, list func(S) []string) func(S, []string) []string {
+	return func(s S, args []string) []string {
+		if len(args) == n {
+			return list(s)
+		}
+		return nil
+	}
+}
+
+// FixedArg completes argument n from a fixed list.
+func FixedArg[S any](n int, words ...string) func(S, []string) []string {
+	return func(_ S, args []string) []string {
+		if len(args) == n {
+			return words
+		}
+		return nil
+	}
+}

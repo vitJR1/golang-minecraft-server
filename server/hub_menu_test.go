@@ -16,7 +16,7 @@ import (
 func skipPackets(t *testing.T, cli *testClient, n int) {
 	t.Helper()
 	for i := 0; i < n; i++ {
-		cli.read(t)
+		cli.Read(t)
 	}
 }
 
@@ -39,13 +39,13 @@ func TestUseItemOpensMainMenu(t *testing.T) {
 	var p bytes.Buffer
 	protocol.WriteVarInt32ToBuffer(&p, 0)
 	protocol.WriteVarInt32ToBuffer(&p, 0)
-	cli.write(t, packetid.SbPlayUseItem, p.Bytes())
+	cli.Write(t, packetid.SbPlayUseItem, p.Bytes())
 
 	// Expect Open Screen, then Set Container Content.
-	if id, _ := cli.read(t); id != packetid.CbPlayOpenScreen {
+	if id, _ := cli.Read(t); id != packetid.CbPlayOpenScreen {
 		t.Fatalf("expected OpenScreen 0x%02X, got 0x%02X", packetid.CbPlayOpenScreen, id)
 	}
-	if id, _ := cli.read(t); id != packetid.CbPlaySetContainerContent {
+	if id, _ := cli.Read(t); id != packetid.CbPlaySetContainerContent {
 		t.Fatalf("expected SetContainerContent 0x%02X, got 0x%02X",
 			packetid.CbPlaySetContainerContent, id)
 	}
@@ -73,7 +73,7 @@ func TestClickGameTeleportsToLobby(t *testing.T) {
 	SetupHubMenu(s)
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Clicker")
-	cli.startDiscardDrain()
+	cli.StartDiscardDrain()
 	conn := findConn(t, s, "Clicker")
 
 	// Open the main menu server-side (skip the wire round-trip).
@@ -88,7 +88,7 @@ func TestClickGameTeleportsToLobby(t *testing.T) {
 	protocol.WriteVarInt32ToBuffer(&p, 0)
 	protocol.WriteVarInt32ToBuffer(&p, 0)
 	p.Write(protocol.WriteEmptySlot())
-	cli.write(t, packetid.SbPlayClickContainer, p.Bytes())
+	cli.Write(t, packetid.SbPlayClickContainer, p.Bytes())
 
 	waitFor(t, 2*time.Second, func() bool {
 		_, inst, ok := s.FindPlayer("Clicker")
@@ -106,7 +106,7 @@ func TestCloseContainerClearsMenu(t *testing.T) {
 	SetupHubMenu(s)
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Closer")
-	cli.startDiscardDrain()
+	cli.StartDiscardDrain()
 	conn := findConn(t, s, "Closer")
 
 	conn.openHubMainMenu()
@@ -114,6 +114,6 @@ func TestCloseContainerClearsMenu(t *testing.T) {
 		t.Fatal("precondition: menu should be open")
 	}
 
-	cli.write(t, packetid.SbPlayCloseContainer, []byte{menuWindowID})
+	cli.Write(t, packetid.SbPlayCloseContainer, []byte{menuWindowID})
 	waitFor(t, time.Second, func() bool { return conn.menu.Load() == nil }, "menu to clear on close")
 }

@@ -6,9 +6,8 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server/servertest"
 	"minecraft-server/world"
-	"net"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -17,148 +16,31 @@ import (
 // testClient speaks the wire protocol to a HandleConn running over net.Pipe.
 // The threshold field mirrors the server's compression state and must be
 // updated when the test client receives Set Compression.
-type testClient struct {
-	conn      net.Conn
-	threshold int
-	server    *Server // the Server backing this client (handy in multi-client tests)
+// The protocol-level client is server/servertest; these keep the names the
+// server's tests have always used.
+type testClient = servertest.Client
 
-	// writeMu serialises frames: the drain goroutines answer teleports and
-	// Pings (autoReply) while the test itself writes.
-	writeMu sync.Mutex
-}
+// pipeServer dials a fresh Server — use pipeClientOn to attach several
+// clients to one.
+func pipeServer(t *testing.T) *testClient { return servertest.Dial(t, New()) }
 
-// pipeServer wires HandleConn to one side of a net.Pipe and returns a
-// testClient for the other side. Starts with compression disabled. A fresh
-// Server is created — use pipeClientOn to attach multiple clients to one.
-func pipeServer(t *testing.T) *testClient {
-	return pipeClientOn(t, New())
-}
+// pipeClientOn attaches a new pipe-backed client to an existing Server.
+func pipeClientOn(t *testing.T, s *Server) *testClient { return servertest.Dial(t, s) }
 
-// pipeClientOn attaches a new pipe-backed client to an existing Server. Use
-// when a test needs two or more clients that share PlayerList/world state.
-func pipeClientOn(t *testing.T, s *Server) *testClient {
+// completeOfflineLogin: see servertest.Client.Login.
+func completeOfflineLogin(t *testing.T, cli *testClient, name string) { cli.Login(t, name) }
+
+func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) {
 	t.Helper()
-	cli, srv := net.Pipe()
-
-	done := make(chan struct{})
-	go func() {
-		s.HandleConn(srv)
-		close(done)
-	}()
-	// t.Cleanup runs LIFO. Close the client first, then wait for the server
-	// goroutine — closing cli is what unblocks the server's readLoop.
-	t.Cleanup(func() {
-		select {
-		case <-done:
-		case <-time.After(time.Second):
-			t.Log("server did not exit within 1s after pipe close")
-		}
-	})
-	t.Cleanup(func() { _ = cli.Close() })
-	return &testClient{conn: cli, threshold: protocol.CompressionDisabled, server: s}
+	servertest.WaitFor(t, timeout, cond, msg)
 }
 
-func (tc *testClient) write(t *testing.T, id int32, payload []byte) {
+func drainExpect(t *testing.T, ch <-chan int, who string, expected ...int) {
 	t.Helper()
-	tc.writeMu.Lock()
-	err := protocol.WritePacket(tc.conn, id, payload, tc.threshold)
-	tc.writeMu.Unlock()
-	if err != nil {
-		t.Fatalf("write packet 0x%02X: %v", id, err)
-	}
+	servertest.DrainExpect(t, ch, who, expected...)
 }
 
-// autoReply answers what a vanilla client answers on its own: Confirm
-// Teleportation for every Synchronize Player Position (the server ignores
-// movement until then) and Pong for every Ping. body is the packet payload
-// after the id; it is read from a copy, so the caller's buffer is untouched.
-// Write errors are ignored — the pipe closing ends the test anyway.
-func (tc *testClient) autoReply(id int, body []byte) {
-	var reply []byte
-	var replyID int32
-	switch id {
-	case packetid.CbPlaySyncPos:
-		// x, y, z (3×Double) + yaw, pitch (2×Float) + flags (Byte) = 33 bytes.
-		if len(body) < 33 {
-			return
-		}
-		tp, _, err := protocol.ReadVarIntFromBytes(body[33:])
-		if err != nil {
-			return
-		}
-		replyID, reply = packetid.SbPlayTeleportConfirm, protocol.WriteVarInt32(int32(tp))
-	case packetid.CbPlayPing:
-		if len(body) < 4 {
-			return
-		}
-		replyID, reply = packetid.SbPlayPong, append([]byte(nil), body[:4]...)
-	default:
-		return
-	}
-	tc.writeMu.Lock()
-	_ = protocol.WritePacket(tc.conn, replyID, reply, tc.threshold)
-	tc.writeMu.Unlock()
-}
-
-// startDiscardDrain spawns a goroutine that reads every subsequent packet
-// off the pipe and throws it away. Use when a test doesn't care about
-// packet contents but needs to keep the synchronous net.Pipe drained so
-// the server's writerLoop doesn't block (e.g. during MovePlayer flows
-// that emit >64 packets per player).
-func (tc *testClient) startDiscardDrain() {
-	go func() {
-		for {
-			buf, err := protocol.ReadPacket(tc.conn, tc.threshold)
-			if err != nil {
-				return
-			}
-			if id, err := protocol.ReadVarInt(buf); err == nil {
-				tc.autoReply(id, buf.Bytes())
-			}
-		}
-	}()
-}
-
-// startDrain spawns a goroutine that reads every subsequent packet off the
-// pipe and pushes its ID onto the returned channel. Closes the channel when
-// the pipe errors out (e.g. test cleanup). Use after login when later
-// server-side writes (announceJoin, broadcasts) would otherwise deadlock
-// the synchronous net.Pipe.
-func (tc *testClient) startDrain() <-chan int {
-	ids := make(chan int, 64)
-	go func() {
-		defer close(ids)
-		for {
-			buf, err := protocol.ReadPacket(tc.conn, tc.threshold)
-			if err != nil {
-				return
-			}
-			id, err := protocol.ReadVarInt(buf)
-			if err != nil {
-				return
-			}
-			tc.autoReply(id, buf.Bytes())
-			ids <- id
-		}
-	}()
-	return ids
-}
-
-func (tc *testClient) read(t *testing.T) (id int, payload *bytes.Buffer) {
-	t.Helper()
-	_ = tc.conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	buf, err := protocol.ReadPacket(tc.conn, tc.threshold)
-	if err != nil {
-		t.Fatalf("read packet: %v", err)
-	}
-	_ = tc.conn.SetReadDeadline(time.Time{})
-	id, err = protocol.ReadVarInt(buf)
-	if err != nil {
-		t.Fatalf("decode packet id: %v", err)
-	}
-	tc.autoReply(id, buf.Bytes())
-	return id, buf
-}
+var buildHandshake = servertest.Handshake
 
 // giveHeldItem puts itemName in the player's selected hotbar slot (window-0
 // slot 36) via a Set Creative Mode Slot packet, so a subsequent block place
@@ -175,30 +57,20 @@ func giveHeldItem(t *testing.T, cli *testClient, conn *ClientConnection, itemNam
 	var p bytes.Buffer
 	p.Write(protocol.WriteShort(36)) // hotbar slot 0 in window 0
 	p.Write(protocol.WriteSlot(id, 1))
-	cli.write(t, packetid.SbPlaySetCreativeSlot, p.Bytes())
-}
-
-func buildHandshake(protoVer int32, addr string, port uint16, nextState int32) []byte {
-	var buf bytes.Buffer
-	buf.Write(protocol.WriteVarInt32(protoVer))
-	buf.Write(protocol.WriteString(addr))
-	buf.WriteByte(byte(port >> 8))
-	buf.WriteByte(byte(port & 0xff))
-	buf.Write(protocol.WriteVarInt32(nextState))
-	return buf.Bytes()
+	cli.Write(t, packetid.SbPlaySetCreativeSlot, p.Bytes())
 }
 
 func TestStatusFlow(t *testing.T) {
 	cli := pipeServer(t)
 
 	// Handshake → status state
-	cli.write(t, packetid.SbHandshake, buildHandshake(763, "localhost", 25565, 1))
+	cli.Write(t, packetid.SbHandshake, buildHandshake(763, "localhost", 25565, 1))
 
 	// Status Request (empty payload)
-	cli.write(t, packetid.SbStatusRequest, nil)
+	cli.Write(t, packetid.SbStatusRequest, nil)
 
 	// Response
-	id, payload := cli.read(t)
+	id, payload := cli.Read(t)
 	if id != packetid.CbStatusResponse {
 		t.Fatalf("status response id: got 0x%02X, want 0x%02X", id, packetid.CbStatusResponse)
 	}
@@ -220,9 +92,9 @@ func TestStatusFlow(t *testing.T) {
 
 	// Ping → Pong (server echoes the 8-byte payload)
 	payloadBytes := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}
-	cli.write(t, packetid.SbStatusPing, payloadBytes)
+	cli.Write(t, packetid.SbStatusPing, payloadBytes)
 
-	id, pong := cli.read(t)
+	id, pong := cli.Read(t)
 	if id != packetid.CbStatusPong {
 		t.Errorf("pong id: got 0x%02X, want 0x%02X", id, packetid.CbStatusPong)
 	}
@@ -235,14 +107,14 @@ func TestOfflineLoginFlow(t *testing.T) {
 	cli := pipeServer(t)
 
 	// Handshake → login state
-	cli.write(t, packetid.SbHandshake, buildHandshake(763, "localhost", 25565, 2))
+	cli.Write(t, packetid.SbHandshake, buildHandshake(763, "localhost", 25565, 2))
 
 	// Login Start: just the player name (no UUID in 1.20.1 — that was 1.19.x)
-	cli.write(t, packetid.SbLoginStart, protocol.WriteString("TestPlayer"))
+	cli.Write(t, packetid.SbLoginStart, protocol.WriteString("TestPlayer"))
 
 	// Set Compression arrives first (still uncompressed), then everything
 	// after uses compressed framing.
-	id, body := cli.read(t)
+	id, body := cli.Read(t)
 	if id != packetid.CbLoginSetCompr {
 		t.Fatalf("expected Set Compression (0x%02X), got 0x%02X", packetid.CbLoginSetCompr, id)
 	}
@@ -253,10 +125,10 @@ func TestOfflineLoginFlow(t *testing.T) {
 	if gotThreshold != CompressionThreshold {
 		t.Errorf("set compression threshold: got %d, want %d", gotThreshold, CompressionThreshold)
 	}
-	cli.threshold = gotThreshold
+	cli.Threshold = gotThreshold
 
 	// Expect Login Success
-	id, payload := cli.read(t)
+	id, payload := cli.Read(t)
 	if id != packetid.CbLoginSuccess {
 		t.Fatalf("expected LoginSuccess (0x%02X), got 0x%02X", packetid.CbLoginSuccess, id)
 	}
@@ -303,7 +175,7 @@ func TestOfflineLoginFlow(t *testing.T) {
 		expect{"DeclareCommands", packetid.CbPlayDeclareCommands, 5},
 		expect{"UpdateAttributes", packetid.CbPlayUpdateAttributes, 5})
 	for _, want := range expected {
-		got, body := cli.read(t)
+		got, body := cli.Read(t)
 		if got != want.id {
 			t.Fatalf("%s: id 0x%02X, want 0x%02X", want.name, got, want.id)
 		}
@@ -315,52 +187,8 @@ func TestOfflineLoginFlow(t *testing.T) {
 	// announceJoin sends a PlayerInfo with just self (the newcomer joined
 	// alone here). Drain it so the test client's cleanup doesn't strand a
 	// pending server-side write.
-	if id, _ := cli.read(t); id != packetid.CbPlayPlayerInfoUpdate {
+	if id, _ := cli.Read(t); id != packetid.CbPlayPlayerInfoUpdate {
 		t.Errorf("expected post-login PlayerInfoUpdate, got 0x%02X", id)
-	}
-}
-
-// completeOfflineLogin drives the client through Handshake + LoginStart and
-// drains Set Compression + LoginSuccess + the three play packets. After
-// this returns the connection is in StatePlay on the server side and the
-// player is registered in Server.Players.
-func completeOfflineLogin(t *testing.T, cli *testClient, name string) {
-	t.Helper()
-	cli.write(t, packetid.SbHandshake, buildHandshake(763, "localhost", 25565, 2))
-	cli.write(t, packetid.SbLoginStart, protocol.WriteString(name))
-
-	id, body := cli.read(t)
-	if id != packetid.CbLoginSetCompr {
-		t.Fatalf("expected Set Compression (0x%02X), got 0x%02X", packetid.CbLoginSetCompr, id)
-	}
-	thr, err := protocol.ReadVarInt(body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cli.threshold = thr
-
-	if id, _ := cli.read(t); id != packetid.CbLoginSuccess {
-		t.Fatalf("expected LoginSuccess (0x%02X), got 0x%02X", packetid.CbLoginSuccess, id)
-	}
-	// Drain Login(Play) + chunks + any world-state Block Updates + SyncPos
-	// + DeclareCommands. Block Update count varies per test (some pre-seed
-	// blocks into the hub world), so we consume packets until SyncPos
-	// arrives, then read one more for the Declare Commands packet that
-	// follows it. After that, announceJoin's PlayerInfoUpdate / SpawnPlayer
-	// is the next thing on the wire.
-	for {
-		id, _ := cli.read(t)
-		if id == packetid.CbPlaySyncPos {
-			break
-		}
-	}
-	if id, _ := cli.read(t); id != packetid.CbPlayDeclareCommands {
-		t.Fatalf("expected DeclareCommands after SyncPos, got 0x%02X", id)
-	}
-	// Combat Attributes (attack-speed for the cooldown bar) trails Declare
-	// Commands in the join sequence.
-	if id, _ := cli.read(t); id != packetid.CbPlayUpdateAttributes {
-		t.Fatalf("expected UpdateAttributes after DeclareCommands, got 0x%02X", id)
 	}
 }
 
@@ -387,31 +215,17 @@ func joinPrelude() []int {
 	return []int{packetid.CbPlaySpawnPos, packetid.CbPlaySetCenterChunk, packetid.CbPlayGameEvent}
 }
 
-// waitFor polls until cond returns true or the deadline passes. Useful for
-// observing async server-side effects from integration tests.
-func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for: %s", msg)
-}
-
 func TestPlayerListRegistersAndBroadcasts(t *testing.T) {
 	s := New()
 
 	cli1 := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli1, "Alice")
-	aliceCh := cli1.startDrain()
+	aliceCh := cli1.StartDrain()
 	drainExpect(t, aliceCh, "Alice (solo bootstrap)", packetid.CbPlayPlayerInfoUpdate)
 
 	cli2 := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli2, "Bob")
-	bobCh := cli2.startDrain()
+	bobCh := cli2.StartDrain()
 
 	waitFor(t, time.Second, func() bool { return s.PlayerCount() == 2 },
 		"Players.Count == 2")
@@ -436,36 +250,17 @@ func TestPlayerListRegistersAndBroadcasts(t *testing.T) {
 	drainExpect(t, bobCh, "Bob chat", packetid.CbPlaySystemChat)
 }
 
-// drainExpect reads the next N packet IDs and asserts each matches the
-// expected sequence. Times out if anything stalls.
-func drainExpect(t *testing.T, ch <-chan int, who string, expected ...int) {
-	t.Helper()
-	for i, want := range expected {
-		select {
-		case got, ok := <-ch:
-			if !ok {
-				t.Fatalf("%s: channel closed waiting for packet %d (want 0x%02X)", who, i, want)
-			}
-			if got != want {
-				t.Errorf("%s: packet %d: got 0x%02X, want 0x%02X", who, i, got, want)
-			}
-		case <-time.After(2 * time.Second):
-			t.Fatalf("%s: timed out waiting for packet %d (want 0x%02X)", who, i, want)
-		}
-	}
-}
-
 func TestPlayerListBroadcastExceptSkipsSender(t *testing.T) {
 	s := New()
 
 	cli1 := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli1, "Alice")
-	aliceCh := cli1.startDrain()
+	aliceCh := cli1.StartDrain()
 	drainExpect(t, aliceCh, "Alice (solo bootstrap)", packetid.CbPlayPlayerInfoUpdate)
 
 	cli2 := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli2, "Bob")
-	bobCh := cli2.startDrain()
+	bobCh := cli2.StartDrain()
 
 	drainExpect(t, aliceCh, "Alice pre-chat",
 		packetid.CbPlayPlayerInfoUpdate, packetid.CbPlaySpawnPlayer, packetid.CbPlaySetEquipment)
@@ -492,7 +287,7 @@ func TestPlayerListRemovesOnDisconnect(t *testing.T) {
 	s := New()
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "TempPlayer")
-	_ = cli.startDrain() // unblocks joinAndAnnounce's PlayerInfo write
+	_ = cli.StartDrain() // unblocks joinAndAnnounce's PlayerInfo write
 
 	// Players.Add now happens inside joinAndAnnounce (after sendPlayPackets'
 	// 40ms of inter-packet sleeps), so the count won't be 1 immediately —
@@ -500,7 +295,7 @@ func TestPlayerListRemovesOnDisconnect(t *testing.T) {
 	waitFor(t, time.Second, func() bool { return s.PlayerCount() == 1 },
 		"Players.Count == 1")
 
-	_ = cli.conn.Close()
+	_ = cli.Conn.Close()
 
 	waitFor(t, time.Second, func() bool { return s.PlayerCount() == 0 },
 		"PlayerList to drain after client disconnect")
@@ -514,13 +309,13 @@ func TestTwoPlayersSeeEachOther(t *testing.T) {
 	// then sees a deterministic sequence of packets for each.
 	cli1 := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli1, "Alice")
-	aliceCh := cli1.startDrain()
+	aliceCh := cli1.StartDrain()
 	drainExpect(t, aliceCh, "Alice (solo bootstrap)", packetid.CbPlayPlayerInfoUpdate)
 
 	// Bob joins. Alice should see Bob spawn; Bob should see Alice spawn.
 	cli2 := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli2, "Bob")
-	bobCh := cli2.startDrain()
+	bobCh := cli2.StartDrain()
 
 	drainExpect(t, aliceCh, "Alice",
 		packetid.CbPlayPlayerInfoUpdate, // Bob added to tab
@@ -539,12 +334,12 @@ func TestPlayerMovementBroadcasts(t *testing.T) {
 
 	cli1 := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli1, "Alice")
-	aliceCh := cli1.startDrain()
+	aliceCh := cli1.StartDrain()
 	drainExpect(t, aliceCh, "Alice (solo bootstrap)", packetid.CbPlayPlayerInfoUpdate)
 
 	cli2 := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli2, "Bob")
-	bobCh := cli2.startDrain()
+	bobCh := cli2.StartDrain()
 
 	drainExpect(t, aliceCh, "Alice pre-move",
 		packetid.CbPlayPlayerInfoUpdate, packetid.CbPlaySpawnPlayer, packetid.CbPlaySetEquipment)
@@ -559,7 +354,7 @@ func TestPlayerMovementBroadcasts(t *testing.T) {
 	move.Write(protocol.WriteDouble(70))
 	move.Write(protocol.WriteDouble(-3.25))
 	move.WriteByte(1) // on ground
-	cli1.write(t, packetid.SbPlaySetPos, move.Bytes())
+	cli1.Write(t, packetid.SbPlaySetPos, move.Bytes())
 
 	drainExpect(t, bobCh, "Bob sees Alice move", packetid.CbPlayTeleportEntity)
 
@@ -577,18 +372,18 @@ func TestPlayerLeaveDespawnsForOthers(t *testing.T) {
 
 	cli1 := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli1, "Alice")
-	aliceCh := cli1.startDrain()
+	aliceCh := cli1.StartDrain()
 	drainExpect(t, aliceCh, "Alice (solo bootstrap)", packetid.CbPlayPlayerInfoUpdate)
 
 	cli2 := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli2, "Bob")
-	_ = cli2.startDrain()
+	_ = cli2.StartDrain()
 
 	drainExpect(t, aliceCh, "Alice pre-leave",
 		packetid.CbPlayPlayerInfoUpdate, packetid.CbPlaySpawnPlayer, packetid.CbPlaySetEquipment)
 
 	// Bob disconnects.
-	_ = cli2.conn.Close()
+	_ = cli2.Conn.Close()
 
 	drainExpect(t, aliceCh, "Alice sees Bob leave",
 		packetid.CbPlayRemoveEntities, packetid.CbPlayPlayerInfoRemove)
@@ -599,12 +394,12 @@ func TestBlockPlaceBroadcastsAndAcks(t *testing.T) {
 
 	cli1 := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli1, "Placer")
-	aliceCh := cli1.startDrain()
+	aliceCh := cli1.StartDrain()
 	drainExpect(t, aliceCh, "Placer (solo bootstrap)", packetid.CbPlayPlayerInfoUpdate)
 
 	cli2 := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli2, "Watcher")
-	bobCh := cli2.startDrain()
+	bobCh := cli2.StartDrain()
 	drainExpect(t, aliceCh, "Placer pre-place", packetid.CbPlayPlayerInfoUpdate, packetid.CbPlaySpawnPlayer, packetid.CbPlaySetEquipment)
 	drainExpect(t, bobCh, "Watcher pre-place", packetid.CbPlayPlayerInfoUpdate, packetid.CbPlaySpawnPlayer, packetid.CbPlaySetEquipment)
 
@@ -620,7 +415,7 @@ func TestBlockPlaceBroadcastsAndAcks(t *testing.T) {
 	p.Write(protocol.WriteFloat(0.5))         // cursor z
 	p.WriteByte(0)                            // inside_block = false
 	protocol.WriteVarInt32ToBuffer(&p, 42)    // sequence
-	cli1.write(t, packetid.SbPlayUseItemOnBlock, p.Bytes())
+	cli1.Write(t, packetid.SbPlayUseItemOnBlock, p.Bytes())
 
 	// Watcher receives Block Update (or — depending on ordering — the
 	// Placer's own ack also goes out as Block Update to Watcher first).
@@ -647,7 +442,7 @@ func TestBlockBreakClearsAndAcks(t *testing.T) {
 	// covered in dig_test.go). Stand within dig reach of (5,70,5).
 	findConn(t, s, "Breaker").player.SetGamemode(player.Creative)
 	findConn(t, s, "Breaker").player.MoveTo(3.5, 69, 3.5, true)
-	ch := cli.startDrain()
+	ch := cli.StartDrain()
 	// World-state replay (Block Update for the pre-seeded stone) is now
 	// drained inside completeOfflineLogin since it lands before SyncPos.
 	// Only the join announce remains visible here.
@@ -659,7 +454,7 @@ func TestBlockBreakClearsAndAcks(t *testing.T) {
 	p.Write(protocol.WritePosition(5, 70, 5))
 	p.WriteByte(1)                        // face
 	protocol.WriteVarInt32ToBuffer(&p, 7) // sequence
-	cli.write(t, packetid.SbPlayPlayerAction, p.Bytes())
+	cli.Write(t, packetid.SbPlayPlayerAction, p.Bytes())
 
 	drainExpect(t, ch, "Ack + Block Update",
 		packetid.CbPlayAckBlockChange, packetid.CbPlayBlockUpdate)
@@ -673,16 +468,16 @@ func TestSwingArmBroadcasts(t *testing.T) {
 	s := New()
 	cli1 := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli1, "Swinger")
-	aliceCh := cli1.startDrain()
+	aliceCh := cli1.StartDrain()
 	drainExpect(t, aliceCh, "Swinger solo", packetid.CbPlayPlayerInfoUpdate)
 
 	cli2 := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli2, "Bystander")
-	bobCh := cli2.startDrain()
+	bobCh := cli2.StartDrain()
 	drainExpect(t, aliceCh, "Swinger pre-swing", packetid.CbPlayPlayerInfoUpdate, packetid.CbPlaySpawnPlayer, packetid.CbPlaySetEquipment)
 	drainExpect(t, bobCh, "Bystander pre-swing", packetid.CbPlayPlayerInfoUpdate, packetid.CbPlaySpawnPlayer, packetid.CbPlaySetEquipment)
 
-	cli1.write(t, packetid.SbPlaySwingArm, protocol.WriteVarInt32(0)) // main hand
+	cli1.Write(t, packetid.SbPlaySwingArm, protocol.WriteVarInt32(0)) // main hand
 	drainExpect(t, bobCh, "Bystander sees animation", packetid.CbPlayEntityAnimation)
 
 	// Self does not see own animation.
@@ -698,56 +493,23 @@ func TestChatBroadcasts(t *testing.T) {
 	s := New()
 	cli1 := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli1, "Speaker")
-	aliceCh := cli1.startDrain()
+	aliceCh := cli1.StartDrain()
 	drainExpect(t, aliceCh, "Speaker solo", packetid.CbPlayPlayerInfoUpdate)
 
 	cli2 := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli2, "Listener")
-	bobCh := cli2.startDrain()
+	bobCh := cli2.StartDrain()
 	drainExpect(t, aliceCh, "Speaker pre-chat", packetid.CbPlayPlayerInfoUpdate, packetid.CbPlaySpawnPlayer, packetid.CbPlaySetEquipment)
 	drainExpect(t, bobCh, "Listener pre-chat", packetid.CbPlayPlayerInfoUpdate, packetid.CbPlaySpawnPlayer, packetid.CbPlaySetEquipment)
 
 	// 1.20.1 ChatMessage payload is String + Long(timestamp) + Long(salt)
 	// + Optional sig + VarInt(msg count) + FixedBitSet(20). We only need
 	// the leading string for the handler.
-	cli1.write(t, packetid.SbPlayChatMessage, protocol.WriteString("hello world"))
+	cli1.Write(t, packetid.SbPlayChatMessage, protocol.WriteString("hello world"))
 
 	// Both clients should receive the broadcast.
 	drainExpect(t, aliceCh, "Speaker sees own chat", packetid.CbPlaySystemChat)
 	drainExpect(t, bobCh, "Listener sees chat", packetid.CbPlaySystemChat)
-}
-
-func TestOpCommand(t *testing.T) {
-	s := New()
-	// Seed Speaker as an op so they can /op someone else.
-	s.Ops.Add("Boss")
-
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Boss")
-	ch := cli.startDrain()
-	drainExpect(t, ch, "Boss solo", packetid.CbPlayPlayerInfoUpdate)
-
-	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("op Notch"))
-	drainExpect(t, ch, "Op confirm to sender", packetid.CbPlaySystemChat)
-
-	if !s.Ops.Has("Notch") {
-		t.Error("Notch should now be op")
-	}
-}
-
-func TestNonOpDeniedCommand(t *testing.T) {
-	s := New()
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Rando")
-	ch := cli.startDrain()
-	drainExpect(t, ch, "Rando solo", packetid.CbPlayPlayerInfoUpdate)
-
-	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("op Notch"))
-	drainExpect(t, ch, "Permission denied reply", packetid.CbPlaySystemChat)
-
-	if s.Ops.Has("Notch") {
-		t.Error("Non-op shouldn't be able to /op")
-	}
 }
 
 func TestOnBlockPlaceVetoRollsBack(t *testing.T) {
@@ -760,7 +522,7 @@ func TestOnBlockPlaceVetoRollsBack(t *testing.T) {
 
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Placer")
-	ch := cli.startDrain()
+	ch := cli.StartDrain()
 	drainExpect(t, ch, "Placer solo", packetid.CbPlayPlayerInfoUpdate)
 
 	giveHeldItem(t, cli, findConn(t, s, "Placer"), "minecraft:stone")
@@ -773,7 +535,7 @@ func TestOnBlockPlaceVetoRollsBack(t *testing.T) {
 	p.Write(protocol.WriteFloat(0.5))
 	p.WriteByte(0)
 	protocol.WriteVarInt32ToBuffer(&p, 7)
-	cli.write(t, packetid.SbPlayUseItemOnBlock, p.Bytes())
+	cli.Write(t, packetid.SbPlayUseItemOnBlock, p.Bytes())
 
 	// Ack first, then the corrective Block Update with the prior block.
 	drainExpect(t, ch, "Placer ack + rollback", packetid.CbPlayAckBlockChange, packetid.CbPlayBlockUpdate)
@@ -799,7 +561,7 @@ func TestOnBlockBreakVetoRollsBack(t *testing.T) {
 	completeOfflineLogin(t, cli, "Breaker")
 	findConn(t, s, "Breaker").player.SetGamemode(player.Creative)
 	findConn(t, s, "Breaker").player.MoveTo(3.5, 69, 3.5, true) // within dig reach
-	ch := cli.startDrain()
+	ch := cli.StartDrain()
 	drainExpect(t, ch, "Breaker bootstrap", packetid.CbPlayPlayerInfoUpdate)
 
 	var p bytes.Buffer
@@ -807,7 +569,7 @@ func TestOnBlockBreakVetoRollsBack(t *testing.T) {
 	p.Write(protocol.WritePosition(5, 70, 5))
 	p.WriteByte(1)
 	protocol.WriteVarInt32ToBuffer(&p, 9)
-	cli.write(t, packetid.SbPlayPlayerAction, p.Bytes())
+	cli.Write(t, packetid.SbPlayPlayerAction, p.Bytes())
 
 	drainExpect(t, ch, "Breaker ack + rollback", packetid.CbPlayAckBlockChange, packetid.CbPlayBlockUpdate)
 
@@ -830,13 +592,13 @@ func TestOnChatRewrite(t *testing.T) {
 	// Drain own PlayerInfoUpdate from announceJoin so the next read picks
 	// up the chat broadcast. No startDrain here — we need cli.read to
 	// inspect the actual payload, and the drainer goroutine would race.
-	if id, _ := cli.read(t); id != packetid.CbPlayPlayerInfoUpdate {
+	if id, _ := cli.Read(t); id != packetid.CbPlayPlayerInfoUpdate {
 		t.Fatalf("expected own PlayerInfoUpdate, got 0x%02X", id)
 	}
 
-	cli.write(t, packetid.SbPlayChatMessage, protocol.WriteString("naughty text"))
+	cli.Write(t, packetid.SbPlayChatMessage, protocol.WriteString("naughty text"))
 
-	id, payload := cli.read(t)
+	id, payload := cli.Read(t)
 	if id != packetid.CbPlaySystemChat {
 		t.Fatalf("expected SystemChat (0x%02X), got 0x%02X", packetid.CbPlaySystemChat, id)
 	}
@@ -860,10 +622,10 @@ func TestOnChatVeto(t *testing.T) {
 
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Silent")
-	ch := cli.startDrain()
+	ch := cli.StartDrain()
 	drainExpect(t, ch, "Silent solo", packetid.CbPlayPlayerInfoUpdate)
 
-	cli.write(t, packetid.SbPlayChatMessage, protocol.WriteString("anything"))
+	cli.Write(t, packetid.SbPlayChatMessage, protocol.WriteString("anything"))
 
 	select {
 	case id := <-ch:
@@ -884,7 +646,7 @@ func TestOnPlayerJoinHook(t *testing.T) {
 
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Newbie")
-	_ = cli.startDrain()
+	_ = cli.StartDrain()
 	waitFor(t, time.Second, func() bool { return joined.Load() == 1 },
 		"OnPlayerJoin to fire")
 
@@ -902,359 +664,23 @@ func TestOnPlayerLeaveHook(t *testing.T) {
 
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Quitter")
-	_ = cli.startDrain()
+	_ = cli.StartDrain()
 	waitFor(t, time.Second, func() bool { return s.PlayerCount() == 1 },
 		"player in list")
 
-	_ = cli.conn.Close()
+	_ = cli.Conn.Close()
 	waitFor(t, time.Second, func() bool { return left.Load() == 1 },
 		"OnPlayerLeave to fire")
-}
-
-func TestMovePlayerSwitchesInstances(t *testing.T) {
-	s := New()
-	arena := NewInstance("arena", s, world.NewMemoryWorld())
-	s.AddInstance(arena)
-	t.Cleanup(arena.Stop)
-
-	// Alice in arena is op so she can run /instance.
-	s.Ops.Add("Mover")
-
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Mover")
-	ch := cli.startDrain()
-	drainExpect(t, ch, "Mover solo in hub", packetid.CbPlayPlayerInfoUpdate)
-
-	// Trigger the move.
-	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("instance join arena"))
-
-	// Wire-level sequence for the move.
-	drainExpect(t, ch, "move pre-chunks",
-		append([]int{
-			packetid.CbPlayPlayerInfoRemove, // clear hub tab list
-			packetid.CbPlayRespawn,          // two-hop dimension change (the_end →
-			packetid.CbPlayRespawn,          // overworld) to fully wipe the client
-		}, joinPrelude()...)...,
-	)
-	drainExpect(t, ch, "move chunks", loginChunks()...)
-	drainExpect(t, ch, "move post-chunks",
-		packetid.CbPlaySyncPos,             // arena spawn point
-		packetid.CbPlayUpdateAttributes,    // cooldown-bar attribute for the arena
-		packetid.CbPlaySetContainerContent, // inventory model re-sent after the move
-		packetid.CbPlayPlayerInfoUpdate,    // arena tab list (just Mover)
-		packetid.CbPlaySystemChat,          // "Moved to arena"
-	)
-
-	// Server-side: player is now in arena.
-	conn, inst, ok := s.FindPlayer("Mover")
-	if !ok {
-		t.Fatal("Mover not found after move")
-	}
-	if inst != arena {
-		t.Errorf("expected Mover in arena, got %s", inst.ID)
-	}
-	if conn.instance != arena {
-		t.Errorf("conn.instance: got %s, want arena", conn.instance.ID)
-	}
-	if s.Hub.Players.Count() != 0 {
-		t.Errorf("hub should be empty: count = %d", s.Hub.Players.Count())
-	}
-	if arena.Players.Count() != 1 {
-		t.Errorf("arena should have 1 player: count = %d", arena.Players.Count())
-	}
-}
-
-func TestMovePlayerNotifiesStayers(t *testing.T) {
-	s := New()
-	arena := NewInstance("arena", s, world.NewMemoryWorld())
-	s.AddInstance(arena)
-	t.Cleanup(arena.Stop)
-	s.Ops.Add("Leaver")
-
-	// Stayer joins hub, gets a drainer set up before Leaver joins.
-	stayer := pipeClientOn(t, s)
-	completeOfflineLogin(t, stayer, "Stayer")
-	stayerCh := stayer.startDrain()
-	drainExpect(t, stayerCh, "Stayer solo bootstrap", packetid.CbPlayPlayerInfoUpdate)
-
-	// Leaver joins hub.
-	leaver := pipeClientOn(t, s)
-	completeOfflineLogin(t, leaver, "Leaver")
-	leaverCh := leaver.startDrain()
-
-	// Both clients see each other appear.
-	drainExpect(t, stayerCh, "Stayer sees Leaver join",
-		packetid.CbPlayPlayerInfoUpdate, packetid.CbPlaySpawnPlayer, packetid.CbPlaySetEquipment)
-	drainExpect(t, leaverCh, "Leaver bootstrap",
-		packetid.CbPlayPlayerInfoUpdate, packetid.CbPlaySpawnPlayer, packetid.CbPlaySetEquipment)
-
-	// Leaver moves out — Stayer should see despawn first.
-	leaver.write(t, packetid.SbPlayChatCommand, protocol.WriteString("instance join arena"))
-
-	// Stayer receives RemoveEntities + PI Remove for Leaver (in that order,
-	// per LeaveAndAnnounce).
-	drainExpect(t, stayerCh, "Stayer sees Leaver leave",
-		packetid.CbPlayRemoveEntities, packetid.CbPlayPlayerInfoRemove)
-
-	// Leaver sees the full move sequence.
-	drainExpect(t, leaverCh, "Leaver move pre-chunks",
-		append([]int{
-			packetid.CbPlayPlayerInfoRemove,
-			packetid.CbPlayRespawn,
-			packetid.CbPlayRespawn,
-		}, joinPrelude()...)...,
-	)
-	drainExpect(t, leaverCh, "Leaver move chunks", loginChunks()...)
-	drainExpect(t, leaverCh, "Leaver move post-chunks",
-		packetid.CbPlaySyncPos,
-		packetid.CbPlayUpdateAttributes,
-		packetid.CbPlaySetContainerContent,
-		packetid.CbPlayPlayerInfoUpdate,
-		packetid.CbPlaySystemChat,
-	)
-}
-
-func TestMoveToSameInstanceIsNoOp(t *testing.T) {
-	s := New()
-	s.Ops.Add("Player")
-
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Player")
-	ch := cli.startDrain()
-	drainExpect(t, ch, "solo bootstrap", packetid.CbPlayPlayerInfoUpdate)
-
-	// /instance hub while already in hub — should reply but not move.
-	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("instance join hub"))
-	drainExpect(t, ch, "already-there reply", packetid.CbPlaySystemChat)
-}
-
-func TestInstanceCreateAndJoin(t *testing.T) {
-	s := New()
-	s.Ops.Add("Builder")
-
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Builder")
-	ch := cli.startDrain()
-	drainExpect(t, ch, "Builder solo", packetid.CbPlayPlayerInfoUpdate)
-
-	// Create
-	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("instance create arena"))
-	drainExpect(t, ch, "create reply", packetid.CbPlaySystemChat)
-
-	if s.GetInstance("arena") == nil {
-		t.Fatal("arena not registered after /instance create")
-	}
-	t.Cleanup(func() { _ = s.RemoveInstance("arena") })
-
-	// Now join it.
-	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("instance join arena"))
-	drainExpect(t, ch, "join pre-chunks",
-		append([]int{
-			packetid.CbPlayPlayerInfoRemove,
-			packetid.CbPlayRespawn,
-			packetid.CbPlayRespawn,
-		}, joinPrelude()...)...,
-	)
-	drainExpect(t, ch, "join chunks", loginChunks()...)
-	drainExpect(t, ch, "join post-chunks",
-		packetid.CbPlaySyncPos,
-		packetid.CbPlayUpdateAttributes,
-		packetid.CbPlaySetContainerContent,
-		packetid.CbPlayPlayerInfoUpdate,
-		packetid.CbPlaySystemChat,
-	)
-
-	conn, inst, ok := s.FindPlayer("Builder")
-	if !ok || inst.ID != "arena" {
-		t.Fatalf("Builder should be in arena, got ok=%v inst=%v", ok, inst)
-	}
-	_ = conn
-}
-
-func TestInstanceCreateDuplicateRejected(t *testing.T) {
-	s := New()
-	s.Ops.Add("Op")
-	NewInstance("existing", s, world.NewMemoryWorld())
-	s.AddInstance(s.GetInstance("hub")) // no-op, just sanity
-	arena := NewInstance("arena", s, world.NewMemoryWorld())
-	s.AddInstance(arena)
-	t.Cleanup(arena.Stop)
-
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Op")
-	ch := cli.startDrain()
-	drainExpect(t, ch, "Op solo", packetid.CbPlayPlayerInfoUpdate)
-
-	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("instance create arena"))
-	drainExpect(t, ch, "duplicate reply", packetid.CbPlaySystemChat)
-
-	// Still exactly one arena (hub + arena = 2 total).
-	if got := len(s.InstanceIDs()); got != 2 {
-		t.Errorf("instance count: got %d, want 2", got)
-	}
-}
-
-func TestInstanceDeleteEmpty(t *testing.T) {
-	s := New()
-	s.Ops.Add("Deleter")
-	arena := NewInstance("arena", s, world.NewMemoryWorld())
-	s.AddInstance(arena)
-
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Deleter")
-	ch := cli.startDrain()
-	drainExpect(t, ch, "Deleter solo", packetid.CbPlayPlayerInfoUpdate)
-
-	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("instance delete arena"))
-	drainExpect(t, ch, "delete reply", packetid.CbPlaySystemChat)
-
-	if s.GetInstance("arena") != nil {
-		t.Error("arena should be gone after /instance delete")
-	}
-}
-
-func TestInstanceDeleteHubRejected(t *testing.T) {
-	s := New()
-	s.Ops.Add("BadActor")
-
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "BadActor")
-	ch := cli.startDrain()
-	drainExpect(t, ch, "BadActor solo", packetid.CbPlayPlayerInfoUpdate)
-
-	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("instance delete hub"))
-	drainExpect(t, ch, "reject reply", packetid.CbPlaySystemChat)
-
-	if s.GetInstance("hub") == nil {
-		t.Error("hub should still exist")
-	}
-}
-
-func TestInstanceDeleteSelfMovesToHub(t *testing.T) {
-	s := New()
-	s.Ops.Add("Solo")
-	arena := NewInstance("arena", s, world.NewMemoryWorld())
-	s.AddInstance(arena)
-
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Solo")
-	ch := cli.startDrain()
-	drainExpect(t, ch, "Solo bootstrap", packetid.CbPlayPlayerInfoUpdate)
-
-	// Move to arena.
-	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("instance join arena"))
-	drainExpect(t, ch, "join arena pre-chunks",
-		append([]int{packetid.CbPlayPlayerInfoRemove, packetid.CbPlayRespawn, packetid.CbPlayRespawn}, joinPrelude()...)...)
-	drainExpect(t, ch, "join arena chunks", loginChunks()...)
-	drainExpect(t, ch, "join arena post-chunks",
-		packetid.CbPlaySyncPos, packetid.CbPlayUpdateAttributes, packetid.CbPlaySetContainerContent, packetid.CbPlayPlayerInfoUpdate, packetid.CbPlaySystemChat)
-
-	// Delete arena while inside it: server should evac caller to hub, then delete.
-	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("instance delete arena"))
-	drainExpect(t, ch, "evac + delete pre-chunks",
-		append([]int{packetid.CbPlayPlayerInfoRemove, packetid.CbPlayRespawn, packetid.CbPlayRespawn}, joinPrelude()...)...)
-	drainExpect(t, ch, "evac + delete chunks", loginChunks()...)
-	drainExpect(t, ch, "evac + delete post-chunks",
-		packetid.CbPlaySyncPos,
-		packetid.CbPlayUpdateAttributes,    // cooldown-bar attribute for the hub
-		packetid.CbPlaySetHealth,           // hub entry resets the player (resetForHub)
-		packetid.CbPlaySetContainerContent, // inventory model re-sent after the move
-		packetid.CbPlayPlayerInfoUpdate,    // hub tab list bootstrap
-		packetid.CbPlaySystemChat,          // "Deleted instance arena"
-	)
-
-	if s.GetInstance("arena") != nil {
-		t.Error("arena should be gone")
-	}
-	_, inst, ok := s.FindPlayer("Solo")
-	if !ok || inst.ID != "hub" {
-		t.Errorf("Solo should be in hub, got ok=%v inst=%v", ok, inst)
-	}
-}
-
-func TestInstanceCreateFromTemplate(t *testing.T) {
-	s := New()
-	s.Ops.Add("Builder")
-
-	tmpl := world.NewTemplate()
-	tmpl.SetBlock(world.Position{X: 0, Y: 64, Z: 0}, world.Stone)
-	tmpl.SetBlock(world.Position{X: 1, Y: 64, Z: 0}, world.Stone)
-	tmpl.AddSpawnPoint(world.SpawnPoint{Position: world.Position{X: 0, Y: 65, Z: 0}})
-	s.RegisterTemplate("platform", tmpl)
-
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Builder")
-	ch := cli.startDrain()
-	drainExpect(t, ch, "Builder solo", packetid.CbPlayPlayerInfoUpdate)
-
-	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("instance create lab platform"))
-	drainExpect(t, ch, "create reply", packetid.CbPlaySystemChat)
-
-	inst := s.GetInstance("lab")
-	if inst == nil {
-		t.Fatal("lab not created")
-	}
-	t.Cleanup(func() { _ = s.RemoveInstance("lab") })
-
-	// Template blocks should now be in the new instance's world.
-	if got := inst.World.GetBlock(world.Position{X: 0, Y: 64, Z: 0}); got != world.Stone {
-		t.Errorf("template block (0,64,0): got %+v, want Stone", got)
-	}
-	if got := inst.World.GetBlock(world.Position{X: 1, Y: 64, Z: 0}); got != world.Stone {
-		t.Errorf("template block (1,64,0): got %+v, want Stone", got)
-	}
-	// Mutating the instance must not affect the template (independence
-	// already covered by world tests, but verifying through the create
-	// pipeline catches integration regressions).
-	inst.World.SetBlock(world.Position{X: 0, Y: 64, Z: 0}, world.Air)
-	if got := tmpl.Instantiate().GetBlock(world.Position{X: 0, Y: 64, Z: 0}); got != world.Stone {
-		t.Errorf("template leaked: got %+v, want Stone", got)
-	}
-}
-
-func TestInstanceCreateUnknownTemplateRejected(t *testing.T) {
-	s := New()
-	s.Ops.Add("Op")
-
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Op")
-	ch := cli.startDrain()
-	drainExpect(t, ch, "Op solo", packetid.CbPlayPlayerInfoUpdate)
-
-	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("instance create lab nonexistent"))
-	drainExpect(t, ch, "rejected reply", packetid.CbPlaySystemChat)
-
-	if s.GetInstance("lab") != nil {
-		t.Error("lab should not exist when template is unknown")
-	}
-}
-
-func TestInstanceList(t *testing.T) {
-	s := New()
-	s.Ops.Add("Lister")
-	a := NewInstance("arena", s, world.NewMemoryWorld())
-	s.AddInstance(a)
-	t.Cleanup(a.Stop)
-
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Lister")
-	ch := cli.startDrain()
-	drainExpect(t, ch, "Lister solo", packetid.CbPlayPlayerInfoUpdate)
-
-	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("instance list"))
-	// Header + 2 entries (hub, arena) = 3 system chat messages.
-	drainExpect(t, ch, "list output",
-		packetid.CbPlaySystemChat, packetid.CbPlaySystemChat, packetid.CbPlaySystemChat)
 }
 
 func TestHandshakeInvalidNextState(t *testing.T) {
 	cli := pipeServer(t)
 
 	// nextState = 99 is invalid; server should refuse and close.
-	cli.write(t, packetid.SbHandshake, buildHandshake(763, "localhost", 25565, 99))
+	cli.Write(t, packetid.SbHandshake, buildHandshake(763, "localhost", 25565, 99))
 
-	_ = cli.conn.SetReadDeadline(time.Now().Add(time.Second))
-	if _, err := protocol.ReadPacket(cli.conn, protocol.CompressionDisabled); err == nil {
+	_ = cli.Conn.SetReadDeadline(time.Now().Add(time.Second))
+	if _, err := protocol.ReadPacket(cli.Conn, protocol.CompressionDisabled); err == nil {
 		t.Fatal("expected read error after server rejected handshake")
 	}
 }

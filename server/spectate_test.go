@@ -68,7 +68,9 @@ func TestBotMatchWatcher(t *testing.T) {
 		t.Fatal("duel teams")
 	}
 
-	cmdLeave(op, nil)
+	if _, err := s.LeaveGame(op); err != nil {
+		t.Fatal(err)
+	}
 	if op.instance == inst || op.watching(inst) || op.gamemode() == player.Spectator {
 		t.Fatalf("after /leave: in %s, mode %v", op.instance.ID, op.gamemode())
 	}

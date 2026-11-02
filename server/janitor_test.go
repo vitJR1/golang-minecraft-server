@@ -42,7 +42,7 @@ func TestJanitorSparesFreshAndOccupied(t *testing.T) {
 	s.AddInstance(occ)
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Player")
-	cli.startDiscardDrain()
+	cli.StartDiscardDrain()
 	conn := findConn(t, s, "Player")
 	occ.Players.Add(conn)
 

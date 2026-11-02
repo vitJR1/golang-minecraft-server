@@ -30,6 +30,10 @@ import (
 
 	"github.com/joho/godotenv"
 
+	// Server features built over its exported API (server/api.go): each
+	// registers itself in init(). The built-in slash commands live here.
+	_ "minecraft-server/server/commands"
+
 	// Each blank import registers a mini-game with game.Register during
 	// its init(). Drop a game by deleting the line.
 	_ "minecraft-server/games/bedwars"

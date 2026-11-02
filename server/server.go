@@ -457,11 +457,6 @@ func (c *ClientConnection) resetForHub() {
 	c.cursor = inventory.Stack{}
 }
 
-// Name returns the player's chosen username (immutable for the session).
-// Exposed so plugins / bots can read the name without reaching into
-// unexported fields.
-func (c *ClientConnection) Name() string { return c.playerName }
-
 // connectionsFromIP returns every currently-connected ClientConnection
 // whose remote address matches ip. Used by /banip to evict matching
 // sessions on the spot. IP is matched via clientIP() so net.Pipe
@@ -483,11 +478,6 @@ func (s *Server) connectionsFromIP(ip string) []*ClientConnection {
 	}
 	return out
 }
-
-// Instance returns the instance the player is currently in (hub, an
-// arena, a lobby). Nil before login completes. Exposed for bots that
-// need to broadcast into the same chat scope the player is talking in.
-func (c *ClientConnection) Instance() *Instance { return c.instance }
 
 // sendSystemMessage delivers a SystemChat line to a single player. Used by
 // command responses and other server → one-player notifications.

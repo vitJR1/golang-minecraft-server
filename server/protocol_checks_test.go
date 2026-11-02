@@ -44,11 +44,11 @@ func TestChatWithFormattingCodesDropped(t *testing.T) {
 func TestCommandWithControlCharactersNotRun(t *testing.T) {
 	s := New()
 	c := offlineConn(s.Hub, "Injector", player.Survival, 0, 64, 0)
-	s.Ops.Add("Injector") // /tp would work if run
-	c.player.MoveTo(0, 64, 0, true)
-	play(t, c, packetid.SbPlayChatCommand, protocol.WriteString("tp 100 64 100\x00"))
-	if x := c.player.Snapshot().X; x != 0 {
-		t.Fatalf("command with a NUL ran: x=%v", x)
+	ran := false
+	registerCommand(&Command{Name: "nultest", Run: func(*ClientConnection, []string) { ran = true }})
+	play(t, c, packetid.SbPlayChatCommand, protocol.WriteString("nultest\x00"))
+	if ran {
+		t.Fatal("command with a NUL ran")
 	}
 	if !flaggedNow(c, "badpackets.chat") {
 		t.Fatal("not flagged")
@@ -58,7 +58,7 @@ func TestCommandWithControlCharactersNotRun(t *testing.T) {
 func TestChatSpamKicked(t *testing.T) {
 	_, cli, conn := loginOne(t, "Spammer")
 	for i := 0; i < int(anticheat.ChatBurst)+5 && !conn.isClosed(); i++ {
-		cli.tryWrite(packetid.SbPlayChatMessage, chatPacket("buy gold"))
+		cli.TryWrite(packetid.SbPlayChatMessage, chatPacket("buy gold"))
 	}
 	waitFor(t, 2*time.Second, conn.isClosed, "spammer to be kicked")
 }
@@ -66,7 +66,7 @@ func TestChatSpamKicked(t *testing.T) {
 func TestChatBurstWithinBudgetAllowed(t *testing.T) {
 	_, cli, conn := loginOne(t, "Talker")
 	for i := 0; i < int(anticheat.ChatBurst)-1; i++ {
-		cli.write(t, packetid.SbPlayChatMessage, chatPacket("gg"))
+		cli.Write(t, packetid.SbPlayChatMessage, chatPacket("gg"))
 	}
 	barrier(t, cli, conn)
 	if conn.isClosed() {
@@ -79,10 +79,10 @@ func TestOpsExemptFromChatSpam(t *testing.T) {
 	s.Ops.Add("Admin")
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Admin")
-	cli.startDiscardDrain()
+	cli.StartDiscardDrain()
 	conn := findConn(t, s, "Admin")
 	for i := 0; i < 3*int(anticheat.ChatBurst); i++ {
-		cli.write(t, packetid.SbPlayChatMessage, chatPacket("announcement"))
+		cli.Write(t, packetid.SbPlayChatMessage, chatPacket("announcement"))
 	}
 	barrier(t, cli, conn)
 	if conn.isClosed() {

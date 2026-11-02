@@ -18,7 +18,7 @@ func writeSetPos(t *testing.T, cli *testClient, x, y, z float64) {
 	p.Write(protocol.WriteDouble(y))
 	p.Write(protocol.WriteDouble(z))
 	p.WriteByte(1) // onGround
-	cli.write(t, packetid.SbPlaySetPos, p.Bytes())
+	cli.Write(t, packetid.SbPlaySetPos, p.Bytes())
 }
 
 // awaitSetback waits for the server's rubber-band Synchronize Player
@@ -45,7 +45,7 @@ func TestMoveValidAccepted(t *testing.T) {
 	s := New()
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Walker")
-	cli.startDiscardDrain()
+	cli.StartDiscardDrain()
 	conn := findConn(t, s, "Walker")
 	// Creative: these tests are about the sanity limits, not walking speed
 	// (movement.go skips creative's speed/flight checks).
@@ -63,7 +63,7 @@ func TestMoveTooFastRejected(t *testing.T) {
 	s := New()
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Teleporter")
-	ids := cli.startDrain()
+	ids := cli.StartDrain()
 	conn := findConn(t, s, "Teleporter")
 	conn.player.SetGamemode(player.Creative) // sanity limits, not speed
 
@@ -83,7 +83,7 @@ func TestMoveOutOfBoundsRejected(t *testing.T) {
 	s := New()
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Voider")
-	ids := cli.startDrain()
+	ids := cli.StartDrain()
 	conn := findConn(t, s, "Voider")
 	conn.player.SetGamemode(player.Creative) // sanity limits, not speed
 
@@ -102,7 +102,7 @@ func TestMoveNaNKicks(t *testing.T) {
 	s := New()
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Fuzzer")
-	cli.startDiscardDrain()
+	cli.StartDiscardDrain()
 	conn := findConn(t, s, "Fuzzer")
 
 	writeSetPos(t, cli, math.NaN(), 67, 0.5)

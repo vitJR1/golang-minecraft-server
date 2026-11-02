@@ -1,9 +1,11 @@
-package server
+package commands
 
 import (
 	"context"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
+	"minecraft-server/server"
+	"minecraft-server/server/servertest"
 	"testing"
 	"time"
 )
@@ -11,21 +13,21 @@ import (
 // TestCmdKickDisconnectsTarget: op runs /kick on a victim → victim's
 // connection is closed and the wire shows a Play Disconnect.
 func TestCmdKickDisconnectsTarget(t *testing.T) {
-	s := New()
+	s := server.New()
 	s.Ops.Add("Moderator")
 
-	mod := pipeClientOn(t, s)
-	completeOfflineLogin(t, mod, "Moderator")
-	mod.startDiscardDrain()
+	mod := servertest.Dial(t, s)
+	mod.Login(t, "Moderator")
+	mod.StartDiscardDrain()
 
-	victim := pipeClientOn(t, s)
-	completeOfflineLogin(t, victim, "Victim")
+	victim := servertest.Dial(t, s)
+	victim.Login(t, "Victim")
 
 	// Victim drainer that also signals when it sees a disconnect.
 	gotDisconnect := make(chan struct{}, 1)
 	go func() {
 		for {
-			buf, err := protocol.ReadPacket(victim.conn, victim.threshold)
+			buf, err := protocol.ReadPacket(victim.Conn, victim.Threshold)
 			if err != nil {
 				return
 			}
@@ -42,14 +44,14 @@ func TestCmdKickDisconnectsTarget(t *testing.T) {
 		}
 	}()
 
-	mod.write(t, packetid.SbPlayChatCommand, protocol.WriteString("kick Victim spam"))
+	mod.Write(t, packetid.SbPlayChatCommand, protocol.WriteString("kick Victim spam"))
 
 	select {
 	case <-gotDisconnect:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Victim never saw Play Disconnect")
 	}
-	waitFor(t, 2*time.Second, func() bool {
+	servertest.WaitFor(t, 2*time.Second, func() bool {
 		_, _, ok := s.FindPlayer("Victim")
 		return !ok
 	}, "Victim to be removed from PlayerList")
@@ -58,19 +60,19 @@ func TestCmdKickDisconnectsTarget(t *testing.T) {
 // TestCmdBanAddsEntryAndKicks: /ban inserts a ban that s.Bans can see
 // (with the issuer recorded), and the target is dropped from the server.
 func TestCmdBanAddsEntryAndKicks(t *testing.T) {
-	s := New()
+	s := server.New()
 	s.Ops.Add("Mod")
-	mod := pipeClientOn(t, s)
-	completeOfflineLogin(t, mod, "Mod")
-	mod.startDiscardDrain()
+	mod := servertest.Dial(t, s)
+	mod.Login(t, "Mod")
+	mod.StartDiscardDrain()
 
-	spammer := pipeClientOn(t, s)
-	completeOfflineLogin(t, spammer, "Spammer")
-	spammer.startDiscardDrain()
+	spammer := servertest.Dial(t, s)
+	spammer.Login(t, "Spammer")
+	spammer.StartDiscardDrain()
 
-	mod.write(t, packetid.SbPlayChatCommand, protocol.WriteString("ban Spammer 1h flooding"))
+	mod.Write(t, packetid.SbPlayChatCommand, protocol.WriteString("ban Spammer 1h flooding"))
 
-	waitFor(t, 2*time.Second, func() bool {
+	servertest.WaitFor(t, 2*time.Second, func() bool {
 		info, _ := s.Bans.IsBanned(context.Background(), "Spammer")
 		return info != nil
 	}, "ban entry to land")
@@ -78,7 +80,7 @@ func TestCmdBanAddsEntryAndKicks(t *testing.T) {
 	if info == nil || info.Reason != "flooding" || info.IssuedBy != "Mod" {
 		t.Errorf("ban info: %+v", info)
 	}
-	waitFor(t, 2*time.Second, func() bool {
+	servertest.WaitFor(t, 2*time.Second, func() bool {
 		_, _, ok := s.FindPlayer("Spammer")
 		return !ok
 	}, "Spammer to be dropped")
@@ -87,26 +89,26 @@ func TestCmdBanAddsEntryAndKicks(t *testing.T) {
 // TestCmdMuteSuppressesChat: muted player's chat message never
 // broadcasts to others; chat command still works.
 func TestCmdMuteSuppressesChat(t *testing.T) {
-	s := New()
+	s := server.New()
 	s.Ops.Add("Mod")
-	mod := pipeClientOn(t, s)
-	completeOfflineLogin(t, mod, "Mod")
-	modCh := mod.startDrain()
+	mod := servertest.Dial(t, s)
+	mod.Login(t, "Mod")
+	modCh := mod.StartDrain()
 
-	loud := pipeClientOn(t, s)
-	completeOfflineLogin(t, loud, "Loud")
-	loud.startDiscardDrain()
+	loud := servertest.Dial(t, s)
+	loud.Login(t, "Loud")
+	loud.StartDiscardDrain()
 
 	// Drain the mutual join announces so we know what's pre-mute baseline.
-	drainExpect(t, modCh, "Mod sees Loud join",
+	servertest.DrainExpect(t, modCh, "Mod sees Loud join",
 		packetid.CbPlayPlayerInfoUpdate, packetid.CbPlayPlayerInfoUpdate, packetid.CbPlaySpawnPlayer, packetid.CbPlaySetEquipment)
 
-	mod.write(t, packetid.SbPlayChatCommand, protocol.WriteString("mute Loud 1m"))
+	mod.Write(t, packetid.SbPlayChatCommand, protocol.WriteString("mute Loud 1m"))
 	// "Muted Loud until …" reply.
-	drainExpect(t, modCh, "mute reply", packetid.CbPlaySystemChat)
+	servertest.DrainExpect(t, modCh, "mute reply", packetid.CbPlaySystemChat)
 
 	// Loud tries to chat. Mod should NOT see SystemChat from it.
-	loud.write(t, packetid.SbPlayChatMessage, protocol.WriteString("hello?"))
+	loud.Write(t, packetid.SbPlayChatMessage, protocol.WriteString("hello?"))
 
 	select {
 	case id, ok := <-modCh:
@@ -125,16 +127,16 @@ func TestCmdMuteSuppressesChat(t *testing.T) {
 
 // TestCmdUnmuteRestoresChat verifies the round-trip.
 func TestCmdUnmuteRestoresChat(t *testing.T) {
-	s := New()
+	s := server.New()
 	s.Ops.Add("Mod")
-	mod := pipeClientOn(t, s)
-	completeOfflineLogin(t, mod, "Mod")
-	mod.startDiscardDrain()
+	mod := servertest.Dial(t, s)
+	mod.Login(t, "Mod")
+	mod.StartDiscardDrain()
 
 	s.Mutes.Mute("Quiet", time.Now().Add(time.Hour))
-	mod.write(t, packetid.SbPlayChatCommand, protocol.WriteString("unmute Quiet"))
+	mod.Write(t, packetid.SbPlayChatCommand, protocol.WriteString("unmute Quiet"))
 
-	waitFor(t, time.Second, func() bool {
+	servertest.WaitFor(t, time.Second, func() bool {
 		_, muted := s.Mutes.MutedUntil("Quiet")
 		return !muted
 	}, "Quiet to be unmuted")
@@ -142,15 +144,15 @@ func TestCmdUnmuteRestoresChat(t *testing.T) {
 
 // TestCmdBanRejectsBadDuration: malformed duration string surfaces to op.
 func TestCmdBanRejectsBadDuration(t *testing.T) {
-	s := New()
+	s := server.New()
 	s.Ops.Add("Mod")
-	mod := pipeClientOn(t, s)
-	completeOfflineLogin(t, mod, "Mod")
-	ch := mod.startDrain()
-	drainExpect(t, ch, "Mod solo bootstrap", packetid.CbPlayPlayerInfoUpdate)
+	mod := servertest.Dial(t, s)
+	mod.Login(t, "Mod")
+	ch := mod.StartDrain()
+	servertest.DrainExpect(t, ch, "Mod solo bootstrap", packetid.CbPlayPlayerInfoUpdate)
 
-	mod.write(t, packetid.SbPlayChatCommand, protocol.WriteString("ban Nobody 5x bogus"))
-	drainExpect(t, ch, "bad duration reply", packetid.CbPlaySystemChat)
+	mod.Write(t, packetid.SbPlayChatCommand, protocol.WriteString("ban Nobody 5x bogus"))
+	servertest.DrainExpect(t, ch, "bad duration reply", packetid.CbPlaySystemChat)
 
 	if info, _ := s.Bans.IsBanned(context.Background(), "Nobody"); info != nil {
 		t.Error("malformed /ban should not have created an entry")

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -92,7 +93,7 @@ func TestUnauthedLandsInAuthInstance(t *testing.T) {
 	withAuth(t, s)
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "newcomer")
-	cli.startDiscardDrain()
+	cli.StartDiscardDrain()
 
 	conn := findConn(t, s, "newcomer")
 	if conn.instance != s.Auth {
@@ -110,10 +111,10 @@ func TestRegisterMovesPlayerToHub(t *testing.T) {
 	withAuth(t, s)
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "alice")
-	cli.startDiscardDrain()
+	cli.StartDiscardDrain()
 
 	conn := findConn(t, s, "alice")
-	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("register hunter2 hunter2"))
+	cli.Write(t, packetid.SbPlayChatCommand, protocol.WriteString("register hunter2 hunter2"))
 
 	waitFor(t, 2*time.Second, func() bool { return conn.authed.Load() },
 		"alice to be authed")
@@ -133,10 +134,10 @@ func TestRegisterMismatchedPasswordsRejected(t *testing.T) {
 	withAuth(t, s)
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "bob")
-	cli.startDiscardDrain()
+	cli.StartDiscardDrain()
 	conn := findConn(t, s, "bob")
 
-	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("register foo bar"))
+	cli.Write(t, packetid.SbPlayChatCommand, protocol.WriteString("register foo bar"))
 	time.Sleep(100 * time.Millisecond)
 	if conn.authed.Load() {
 		t.Error("mismatched passwords must not authenticate")
@@ -154,12 +155,12 @@ func TestLoginAfterPriorRegister(t *testing.T) {
 
 	c1 := pipeClientOn(t, s)
 	completeOfflineLogin(t, c1, "carol")
-	c1.startDiscardDrain()
-	c1.write(t, packetid.SbPlayChatCommand, protocol.WriteString("register mypass mypass"))
+	c1.StartDiscardDrain()
+	c1.Write(t, packetid.SbPlayChatCommand, protocol.WriteString("register mypass mypass"))
 	waitFor(t, 2*time.Second, func() bool { return authStore.svc.Registered("carol") },
 		"carol registered")
 
-	_ = c1.conn.Close()
+	_ = c1.Conn.Close()
 	waitFor(t, 2*time.Second, func() bool {
 		_, _, ok := s.FindPlayer("carol")
 		return !ok
@@ -167,10 +168,10 @@ func TestLoginAfterPriorRegister(t *testing.T) {
 
 	c2 := pipeClientOn(t, s)
 	completeOfflineLogin(t, c2, "carol")
-	c2.startDiscardDrain()
+	c2.StartDiscardDrain()
 	conn2 := findConn(t, s, "carol")
 
-	c2.write(t, packetid.SbPlayChatCommand, protocol.WriteString("login mypass"))
+	c2.Write(t, packetid.SbPlayChatCommand, protocol.WriteString("login mypass"))
 	waitFor(t, 2*time.Second, func() bool { return conn2.authed.Load() },
 		"carol re-login")
 	waitFor(t, 2*time.Second, func() bool {
@@ -179,22 +180,24 @@ func TestLoginAfterPriorRegister(t *testing.T) {
 	}, "carol in hub")
 }
 
-// TestGatedCommandRejected: /play before auth is blocked.
+// TestGatedCommandRejected: a command before auth is blocked.
 func TestGatedCommandRejected(t *testing.T) {
 	s := New()
 	withAuth(t, s)
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "wally")
-	cli.startDiscardDrain()
+	cli.StartDiscardDrain()
 	conn := findConn(t, s, "wally")
 
-	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("play ffa"))
+	var ran atomic.Bool
+	registerCommand(&Command{Name: "gatetest", Run: func(*ClientConnection, []string) { ran.Store(true) }})
+	cli.Write(t, packetid.SbPlayChatCommand, protocol.WriteString("gatetest"))
 	time.Sleep(100 * time.Millisecond)
 	if conn.authed.Load() {
 		t.Error("wally should still be unauthed")
 	}
-	if _, ok := s.Matchmaker.PlayerQueue(conn); ok {
-		t.Error("/play should NOT have queued wally — gate must block")
+	if ran.Load() {
+		t.Error("the command ran — the gate must block it")
 	}
 }
 
@@ -208,7 +211,7 @@ func TestAuthTimeoutKicks(t *testing.T) {
 	withAuth(t, s)
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "slow")
-	cli.startDiscardDrain()
+	cli.StartDiscardDrain()
 
 	waitFor(t, 2*time.Second, func() bool {
 		_, _, ok := s.FindPlayer("slow")
@@ -226,10 +229,10 @@ func TestAuthTimeoutCancelledOnSuccess(t *testing.T) {
 	withAuth(t, s)
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "fast")
-	cli.startDiscardDrain()
+	cli.StartDiscardDrain()
 	conn := findConn(t, s, "fast")
 
-	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("register racepass racepass"))
+	cli.Write(t, packetid.SbPlayChatCommand, protocol.WriteString("register racepass racepass"))
 	waitFor(t, 2*time.Second, func() bool { return conn.authed.Load() },
 		"fast to register before timeout")
 
@@ -260,20 +263,20 @@ func TestIPBannedAfterMaxAttempts(t *testing.T) {
 
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "target")
-	cli.startDiscardDrain()
+	cli.StartDiscardDrain()
 
 	// 1st wrong password.
-	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("login wrong1"))
+	cli.Write(t, packetid.SbPlayChatCommand, protocol.WriteString("login wrong1"))
 	time.Sleep(100 * time.Millisecond)
 	// 2nd wrong password → trips the ban.
-	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("login wrong2"))
+	cli.Write(t, packetid.SbPlayChatCommand, protocol.WriteString("login wrong2"))
 	waitFor(t, 2*time.Second, func() bool {
 		_, _, ok := s.FindPlayer("target")
 		return !ok
 	}, "target kicked after 2 fails")
 
 	// IP should now be in ipBans.
-	if _, allowed := authStore.CheckIPAllowed(cli.conn.RemoteAddr()); allowed {
+	if _, allowed := authStore.CheckIPAllowed(cli.Conn.RemoteAddr()); allowed {
 		t.Error("IP should be banned after max attempts")
 	}
 }
@@ -296,17 +299,17 @@ func TestSuccessfulLoginClearsFailCounter(t *testing.T) {
 
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "jane")
-	cli.startDiscardDrain()
+	cli.StartDiscardDrain()
 	conn := findConn(t, s, "jane")
 
-	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("login wrong"))
+	cli.Write(t, packetid.SbPlayChatCommand, protocol.WriteString("login wrong"))
 	time.Sleep(100 * time.Millisecond)
-	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("login correct"))
+	cli.Write(t, packetid.SbPlayChatCommand, protocol.WriteString("login correct"))
 	waitFor(t, 2*time.Second, func() bool { return conn.authed.Load() },
 		"jane to log in")
 
 	// Fail counter should be cleared.
-	count := authStore.svc.IPs.Fails(clientIP(cli.conn.RemoteAddr()))
+	count := authStore.svc.IPs.Fails(clientIP(cli.Conn.RemoteAddr()))
 	if count != 0 {
 		t.Errorf("fail counter not cleared after success: got %d", count)
 	}

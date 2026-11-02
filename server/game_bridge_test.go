@@ -3,8 +3,6 @@ package server
 import (
 	"minecraft-server/game"
 	"minecraft-server/player"
-	"minecraft-server/protocol"
-	"minecraft-server/protocol/packetid"
 	"minecraft-server/world"
 	"sync/atomic"
 	"testing"
@@ -51,31 +49,6 @@ func TestAttachLogicWiresOnTick(t *testing.T) {
 	time.Sleep(150 * time.Millisecond) // ~3 ticks
 	if logic.tickCalls.Load() < 2 {
 		t.Errorf("OnTick: got %d, want >= 2", logic.tickCalls.Load())
-	}
-}
-
-func TestAttachLogicWiresOnPlayerJoin(t *testing.T) {
-	s := New()
-	s.Ops.Add("Joiner")
-
-	inst := NewInstance("arena", s, world.NewMemoryWorld())
-	s.AddInstance(inst)
-	t.Cleanup(func() { _ = s.RemoveInstance("arena") })
-
-	logic := &recordingLogic{}
-	s.AttachLogic(inst, logic)
-
-	cli := pipeClientOn(t, s)
-	completeOfflineLogin(t, cli, "Joiner")
-	_ = cli.startDrain()
-
-	// Move into the wired instance — that fires OnPlayerJoin on its logic.
-	cli.write(t, packetid.SbPlayChatCommand, protocol.WriteString("instance join arena"))
-
-	waitFor(t, time.Second, func() bool { return logic.joinCalls.Load() == 1 },
-		"OnPlayerJoin to fire")
-	if name, _ := logic.lastJoinName.Load().(string); name != "Joiner" {
-		t.Errorf("OnPlayerJoin saw name %q, want Joiner", name)
 	}
 }
 

@@ -42,7 +42,7 @@ func TestKeepAliveKicksUnresponsiveClient(t *testing.T) {
 	// echo any Keep Alive responses.
 	go func() {
 		for {
-			if _, err := protocol.ReadPacket(cli.conn, cli.threshold); err != nil {
+			if _, err := protocol.ReadPacket(cli.Conn, cli.Threshold); err != nil {
 				return
 			}
 		}
@@ -79,7 +79,7 @@ func TestKeepAliveAckKeepsClientAlive(t *testing.T) {
 	go func() {
 		defer close(done)
 		for {
-			buf, err := protocol.ReadPacket(cli.conn, cli.threshold)
+			buf, err := protocol.ReadPacket(cli.Conn, cli.Threshold)
 			if err != nil {
 				return
 			}
@@ -96,8 +96,8 @@ func TestKeepAliveAckKeepsClientAlive(t *testing.T) {
 			}
 			keepID := int64(binary.BigEndian.Uint64(payload))
 			// Echo it back.
-			if err := protocol.WritePacket(cli.conn, int32(packetid.SbPlayKeepAlive),
-				protocol.WriteLong(keepID), cli.threshold); err != nil {
+			if err := protocol.WritePacket(cli.Conn, int32(packetid.SbPlayKeepAlive),
+				protocol.WriteLong(keepID), cli.Threshold); err != nil {
 				return
 			}
 		}
@@ -117,6 +117,6 @@ func TestKeepAliveAckKeepsClientAlive(t *testing.T) {
 		t.Fatalf("healthy client got kicked: count=%d", s.Hub.Players.Count())
 	}
 
-	_ = cli.conn.Close()
+	_ = cli.Conn.Close()
 	<-done
 }

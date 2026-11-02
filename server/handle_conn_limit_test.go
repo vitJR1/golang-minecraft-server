@@ -27,9 +27,9 @@ func TestHandleConnRejectsOverLimit(t *testing.T) {
 
 	second := pipeClientOn(t, s)
 	// The rejected side is closed without any response; a read must fail.
-	second.conn.SetReadDeadline(time.Now().Add(time.Second))
+	second.Conn.SetReadDeadline(time.Now().Add(time.Second))
 	buf := make([]byte, 1)
-	if _, err := second.conn.Read(buf); err == nil {
+	if _, err := second.Conn.Read(buf); err == nil {
 		t.Fatal("expected the second connection to be closed by the limiter")
 	}
 }

@@ -91,13 +91,13 @@ func TestListenerSeesEveryInstance(t *testing.T) {
 
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Alice")
-	cli.startDiscardDrain()
+	cli.StartDiscardDrain()
 	waitFor(t, time.Second, func() bool { return l.joins.Load() == 1 }, "listener OnPlayerJoin")
 
 	// The instance's own hook still runs, after the listener.
 	var hubHook atomic.Int32
 	s.Hub.OnPlayerLeave = func(*ClientConnection) { hubHook.Add(1) }
-	_ = cli.conn.Close()
+	_ = cli.Conn.Close()
 	waitFor(t, time.Second, func() bool { return l.leaves.Load() == 1 && hubHook.Load() == 1 },
 		"listener + instance OnPlayerLeave")
 }
@@ -110,7 +110,7 @@ func TestListenerConsumesBlockInteract(t *testing.T) {
 
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Digger")
-	cli.startDiscardDrain()
+	cli.StartDiscardDrain()
 	findConn(t, s, "Digger").player.SetGamemode(player.Creative) // instant breaks
 	findConn(t, s, "Digger").player.MoveTo(7.5, 69, 5.5, true)   // within dig reach of both blocks
 
@@ -120,7 +120,7 @@ func TestListenerConsumesBlockInteract(t *testing.T) {
 		p.Write(protocol.WritePosition(x, y, z))
 		p.WriteByte(1)
 		protocol.WriteVarInt32ToBuffer(&p, 1)
-		cli.write(t, packetid.SbPlayPlayerAction, p.Bytes())
+		cli.Write(t, packetid.SbPlayPlayerAction, p.Bytes())
 	}
 
 	// Consumed click: block stays, even after the survival "finished
@@ -194,14 +194,14 @@ func TestPluginCommandDispatch(t *testing.T) {
 		},
 	})
 	game.RegisterCommand(&game.Command{
-		Name: "op", Help: "shadowed by the built-in /op",
+		Name: "help", Help: "shadowed by the built-in /help",
 		Run: func(*game.Ctx, game.PlayerHandle, []string) { t.Error("shadowed plugin command must not run") },
 	})
 
 	s := New()
 	cli := pipeClientOn(t, s)
 	completeOfflineLogin(t, cli, "Cmd")
-	cli.startDiscardDrain()
+	cli.StartDiscardDrain()
 	c := findConn(t, s, "Cmd")
 
 	// As the vanilla client sends "//ptest a b": "/ptest a b".
@@ -218,8 +218,7 @@ func TestPluginCommandDispatch(t *testing.T) {
 	s.RunCommand(c, "/help")
 
 	// Built-in wins over the shadowing plugin command (its Run would t.Error).
-	s.Ops.Add("Cmd")
-	s.RunCommand(c, "op Someone")
+	s.RunCommand(c, "help")
 
 	// Visible in the command tree / help and tab-completes via Complete.
 	var seen bool

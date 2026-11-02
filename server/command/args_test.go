@@ -72,3 +72,17 @@ func TestSuggestionsPayload(t *testing.T) {
 		t.Errorf("payload %v %q %q", got, m1, m2)
 	}
 }
+
+func TestArgCompleters(t *testing.T) {
+	names := ArgFrom(2, func(s string) []string { return []string{s} })
+	if got := names("me", []string{"a", "b"}); len(got) != 1 || got[0] != "me" {
+		t.Errorf("ArgFrom at its position = %v", got)
+	}
+	if names("me", []string{"a"}) != nil {
+		t.Error("ArgFrom elsewhere should give nothing")
+	}
+	fixed := FixedArg[string](1, "x", "y")
+	if got := fixed("", []string{"p"}); len(got) != 2 {
+		t.Errorf("FixedArg = %v", got)
+	}
+}
