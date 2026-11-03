@@ -212,88 +212,13 @@ func (c *ClientConnection) sendPlayDisconnect(reason string) error {
 //
 // This replaces the old "empty chunks + a Block Update per block" path, which
 // couldn't render large maps (millions of packets, and only a tiny ring of
-// chunks was ever loaded).
+// chunks was ever loaded). The baked, framed columns are cached per instance
+// (chunk_cache.go): a join re-bakes only the columns changed since the last
+// one.
 func (c *ClientConnection) sendWorldChunks() error {
-	type colKey struct{ cx, cz int32 }
-	cols := make(map[colKey][][]int32)
-
-	haveBounds := false
-	var minCx, maxCx, minCz, maxCz int32
-
-	c.instance.World.Range(func(p world.Position, b world.Block) {
-		if b.StateID == 0 { // air — sections default to air
-			return
-		}
-		sec := floorDiv(p.Y-chunk.MinY, 16)
-		if sec < 0 || sec >= chunk.SectionCount {
-			return // outside the dimension's vertical range
-		}
-		cx := int32(floorDiv(p.X, 16))
-		cz := int32(floorDiv(p.Z, 16))
-		k := colKey{cx, cz}
-		col, ok := cols[k]
-		if !ok {
-			col = make([][]int32, chunk.SectionCount)
-			cols[k] = col
-			if !haveBounds {
-				minCx, maxCx, minCz, maxCz, haveBounds = cx, cx, cz, cz, true
-			}
-			minCx, maxCx = minI32(minCx, cx), maxI32(maxCx, cx)
-			minCz, maxCz = minI32(minCz, cz), maxI32(maxCz, cz)
-		}
-		if col[sec] == nil {
-			col[sec] = make([]int32, 4096)
-		}
-		lx := p.X - int(cx)*16
-		lz := p.Z - int(cz)*16
-		ly := (p.Y - chunk.MinY) - sec*16
-		col[sec][ly*256+lz*16+lx] = b.StateID
-	})
-
-	// Union the build's bounding box (padded) with the spawn ring.
-	if !haveBounds {
-		minCx, maxCx, minCz, maxCz = -HubChunkRadius, HubChunkRadius-1, -HubChunkRadius, HubChunkRadius-1
-	} else {
-		minCx, maxCx = minI32(minCx-1, -HubChunkRadius), maxI32(maxCx+1, HubChunkRadius-1)
-		minCz, maxCz = minI32(minCz-1, -HubChunkRadius), maxI32(maxCz+1, HubChunkRadius-1)
-	}
-
-	// Group block entities (beds, chests, banners, …) by column so each
-	// chunk packet can list the ones it contains — without them the client's
-	// BlockEntityRenderer draws nothing and those blocks look missing.
-	beByCol := map[colKey][]blockEntityWire{}
-	if bep, ok := c.instance.World.(world.BlockEntityProvider); ok {
-		for pos, typeName := range bep.BlockEntities() {
-			id, ok := world.BlockEntityTypeID(typeName)
-			if !ok {
-				continue
-			}
-			k := colKey{int32(floorDiv(pos.X, 16)), int32(floorDiv(pos.Z, 16))}
-			beByCol[k] = append(beByCol[k], blockEntityWire{
-				packedXZ: byte((pos.X&15)<<4 | (pos.Z & 15)),
-				y:        int16(pos.Y),
-				typeID:   id,
-			})
-		}
-	}
-
-	// Biome painted across the whole column, taken from the instance world
-	// (set from the schematic), falling back to plains.
-	biomeID := registry.BiomeIDOrDefault("")
-	if bp, ok := c.instance.World.(world.BiomeProvider); ok {
-		biomeID = registry.BiomeIDOrDefault(bp.Biome())
-	}
-
-	empty := chunk.BuildEmptyChunkData(biomeID)
-	for cx := minCx; cx <= maxCx; cx++ {
-		for cz := minCz; cz <= maxCz; cz++ {
-			data := empty
-			if col := cols[colKey{cx, cz}]; col != nil {
-				data = chunk.BuildChunkData(col, biomeID)
-			}
-			if err := c.sendChunkColumn(cx, cz, data, beByCol[colKey{cx, cz}]); err != nil {
-				return err
-			}
+	for _, f := range c.instance.chunks.frames(c.instance.World) {
+		if err := c.safeWriteShared(f); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -314,20 +239,6 @@ func floorDiv(a, b int) int {
 		q--
 	}
 	return q
-}
-
-func minI32(a, b int32) int32 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func maxI32(a, b int32) int32 {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 // HubChunkRadius controls how many empty chunks are streamed around the
@@ -351,12 +262,12 @@ const skyLightMaskLong int64 = (1 << lightSections) - 1
 // bytes, every nibble 0xF (level 15). Shared read-only across all columns.
 var fullSkyLight = bytes.Repeat([]byte{0xFF}, 2048)
 
-// sendChunkColumn writes the Chunk Data and Update Light packet (0x24) for
+// chunkColumnPayload builds the Chunk Data and Update Light packet (0x24) for
 // one column, using the caller-supplied paletted-section blob (see
-// chunk.BuildChunkData / BuildEmptyChunkData). It sends a full sky-light array
+// chunk.BuildChunkData / BuildEmptyChunkData). It carries a full sky-light array
 // (level 15) for every section so the world renders in permanent daylight —
 // no dark chunks regardless of which blocks occlude.
-func (c *ClientConnection) sendChunkColumn(chunkX, chunkZ int32, data []byte, bes []blockEntityWire) error {
+func chunkColumnPayload(chunkX, chunkZ int32, data []byte, bes []blockEntityWire) []byte {
 	var buf bytes.Buffer
 
 	buf.Write(protocol.WriteInt(chunkX))
@@ -381,8 +292,7 @@ func (c *ClientConnection) sendChunkColumn(chunkX, chunkZ int32, data []byte, be
 	}
 
 	writeFullDaylight(&buf)
-
-	return c.safeWrite(packetid.CbPlayChunkData, buf.Bytes())
+	return buf.Bytes()
 }
 
 // writeFullDaylight appends the light section of the Chunk Data packet: a full

@@ -112,6 +112,9 @@ type Instance struct {
 	// removed is set by RemoveInstance (under joinMu): no join after it.
 	removed bool
 
+	// chunks is the baked world streamed to joiners (chunk_cache.go).
+	chunks chunkCache
+
 	// streams buffers block updates for players MovePlayer is streaming
 	// the world to (join_stream.go).
 	streams blockStreams

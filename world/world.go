@@ -44,6 +44,81 @@ type MemoryWorld struct {
 	entities      []Entity
 	blockEntities map[Position]string // pos → block-entity type name
 	biome         string              // namespaced biome for the whole world
+
+	// Change tracking for caches of the world's chunk data (ColumnTracker):
+	// version counts every change; colVersion is the version of each chunk
+	// column's last change, biomeVersion that of the last SetBiome (the
+	// biome covers every column).
+	version      uint64
+	colVersion   map[Column]uint64
+	biomeVersion uint64
+}
+
+// Column is a chunk column's coordinates: block X and Z divided by 16,
+// rounding down.
+type Column struct{ X, Z int32 }
+
+// ColumnOf is the chunk column holding p.
+func ColumnOf(p Position) Column {
+	return Column{int32(p.X >> 4), int32(p.Z >> 4)}
+}
+
+// ColumnTracker is a World that reports which chunk columns changed, so a
+// cache of their chunk data can rebuild only those. MemoryWorld implements
+// it.
+type ColumnTracker interface {
+	World
+	// Version is the world's change counter; it only grows.
+	Version() uint64
+	// ChangedSince lists the columns changed after version v; all is true
+	// when every column changed (the biome).
+	ChangedSince(v uint64) (cols []Column, all bool)
+	// RangeColumns visits every non-Air block in the given columns (every
+	// column when cols is nil) under the world's read lock: fn must not
+	// call back into the world.
+	RangeColumns(cols map[Column]bool, fn func(p Position, b Block))
+}
+
+// touch records a change to column c; w.mu held for writing.
+func (w *MemoryWorld) touch(c Column) {
+	w.version++
+	if w.colVersion == nil {
+		w.colVersion = make(map[Column]uint64)
+	}
+	w.colVersion[c] = w.version
+}
+
+// Version implements ColumnTracker.
+func (w *MemoryWorld) Version() uint64 {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.version
+}
+
+// ChangedSince implements ColumnTracker.
+func (w *MemoryWorld) ChangedSince(v uint64) (cols []Column, all bool) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	if w.biomeVersion > v {
+		return nil, true
+	}
+	for c, cv := range w.colVersion {
+		if cv > v {
+			cols = append(cols, c)
+		}
+	}
+	return cols, false
+}
+
+// RangeColumns implements ColumnTracker.
+func (w *MemoryWorld) RangeColumns(cols map[Column]bool, fn func(p Position, b Block)) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	for p, b := range w.blocks {
+		if cols == nil || cols[ColumnOf(p)] {
+			fn(p, b)
+		}
+	}
 }
 
 func NewMemoryWorld() *MemoryWorld {
@@ -75,6 +150,7 @@ func (w *MemoryWorld) AddBlockEntity(p Position, typeName string) {
 		w.blockEntities = make(map[Position]string)
 	}
 	w.blockEntities[p] = typeName
+	w.touch(ColumnOf(p)) // the column's chunk data lists its block entities
 	w.mu.Unlock()
 }
 
@@ -94,6 +170,8 @@ func (w *MemoryWorld) BlockEntities() map[Position]string {
 func (w *MemoryWorld) SetBiome(name string) {
 	w.mu.Lock()
 	w.biome = name
+	w.version++
+	w.biomeVersion = w.version
 	w.mu.Unlock()
 }
 
@@ -120,11 +198,19 @@ func (w *MemoryWorld) GetBlock(p Position) Block {
 func (w *MemoryWorld) SetBlock(p Position, b Block) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	old, had := w.blocks[p]
 	if b == Air {
+		if !had {
+			return
+		}
 		delete(w.blocks, p)
-		return
+	} else {
+		if had && old == b {
+			return
+		}
+		w.blocks[p] = b
 	}
-	w.blocks[p] = b
+	w.touch(ColumnOf(p))
 }
 
 // Range visits every non-Air block. Snapshots the map under the read lock,

@@ -124,6 +124,53 @@ func (c *Conn) Write(packetID int32, payload []byte) error {
 	return c.queue(msg{frame: frame})
 }
 
+// SharedFrame is one packet whose frame is built once and queued to many
+// connections (an instance's cached chunk data): framing and compression
+// cost once per compression threshold, not once per recipient. Frames are
+// plaintext in the queue (the socket encrypts), so the bytes are shared
+// read-only. Only the frame for the last threshold is kept — the payload
+// is rebuilt by Build for another one: an uncompressed payload can be much
+// bigger (a chunk column's light arrays: ~55 KB, framed ~0.4 KB). Safe for
+// concurrent use.
+type SharedFrame struct {
+	ID    int32
+	Build func() []byte // the packet payload
+
+	mu        sync.Mutex
+	threshold int
+	frame     []byte
+}
+
+// frameFor returns the frame for threshold, building it on first use (or
+// when a connection with another threshold asks).
+func (f *SharedFrame) frameFor(threshold int) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.frame != nil && f.threshold == threshold {
+		return f.frame, nil
+	}
+	frame, err := protocol.BuildFrame(f.ID, f.Build(), threshold)
+	if err != nil {
+		return nil, err
+	}
+	f.frame, f.threshold = frame, threshold
+	return frame, nil
+}
+
+// WriteShared queues a shared packet, like Write.
+func (c *Conn) WriteShared(f *SharedFrame) error {
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	if c.closed.Load() {
+		return ErrClosed
+	}
+	frame, err := f.frameFor(c.threshold)
+	if err != nil {
+		return fmt.Errorf("build frame: %w", err)
+	}
+	return c.queue(msg{frame: frame})
+}
+
 // queue pushes m without blocking; sendMu held.
 func (c *Conn) queue(m msg) error {
 	select {

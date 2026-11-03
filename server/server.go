@@ -851,7 +851,17 @@ func (c *ClientConnection) sendPlayPackets() error {
 // immediately; transport errors surface on the next call. If the queue is
 // full, kicks the client — slow consumers must not block the broadcaster.
 func (c *ClientConnection) safeWrite(packetID int32, payload []byte) error {
-	err := c.link.Write(packetID, payload)
+	return c.queued(c.link.Write(packetID, payload))
+}
+
+// safeWriteShared is safeWrite for a frame shared between connections
+// (conn.SharedFrame: the cached chunk data).
+func (c *ClientConnection) safeWriteShared(f *conn.SharedFrame) error {
+	return c.queued(c.link.WriteShared(f))
+}
+
+// queued handles a queueing error: a full queue kicks.
+func (c *ClientConnection) queued(err error) error {
 	if errors.Is(err, conn.ErrQueueFull) {
 		if c.server != nil {
 			c.server.queueFullKicks.Add(1)
