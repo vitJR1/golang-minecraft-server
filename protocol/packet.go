@@ -71,24 +71,42 @@ func ReadPacketSplit(conn net.Conn, compressionThreshold int) (packetID int, pay
 // returns bytes instead of touching a conn — useful when a single payload
 // is broadcast to many connections (compress once, write many).
 func BuildFrame(packetID int32, payload []byte, compressionThreshold int) ([]byte, error) {
-	uncompressed := append(WriteVarInt32(packetID), payload...)
+	id := WriteVarInt32(packetID)
+	size := len(id) + len(payload) // uncompressed body: VarInt(id) + payload
 
-	var body []byte
-	if compressionThreshold < 0 {
-		body = uncompressed
-	} else if len(uncompressed) < compressionThreshold {
-		body = append(WriteVarInt32(0), uncompressed...)
-	} else {
-		compressed, err := CompressPayload(uncompressed)
-		if err != nil {
+	if compressionThreshold >= 0 && size >= compressionThreshold {
+		// The body (data length + zlib stream) is built after a reserved
+		// 5-byte gap — room for the longest VarInt length prefix — so the
+		// frame needs one buffer and no copy of the compressed bytes.
+		var buf bytes.Buffer
+		buf.Grow(maxVarIntLen + maxVarIntLen + size/2 + 64)
+		buf.Write(make([]byte, maxVarIntLen))
+		buf.Write(WriteVarInt32(int32(size)))
+		if err := compressTo(&buf, id, payload); err != nil {
 			return nil, fmt.Errorf("compress: %w", err)
 		}
-		body = append(WriteVarInt32(int32(len(uncompressed))), compressed...)
+		frame := buf.Bytes()
+		length := WriteVarInt32(int32(len(frame) - maxVarIntLen))
+		start := maxVarIntLen - len(length)
+		copy(frame[start:], length)
+		return frame[start:], nil
 	}
 
-	length := WriteVarInt32(int32(len(body)))
-	return append(length, body...), nil
+	var dataLen []byte
+	if compressionThreshold >= 0 {
+		dataLen = WriteVarInt32(0) // below the threshold: sent as is
+	}
+	bodyLen := len(dataLen) + size
+	length := WriteVarInt32(int32(bodyLen))
+	frame := make([]byte, 0, len(length)+bodyLen)
+	frame = append(frame, length...)
+	frame = append(frame, dataLen...)
+	frame = append(frame, id...)
+	return append(frame, payload...), nil
 }
+
+// maxVarIntLen is the longest encoding of a 32-bit VarInt.
+const maxVarIntLen = 5
 
 // WritePacket frames and writes a single packet. Equivalent to BuildFrame +
 // conn.Write with partial-write handling.

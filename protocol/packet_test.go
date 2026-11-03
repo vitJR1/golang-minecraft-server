@@ -211,3 +211,36 @@ func TestCompressedFramingByteLayoutBelowThreshold(t *testing.T) {
 		t.Errorf("packet ID byte: got 0x%02x, want 0x03", body[1])
 	}
 }
+
+// TestBuildFrameRoundTripSizes: frames of every length-prefix width (1..3
+// VarInt bytes), compressed or not, decode back to the id and payload, and
+// the length prefix covers exactly the rest of the frame. BuildFrame writes
+// the compressed body after a reserved gap and slides the prefix in, so the
+// prefix width is what this pins down.
+func TestBuildFrameRoundTripSizes(t *testing.T) {
+	for _, threshold := range []int{CompressionDisabled, 0, 256} {
+		for _, n := range []int{0, 1, 100, 300, 5000, 70000, 300000} {
+			payload := make([]byte, n)
+			for i := range payload {
+				payload[i] = byte(i*7 + i/300) // compresses, but not to nothing
+			}
+			frame, err := BuildFrame(0x24, payload, threshold)
+			if err != nil {
+				t.Fatal(err)
+			}
+			length, k, err := ReadVarIntFromBytes(frame)
+			if err != nil || int(length) != len(frame)-k {
+				t.Fatalf("threshold %d, n %d: length prefix %d, rest %d (%v)", threshold, n, length, len(frame)-k, err)
+			}
+			cli, srv := pipePair(t)
+			go func() { _, _ = srv.Write(frame) }()
+			buf, err := ReadPacket(cli, threshold)
+			if err != nil {
+				t.Fatalf("threshold %d, n %d: %v", threshold, n, err)
+			}
+			if id, _ := ReadVarInt(buf); id != 0x24 || !bytes.Equal(buf.Bytes(), payload) {
+				t.Fatalf("threshold %d, n %d: id 0x%02X, payload equal %v", threshold, n, id, bytes.Equal(buf.Bytes(), payload))
+			}
+		}
+	}
+}

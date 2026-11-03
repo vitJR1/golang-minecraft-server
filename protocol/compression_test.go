@@ -61,3 +61,33 @@ func TestDecompressGarbage(t *testing.T) {
 		t.Error("expected error for non-zlib bytes")
 	}
 }
+
+// benchPayload is a typical compressible play packet body (Set Equipment
+// with NBT, a chunk section's palette): repetitive, a few hundred bytes.
+func benchPayload(n int) []byte {
+	p := make([]byte, n)
+	for i := range p {
+		p[i] = byte(i % 23)
+	}
+	return p
+}
+
+func BenchmarkBuildFrameCompressed300(b *testing.B) {
+	p := benchPayload(300)
+	b.ReportAllocs()
+	for range b.N {
+		if _, err := BuildFrame(0x55, p, 256); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkBuildFrameCompressed16K(b *testing.B) {
+	p := benchPayload(16 << 10)
+	b.ReportAllocs()
+	for range b.N {
+		if _, err := BuildFrame(0x24, p, 256); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
