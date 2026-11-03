@@ -328,8 +328,14 @@ func FindRoute(at BlockAt, start, aim world.Position, goal func(world.Position) 
 // ResumeAt finds where a route can be picked up again from cell here: the
 // index of the step after the one the bot stands on (or next to, at the same
 // level), or -1. A bot knocked off its bridge mid-way continues that bridge
-// instead of starting a new one from wherever it landed.
-func ResumeAt(route []Step, here world.Position) int {
+// instead of starting a new one from wherever it landed. Not from a cell
+// with nothing under it — the bot stands on the edge of the block next to
+// it (a bridge step whose block isn't down yet), and the first move, from
+// that cell's centre, would go into the void.
+func ResumeAt(at BlockAt, route []Step, here world.Position) int {
+	if !groundUnder(at, here) {
+		return -1
+	}
 	best, bestD := -1, 2
 	for i, s := range route {
 		dx, dz := s.Cell.X-here.X, s.Cell.Z-here.Z
@@ -347,6 +353,20 @@ func ResumeAt(route []Step, here world.Position) int {
 		return best + 1 // standing on it: go on to the next
 	}
 	return best // next to it: walk onto it first
+}
+
+// ResumeFrom is the rest of route to follow from cell here, picked up at
+// step i (ResumeAt). It starts at step i — so here, not the step before i,
+// is where the first move goes from; next to that step, the move onto it is
+// a plain step across (a leap's run-up and line belong to the cell before
+// it). A follower that took the step before i as its previous cell found
+// the bot off the route and dropped it again at once.
+func ResumeFrom(route []Step, i int, here world.Position) []Step {
+	rest := append([]Step(nil), route[i:]...)
+	if i == 0 || route[i-1].Cell != here {
+		rest[0].Leap = false
+	}
+	return rest
 }
 
 // FeetCell is the cell a player's feet at y are in, nudged up so standing

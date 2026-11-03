@@ -1030,3 +1030,88 @@ func atStation(p world.Position) func(world.Position) bool {
 		return dx*dx+dz*dz <= 1 && c.Y == p.Y
 	}
 }
+
+// TestBotFightsBackWhenCornered: falling back on low health with the enemy
+// right next to it, the bot hits back — it used to drop the target, stand
+// still, pick the same enemy the next tick and stand still again.
+func TestBotFightsBackWhenCornered(t *testing.T) {
+	inst, _ := botWorld()
+	guide := &fakeGuide{plan: game.BotPlan{Home: world.Position{X: -2, Y: 64, Z: -2}}}
+	b := addTestBot(t, inst, guide, botai.DifficultyNormal, 0.5, 0.5)
+	b.player.SetHealth(4)
+	enemy := offlineConn(inst, "Enemy", player.Survival, 2.0, 64, 0.5)
+	runTicks(inst, 60, enemy)
+	if !b.bot.Retreated() {
+		t.Fatal("never fell back")
+	}
+	if enemy.player.Health() >= player.MaxHealth {
+		t.Fatal("cornered, the bot never hit back")
+	}
+}
+
+// TestBotFallsWithLastDY: a bot's moves reach the server's movement state —
+// falling, its last move goes down (what a critical hit needs).
+func TestBotFallsWithLastDY(t *testing.T) {
+	inst, _ := botWorld()
+	b := addTestBot(t, inst, &fakeGuide{plan: game.BotPlan{Idle: true}}, botai.DifficultyHard, 0.5, 0.5)
+	b.player.MoveTo(0.5, 67, 0.5, false)
+	runTicks(inst, 4)
+	if b.serverOnGround() {
+		t.Fatalf("landed already at %+v", b.player.Snapshot())
+	}
+	if dy := b.ac.Move.LastDY; dy >= 0 {
+		t.Fatalf("falling bot's LastDY = %v, want < 0", dy)
+	}
+}
+
+// TestDefenderLeavesAnUnreachableIntruder: an enemy near the bed it can't
+// get to doesn't freeze the defender — out of blocks, it goes to earn some
+// (it used to stand there, re-picking the intruder every tick).
+func TestDefenderLeavesAnUnreachableIntruder(t *testing.T) {
+	inst, _ := botWorld()
+	bed, _ := world.BlockByName("minecraft:red_bed")
+	own := []world.Position{{X: -2, Y: 64, Z: 0}, {X: -1, Y: 64, Z: 0}}
+	for _, p := range own {
+		inst.World.SetBlock(p, bed)
+	}
+	inst.World.SetBlock(world.Position{X: 0, Y: 63, Z: -9}, world.Stone) // the enemy's perch, over the void
+	station := world.Position{X: 2, Y: 64, Z: -2}
+	guide := &fakeGuide{plan: game.BotPlan{
+		Team: "red", Defend: own,
+		BlockItem: "minecraft:white_wool",
+		Station:   station, HasStation: true,
+	}}
+	var bots []*ClientConnection
+	for i := 0; i < 2; i++ {
+		bots = append(bots, addTestBot(t, inst, guide, botai.DifficultyHard, -2.5+float64(i), 2.5))
+	}
+	enemy := offlineConn(inst, "Enemy", player.Survival, 0.5, 64, -8.5)
+	runTicks(inst, 20, enemy)
+	def := bots[1]
+	if def.bot.Role() != botai.RoleDefender {
+		t.Fatalf("second bot is a %v", def.bot.Role())
+	}
+	runTicks(inst, 100, enemy)
+	if p := def.bot.Pos(); math.Hypot(p.X-2.5, p.Z+1.5) > 1.5 {
+		t.Fatalf("the defender stayed at %+v, not at the station", p)
+	}
+}
+
+// TestBotAtEnemyBaseShortOfBlocks: next to an enemy bed it can't bridge to
+// with what it carries, the bot leaves the bed for now and goes to earn
+// blocks — it used to search the route again every other tick, for ever.
+func TestBotAtEnemyBaseShortOfBlocks(t *testing.T) {
+	inst, target := botWorld()
+	station := world.Position{X: -2, Y: 64, Z: -2}
+	guide := &fakeGuide{plan: game.BotPlan{
+		BlockItem: "minecraft:white_wool",
+		Station:   station, HasStation: true,
+		Targets: []world.Position{target},
+	}}
+	b := addTestBot(t, inst, guide, botai.DifficultyHard, 1.5, 0.5) // 15 blocks from the bed: its base
+	b.inv.Set(inventory.HotbarStart+1, woolStack(t, 3))             // the gap takes 8
+	runTicks(inst, 100)
+	if p := b.bot.Pos(); math.Hypot(p.X+1.5, p.Z+1.5) > 1.5 {
+		t.Fatalf("the bot stayed at %+v, not at the station", p)
+	}
+}
