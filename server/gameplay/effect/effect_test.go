@@ -50,3 +50,47 @@ func TestRules(t *testing.T) {
 		t.Errorf("names %v", n)
 	}
 }
+
+// TestLevelDoesNotSwallowExpiry: reading an expired effect must leave it for
+// Sweep, otherwise the server never sends Remove Entity Effect and the
+// client keeps the effect (review #10).
+func TestLevelDoesNotSwallowExpiry(t *testing.T) {
+	var tb Table[string]
+	tb.Apply("a", JumpBoost, 5, -time.Millisecond)
+	if tb.Level("a", JumpBoost) != 0 {
+		t.Fatal("an expired effect reads as 0")
+	}
+	if exp := tb.Sweep(); len(exp["a"]) != 1 || exp["a"][0] != JumpBoost {
+		t.Fatalf("sweep after a read lost the expired effect: %v", exp)
+	}
+}
+
+// TestApplyNeverWeakens: vanilla MobEffectInstance.update — a higher level
+// replaces, the same level extends, a weaker one neither downgrades nor
+// shortens (review #22).
+func TestApplyNeverWeakens(t *testing.T) {
+	var tb Table[string]
+	tb.Apply("a", Regeneration, 2, 5*time.Second)
+	if lvl, rem := tb.Apply("a", Regeneration, 1, time.Minute); lvl != 2 || rem > 5*time.Second {
+		t.Fatalf("weaker effect changed the stronger one: level %d, %v", lvl, rem)
+	}
+	if tb.Level("a", Regeneration) != 2 {
+		t.Fatal("Regeneration II downgraded")
+	}
+
+	tb.Apply("a", Speed, 2, 45*time.Second)
+	if lvl, rem := tb.Apply("a", Speed, 2, 15*time.Second); lvl != 2 || rem < 40*time.Second {
+		t.Fatalf("same level shortened: level %d, %v", lvl, rem)
+	}
+	if lvl, rem := tb.Apply("a", Speed, 2, time.Minute); lvl != 2 || rem < 55*time.Second {
+		t.Fatalf("same level not extended: level %d, %v", lvl, rem)
+	}
+	if lvl, rem := tb.Apply("a", Speed, 3, time.Second); lvl != 3 || rem > time.Second {
+		t.Fatalf("higher level must replace: level %d, %v", lvl, rem)
+	}
+
+	tb.Apply("a", Haste, 3, -time.Millisecond) // expired, not yet swept
+	if lvl, _ := tb.Apply("a", Haste, 1, time.Minute); lvl != 1 {
+		t.Fatalf("an expired effect must not block a new one: level %d", lvl)
+	}
+}

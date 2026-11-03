@@ -57,15 +57,20 @@ type Entity struct {
 
 // Step advances the item one tick: airborne it falls until it lands on a
 // block; resting but still sliding (a throw that just landed) it keeps
-// moving with ground friction and falls again off an edge. moved reports
-// whether its position changed; out that it fell out of the world.
+// moving with ground friction and falls again off an edge. A resting item
+// re-checks its support every step, so it falls once the block under it is
+// broken. moved reports whether its position changed; out that it fell out
+// of the world.
 func (it *Entity) Step(solid SolidAt) (moved, out bool) {
 	it.Ticks++
+	if it.OnGround && !solid(it.X, it.Y-0.01, it.Z) {
+		it.OnGround = false // the block under it is gone
+	}
 	if !it.OnGround {
 		it.VY = it.VY*drag - gravity
 		ny := it.Y + it.VY
-		if it.VY < 0 && solid(it.X, ny, it.Z) {
-			it.Y = math.Floor(ny) + 1 // rest on top of the block it hit
+		if top, hit := it.landing(solid, ny); hit {
+			it.Y = top // rest on top of the block it hit
 			it.VY = 0
 			it.OnGround = true
 		} else {
@@ -82,6 +87,25 @@ func (it *Entity) Step(solid SolidAt) (moved, out bool) {
 		return true, false
 	}
 	return false, false
+}
+
+// landing sweeps a fall from it.Y to ny block by block: the top of the first
+// solid block in the way, so a fast fall (over a block per tick near
+// terminal speed) can't skip a one-block floor.
+func (it *Entity) landing(solid SolidAt, ny float64) (float64, bool) {
+	if it.VY >= 0 {
+		return 0, false
+	}
+	for by := math.Floor(it.Y); by >= math.Floor(ny); by-- {
+		y := math.Min(by+0.5, it.Y) // inside block by, not above the item
+		if by == math.Floor(ny) {
+			y = ny
+		}
+		if solid(it.X, y, it.Z) {
+			return by + 1, true
+		}
+	}
+	return 0, false
 }
 
 // slide advances the item horizontally by its velocity, stopping dead

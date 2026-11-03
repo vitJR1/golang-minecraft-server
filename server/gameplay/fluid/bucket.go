@@ -32,15 +32,23 @@ func BucketKind(item string) (*Kind, bool) {
 // RayToPlacement walks the ray from (ox,oy,oz) along (dx,dy,dz) through air
 // and fluids until it meets a solid block, returning the last block position
 // the ray occupied before the hit. false when nothing solid is within reach.
+// Only an air or fluid cell is ever returned: a block in the eye cell (a
+// ladder, torch or sign the player stands in) is passed through, never
+// filled — the fluid would overwrite it without a drop.
 func RayToPlacement(at func(world.Position) world.Block, ox, oy, oz, dx, dy, dz float64) (world.Position, bool) {
-	last := world.Position{X: floorF(ox), Y: floorF(oy), Z: floorF(oz)}
+	eye := world.Position{X: floorF(ox), Y: floorF(oy), Z: floorF(oz)}
+	var last world.Position
+	haveLast := false
 	for d := 0.0; d <= bucketReach; d += bucketStep {
 		pos := world.Position{X: floorF(ox + dx*d), Y: floorF(oy + dy*d), Z: floorF(oz + dz*d)}
 		b := at(pos)
 		if _, _, isFluid := Of(b); b != world.Air && !isFluid {
-			return last, true
+			if pos == eye {
+				continue // the block the eyes are in
+			}
+			return last, haveLast
 		}
-		last = pos
+		last, haveLast = pos, true
 	}
 	return world.Position{}, false
 }

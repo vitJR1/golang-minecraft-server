@@ -83,7 +83,9 @@ func (s *FileStore) SaveEnderChest(_ context.Context, uuid string, data []byte) 
 }
 
 // enderSlotJSON is one non-empty slot in the persisted form. Items go by
-// namespaced name so the file survives item-ID table changes.
+// namespaced name so the file survives item-ID table changes. Every field of
+// inventory.Stack that reaches the item's NBT is kept (NoDrop is server-only
+// and an undroppable stack never gets into a chest).
 type enderSlotJSON struct {
 	Slot         int            `json:"slot"`
 	Item         string         `json:"item"`
@@ -91,6 +93,10 @@ type enderSlotJSON struct {
 	Name         string         `json:"name,omitempty"`
 	Damage       int            `json:"damage,omitempty"`
 	Enchantments map[string]int `json:"enchantments,omitempty"`
+	Lore         []string       `json:"lore,omitempty"`
+	Color        int32          `json:"color,omitempty"`
+	Potion       string         `json:"potion,omitempty"`
+	Glint        bool           `json:"glint,omitempty"`
 }
 
 // Encode serialises the non-empty slots.
@@ -107,6 +113,7 @@ func Encode(slots [inventory.ChestSlots]inventory.Stack) ([]byte, error) {
 		out = append(out, enderSlotJSON{
 			Slot: i, Item: name, Count: int(st.Count),
 			Name: st.Name, Damage: st.Damage, Enchantments: st.Enchantments,
+			Lore: st.Lore, Color: st.Color, Potion: st.Potion, Glint: st.Glint,
 		})
 	}
 	return json.Marshal(out)
@@ -133,6 +140,7 @@ func Decode(data []byte) ([inventory.ChestSlots]inventory.Stack, error) {
 		slots[e.Slot] = inventory.Stack{
 			ID: id, Count: byte(min(e.Count, inventory.MaxStack)),
 			Name: e.Name, Damage: e.Damage, Enchantments: e.Enchantments,
+			Lore: e.Lore, Color: e.Color, Potion: e.Potion, Glint: e.Glint,
 		}
 	}
 	return slots, nil
