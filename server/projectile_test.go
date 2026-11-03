@@ -69,3 +69,23 @@ func TestEnderPearlTeleportsThrower(t *testing.T) {
 		t.Errorf("thrower not teleported to landing: got (%v,%v,%v)", got.X, got.Y, got.Z)
 	}
 }
+
+// TestExpiredPearlTeleportsNobody: a pearl that flew past the island and
+// timed out over the void doesn't drag its thrower to where it vanished.
+func TestExpiredPearlTeleportsNobody(t *testing.T) {
+	s := New()
+	inst := bareInstance(s, world.NewMemoryWorld())
+	thrower := offlineConn(inst, "Thrower", player.Survival, 0, 70, 0)
+	p := &projectileEntity{Flight: projectile.Flight{EID: 8, X: 1.5, Y: 70.5, Z: 0, VX: 1, MaxTicks: 1}, item: "minecraft:ender_pearl", thrower: thrower}
+	inst.projectiles = []*projectileEntity{p}
+
+	for tick := uint64(0); len(inst.projectiles) > 0 && tick < 10; tick++ {
+		inst.projectileTick(tick)
+	}
+	if len(inst.projectiles) != 0 {
+		t.Fatal("pearl never expired")
+	}
+	if got := thrower.player.Snapshot(); got.X != 0 || got.Y != 70 {
+		t.Errorf("thrower moved by an expired pearl to (%v,%v)", got.X, got.Y)
+	}
+}

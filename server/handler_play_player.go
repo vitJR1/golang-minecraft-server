@@ -134,6 +134,11 @@ func (c *ClientConnection) onClickContainer(k packets.Click, packet *bytes.Buffe
 	}
 	if m := c.menu.Load(); m != nil && k.Window == menuWindowID {
 		switch {
+		case m.kind == "chest" && !c.chestStillValid(m):
+			// Walked away from the chest (or out of its instance): close
+			// it, like vanilla's stillValid check.
+			c.closeWindows()
+			_ = c.sendInventoryContents()
 		case m.kind == "chest":
 			// Simulated against the chest + inventory (click.go).
 			claim, err := inventory.ReadClaim(packet)
@@ -155,7 +160,7 @@ func (c *ClientConnection) onClickContainer(k packets.Click, packet *bytes.Buffe
 			// so the client's ghost pickup / local inventory moves are
 			// undone and the menu stays open for the next click.
 			if entry, ok := m.entries[slot]; ok && m.onClick != nil {
-				m.onClick(c, entry, click)
+				c.menuCallback(func() { m.onClick(c, entry, click) })
 			}
 			if c.menu.Load() == m {
 				_ = c.sendChestContents(m.rows, m.entries)
@@ -181,4 +186,16 @@ func (c *ClientConnection) onCloseContainer(winID byte) {
 		c.menu.Store(nil)
 		_ = c.sendInventoryContents()
 	}
+}
+
+// menuCallback runs a menu's click callback (a plugin shop, the hub's
+// navigation) under panic recovery: a broken shop costs the click, not
+// the server.
+func (c *ClientConnection) menuCallback(fn func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("menu click panic", "player", c.playerName, "panic", fmt.Sprint(r))
+		}
+	}()
+	fn()
 }

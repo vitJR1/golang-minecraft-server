@@ -52,8 +52,10 @@ func (i *Instance) burnTick(tick uint64) {
 		feet := world.Position{X: floorF(s.X), Y: floorF(s.Y), Z: floorF(s.Z)}
 		head := world.Position{X: feet.X, Y: floorF(s.Y + eyeHeight), Z: feet.Z}
 		b := fluid.BurnStep(i.World.GetBlock(feet), i.World.GetBlock(head), c.fireTicks.Load(), tick)
-		if b.Damage > 0 {
-			c.hurtEnvironment(b.Damage, b.Invuln, tick)
+		// Death puts the fire out (die); an instant respawn must not have
+		// it relit from the spot the player burned on.
+		if b.Damage > 0 && c.hurtEnvironment(b.Damage, b.Invuln, tick) {
+			continue
 		}
 		switch {
 		case b.Ignite:
@@ -92,21 +94,25 @@ func (c *ClientConnection) broadcastOnFire(bool) { c.broadcastEntityFlags() }
 
 // hurtEnvironment applies non-player damage with its own invulnerability
 // window: red flash + hurt sound for everyone, then health sync or death.
-func (c *ClientConnection) hurtEnvironment(amount float32, invulnTicks, now uint64) {
+// Reports whether the damage killed the player.
+func (c *ClientConnection) hurtEnvironment(amount float32, invulnTicks, now uint64) (killed bool) {
 	p := c.player
 	if p == nil || c.instance == nil {
-		return
+		return false
 	}
-	applied, newHealth, killed := p.ApplyDamage(c.absorbDamage(amount), now, invulnTicks)
+	dmg, wear := c.absorbDamage(amount)
+	applied, newHealth, killed := p.ApplyDamage(dmg, now, invulnTicks)
 	if applied <= 0 {
-		return
+		return false
 	}
+	c.wearArmor(wear)
 	s := p.Snapshot()
 	c.instance.Players.Broadcast(packetid.CbPlayHurtAnimation, combat.HurtAnimationPayload(s.EntityID, 0), -1)
 	c.instance.playSound("minecraft:entity.player.hurt", sound.CategoryPlayer, s.X, s.Y, s.Z, 1, 1)
 	if killed {
 		c.die(nil)
-		return
+		return true
 	}
 	_ = c.sendSetHealth(newHealth)
+	return false
 }

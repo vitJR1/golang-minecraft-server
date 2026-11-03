@@ -260,3 +260,19 @@ func TestLavaSetsPlayerOnFireUntilWater(t *testing.T) {
 		t.Error("creative player set on fire")
 	}
 }
+
+// TestLavaDeathWithInstantRespawnLeavesNoFire: burning to death in an
+// instant-respawn arena puts the fire out for good — the burn step that
+// killed the player must not relight it at the spawn point.
+func TestLavaDeathWithInstantRespawnLeavesNoFire(t *testing.T) {
+	inst, c := lavaArena(t)
+	inst.SetInstantRespawn(true)
+	c.player.SetHealth(1)
+	inst.burnTick(10)
+	if c.player.Health() != player.MaxHealth {
+		t.Fatalf("not respawned: health %v", c.player.Health())
+	}
+	if f := c.fireTicks.Load(); f != 0 {
+		t.Errorf("respawned on fire: %d ticks", f)
+	}
+}

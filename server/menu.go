@@ -34,6 +34,10 @@ type openMenu struct {
 	// chest is the open chest's storage when kind == "chest" (a block chest
 	// or the player's ender chest), so Click Container changes persist there.
 	chest chest.Store
+	// inst / at are where the chest block stands, when the menu was opened
+	// on one (chestStillValid); at is nil for menus without a block.
+	inst *Instance
+	at   *world.Position
 
 	// rows is the window height, kept so a plugin menu can be re-sent
 	// after each click.

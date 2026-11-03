@@ -26,7 +26,7 @@ func (c *ClientConnection) keepAlive() {
 		case <-time.After(conn.KeepAliveInterval()):
 		}
 
-		if c.state != StatePlay || c.isClosed() {
+		if !c.inPlay.Load() || c.isClosed() {
 			continue
 		}
 

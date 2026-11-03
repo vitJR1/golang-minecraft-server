@@ -50,11 +50,23 @@ func (c *ClientConnection) startDig(pos world.Position) {
 		p := pos
 		c.digPos = &p
 		c.digStartTick = c.instance.Tick()
+		c.digInst = c.instance
 	}
 }
 
 // cancelDig forgets an in-progress dig.
 func (c *ClientConnection) cancelDig() { c.digPos = nil }
+
+// elapsedOn is how many ticks of inst's clock passed since start, which was
+// read from started's clock. Every instance counts its own ticks, so a dig or
+// a draw begun in another instance (or a clock that reads earlier than the
+// start) counts as no time at all — never an underflowed huge number.
+func elapsedOn(inst, started *Instance, start, now uint64) uint64 {
+	if inst != started || now < start {
+		return 0
+	}
+	return now - start
+}
 
 // finishDig handles "finished digging": break if the dig was long enough.
 func (c *ClientConnection) finishDig(pos world.Position) {
@@ -75,7 +87,7 @@ func (c *ClientConnection) finishDig(pos world.Position) {
 	}
 	c.digPos = nil
 	needed := world.BreakTicksWith(world.BreakInfoFor(blk.Name), c.heldItemName(), c.digContext())
-	if !dig.Accepted(needed, c.instance.Tick()-c.digStartTick) {
+	if !dig.Accepted(needed, elapsedOn(c.instance, c.digInst, c.digStartTick, c.instance.Tick())) {
 		_ = c.sendBlockUpdate(pos, blk) // too early (or unbreakable): put it back
 		return
 	}

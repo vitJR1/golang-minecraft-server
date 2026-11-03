@@ -7,6 +7,7 @@ import (
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/server/net/packets"
+	"strings"
 )
 
 func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error {
@@ -55,7 +56,7 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 		// WorldEdit-style "//set stone" arrives as "/set stone" — the leading
 		// slash is part of the command name there. RunCommand falls back to
 		// the slash-less name for clients that include the slash themselves.
-		slog.Info("command", "player", c.playerName, "cmd", raw)
+		slog.Info("command", "player", c.playerName, "cmd", loggedCommand(raw))
 		c.server.RunCommand(c, raw)
 
 	case packetid.SbPlaySetPos, packetid.SbPlaySetPosRot, packetid.SbPlaySetRot:
@@ -215,4 +216,17 @@ func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error 
 			"length", packet.Len())
 	}
 	return nil
+}
+
+// secretCommands carry a password in their arguments.
+var secretCommands = map[string]bool{"register": true, "login": true}
+
+// loggedCommand is raw as it may appear in the log: the arguments of
+// /register and /login (passwords) are replaced by "***".
+func loggedCommand(raw string) string {
+	name, args, _ := strings.Cut(raw, " ")
+	if args != "" && secretCommands[strings.ToLower(strings.TrimPrefix(name, "/"))] {
+		return name + " ***"
+	}
+	return raw
 }

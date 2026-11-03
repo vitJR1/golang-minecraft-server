@@ -188,7 +188,7 @@ func (s *Server) AttachLogic(inst *Instance, logic game.Logic) *game.Ctx {
 
 	// Fire OnInstanceStart synchronously — by the time AttachLogic
 	// returns, the Logic has seen its lifecycle begin.
-	logic.OnInstanceStart(ctx)
+	safeHook(inst, "OnInstanceStart", func() { logic.OnInstanceStart(ctx) })
 	return ctx
 }
 

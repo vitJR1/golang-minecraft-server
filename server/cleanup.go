@@ -22,9 +22,14 @@ func (c *ClientConnection) cleanup() {
 	// Announce departure + Remove under the same lock as join, but only if
 	// the player ever made it into an instance (early disconnects during
 	// handshake/login leave c.instance nil).
+	// moveMu waits out a MovePlayer in flight (the link is already shut,
+	// so no new one starts): the player leaves whichever instance it
+	// ended in instead of staying behind there as a ghost.
+	c.moveMu.Lock()
 	if c.instance != nil {
 		c.instance.LeaveAndAnnounce(c)
 	}
+	c.moveMu.Unlock()
 
 	addr := "bot"
 	if a := c.link.RemoteAddr(); a != nil { // bots have no socket

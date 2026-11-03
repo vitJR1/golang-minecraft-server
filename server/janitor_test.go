@@ -1,9 +1,13 @@
 package server
 
 import (
-	"minecraft-server/world"
+	"math/rand"
 	"testing"
 	"time"
+
+	"minecraft-server/player"
+	"minecraft-server/server/bots/botai"
+	"minecraft-server/world"
 )
 
 func TestJanitorRemovesExpiredEphemeral(t *testing.T) {
@@ -64,5 +68,25 @@ func TestJanitorSparesFreshAndOccupied(t *testing.T) {
 	s.janitorSweep(now.Add(emptyInstanceTTL + time.Second))
 	if s.GetInstance("occ") != nil {
 		t.Error("instance empty for a full TTL should be removed")
+	}
+}
+
+// TestJanitorRemovesArenaLeftToBots: bots alone don't keep an arena alive;
+// the sweep takes them out with it.
+func TestJanitorRemovesArenaLeftToBots(t *testing.T) {
+	s := New()
+	arena := NewInstance("bots-only", s, world.NewMemoryWorld())
+	markEphemeral(arena, time.Now().Add(-2*emptyInstanceTTL))
+	s.AddInstance(arena)
+	b := offlineConn(arena, "BOT_Max", player.Survival, 0, 64, 0)
+	b.bot = botai.New(botBody{b}, botai.DifficultyEasy, rand.New(rand.NewSource(1)))
+
+	s.janitorSweep(time.Now()) // stamps it empty (the stamp was refreshed by nobody)
+	s.janitorSweep(time.Now().Add(2 * emptyInstanceTTL))
+	if s.GetInstance("bots-only") != nil {
+		t.Error("an arena with only bots left should be collected")
+	}
+	if arena.Players.Count() != 0 {
+		t.Error("its bots should be gone too")
 	}
 }

@@ -11,13 +11,16 @@ import (
 )
 
 func TestCreateArena(t *testing.T) {
-	// A throwaway arena builder so this test doesn't depend on a game package.
-	game.RegisterArenaBuilder("arenatest", func(id, name string, tmpl *world.Template, config []byte) (*game.Definition, error) {
-		return &game.Definition{
-			ID: id, Name: name, MinPlayers: 1, MaxPlayers: 2, Template: tmpl,
-			New: func() game.Logic { return game.NoopLogic{} },
-		}, nil
-	})
+	// A throwaway arena builder so this test doesn't depend on a game
+	// package. The registry is global: register once (go test -count=2).
+	if _, ok := game.GetArenaBuilder("arenatest"); !ok {
+		game.RegisterArenaBuilder("arenatest", func(id, name string, tmpl *world.Template, config []byte) (*game.Definition, error) {
+			return &game.Definition{
+				ID: id, Name: name, MinPlayers: 1, MaxPlayers: 2, Template: tmpl,
+				New: func() game.Logic { return game.NoopLogic{} },
+			}, nil
+		})
+	}
 
 	s := New()
 	dir := t.TempDir()

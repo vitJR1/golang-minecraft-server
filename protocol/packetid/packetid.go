@@ -123,6 +123,7 @@ const (
 
 	// Inventory / container packets. IDs from minecraft-data 1.20
 	// protocol.json (window_items / set_slot / open_window).
+	CbPlayCloseContainer      = 0x11 // close_window: UByte window id
 	CbPlaySetContainerContent = 0x12 // window_items
 	CbPlaySetContainerSlot    = 0x14 // set_slot
 	CbPlayOpenScreen          = 0x30 // open_window

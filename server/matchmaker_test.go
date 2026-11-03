@@ -12,6 +12,9 @@ import (
 // (which has no public reset).
 func registerMMGame(t *testing.T, id string, min, max int) {
 	t.Helper()
+	if _, ok := game.GetDef(id); ok {
+		return // go test -count=2: the registry is global
+	}
 	game.Register(&game.Definition{
 		ID:         id,
 		Name:       "MM Test " + id,

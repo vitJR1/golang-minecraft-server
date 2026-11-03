@@ -41,6 +41,7 @@ type projectileEntity struct {
 	crit         bool
 	hitPlayer    *ClientConnection
 	stuck        bool
+	hitBlock     bool // the flight ended against a block (not expired / stopped)
 	stuckTicks   int
 	pickup       projectile.Pickup
 }
@@ -90,13 +91,32 @@ func (c *ClientConnection) launch(p *projectileEntity, speed float64) bool {
 // addProjectile registers p for tick simulation and spawns it for everyone,
 // with its initial velocity so the client animates it.
 func (i *Instance) addProjectile(p *projectileEntity) {
+	// Spawned under projMu, like primeTNT: the tick's Teleport / Remove for
+	// p can't reach a client before its Spawn.
 	i.projMu.Lock()
+	defer i.projMu.Unlock()
 	i.projectiles = append(i.projectiles, p)
-	i.projMu.Unlock()
-
 	i.Players.Broadcast(packetid.CbPlaySpawnEntity, p.SpawnPayload(), -1)
 	i.Players.Broadcast(packetid.CbPlayEntityVelocity,
 		combat.EntityVelocityPayload(p.EID, p.VX, p.VY, p.VZ), -1)
+}
+
+// sendProjectiles streams every projectile still in the world — flying, or
+// an arrow stuck in a block — to this client (join/respawn), where it is
+// now.
+func (c *ClientConnection) sendProjectiles() error {
+	c.instance.projMu.Lock()
+	pkts := make([][]byte, 0, len(c.instance.projectiles))
+	for _, p := range c.instance.projectiles {
+		pkts = append(pkts, p.SpawnPayload())
+	}
+	c.instance.projMu.Unlock()
+	for _, p := range pkts {
+		if err := c.safeWrite(packetid.CbPlaySpawnEntity, p); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // projectileTick advances every in-flight projectile one step: physics, then
@@ -186,6 +206,7 @@ func (i *Instance) stepProjectiles() []*projectileEntity {
 
 		// Impact (or expired, or stopped by the hook): despawn now, act
 		// after the lock is released.
+		p.hitBlock = hit
 		i.Players.Broadcast(packetid.CbPlayRemoveEntities, visibility.RemoveEntitiesPayload([]int32{p.EID}), -1)
 		landed = append(landed, p)
 	}
@@ -226,7 +247,9 @@ func (i *Instance) collectArrow(p *projectileEntity, c *ClientConnection) bool {
 func (p *projectileEntity) impact(i *Instance) {
 	switch p.item {
 	case "minecraft:ender_pearl":
-		p.teleportThrower()
+		if p.hitBlock { // a pearl lost in the void (expired) takes nobody along
+			p.teleportThrower(i)
+		}
 	case "minecraft:fire_charge":
 		i.explodeWith(p.X, p.Y, p.Z, projectile.FireballPower, projectile.FireballKnockback, p.thrower)
 	case "minecraft:arrow":
@@ -249,9 +272,12 @@ func (i *Instance) solidAt(x, y, z float64) bool {
 // teleportThrower moves the ender pearl's thrower to the projectile's landing
 // position (centre of the block column, on top), syncing the client and
 // updating the entity for everyone else. Runs on the tick goroutine.
-func (p *projectileEntity) teleportThrower() {
+// Nobody is moved who has meanwhile died, turned spectator or left the
+// instance the pearl flies in (its coordinates mean nothing elsewhere).
+func (p *projectileEntity) teleportThrower(i *Instance) {
 	c := p.thrower
-	if c == nil || c.player == nil || c.isClosed() || c.instance == nil {
+	if c == nil || c.player == nil || c.isClosed() || c.instance != i ||
+		c.player.IsDead() || c.gamemode() == player.Spectator {
 		return
 	}
 	c.player.MoveTo(p.X, p.Y, p.Z, false)

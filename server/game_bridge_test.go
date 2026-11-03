@@ -66,18 +66,20 @@ func TestStopFiresOnInstanceEnd(t *testing.T) {
 
 func TestStartGameUsesRegisteredDefinition(t *testing.T) {
 	// Register a tiny game definition for the duration of the test.
-	game.Register(&game.Definition{
-		ID:         "stub",
-		Name:       "Stub",
-		MinPlayers: 1,
-		MaxPlayers: 4,
-		Template: func() *world.Template {
-			t := world.NewTemplate()
-			t.SetBlock(world.Position{X: 0, Y: 60, Z: 0}, world.Stone)
-			return t
-		}(),
-		New: func() game.Logic { return &recordingLogic{} },
-	})
+	if _, ok := game.GetDef("stub"); !ok { // go test -count=2: the registry is global
+		game.Register(&game.Definition{
+			ID:         "stub",
+			Name:       "Stub",
+			MinPlayers: 1,
+			MaxPlayers: 4,
+			Template: func() *world.Template {
+				t := world.NewTemplate()
+				t.SetBlock(world.Position{X: 0, Y: 60, Z: 0}, world.Stone)
+				return t
+			}(),
+			New: func() game.Logic { return &recordingLogic{} },
+		})
+	}
 
 	s := New()
 	inst, err := s.StartGame("stub")

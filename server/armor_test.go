@@ -23,7 +23,7 @@ func TestAbsorbDamageVanillaFormula(t *testing.T) {
 	inst := bareInstance(New(), world.NewMemoryWorld())
 	c := tntConn(inst, "Tank", player.Survival, 0, 64, 0)
 
-	if got := c.absorbDamage(7); got != 7 {
+	if got, _ := c.absorbDamage(7); got != 7 {
 		t.Errorf("no armor: %v, want 7", got)
 	}
 
@@ -33,7 +33,7 @@ func TestAbsorbDamageVanillaFormula(t *testing.T) {
 	wear(c, inventory.ChestplateSlot, "minecraft:diamond_chestplate", nil)
 	wear(c, inventory.LeggingsSlot, "minecraft:diamond_leggings", nil)
 	wear(c, inventory.BootsSlot, "minecraft:diamond_boots", nil)
-	if got := c.absorbDamage(7); !near(got, 1.89) {
+	if got, _ := c.absorbDamage(7); !near(got, 1.89) {
 		t.Errorf("diamond set vs 7: %v, want 1.89", got)
 	}
 
@@ -42,7 +42,7 @@ func TestAbsorbDamageVanillaFormula(t *testing.T) {
 	wear(c, inventory.ChestplateSlot, "minecraft:leather_chestplate", nil)
 	wear(c, inventory.LeggingsSlot, "minecraft:leather_leggings", nil)
 	wear(c, inventory.BootsSlot, "minecraft:leather_boots", nil)
-	if got := c.absorbDamage(7); !near(got, 6.02) {
+	if got, _ := c.absorbDamage(7); !near(got, 6.02) {
 		t.Errorf("leather set vs 7: %v, want 6.02", got)
 	}
 
@@ -52,7 +52,7 @@ func TestAbsorbDamageVanillaFormula(t *testing.T) {
 	wear(c, inventory.ChestplateSlot, "minecraft:leather_chestplate", prot)
 	wear(c, inventory.LeggingsSlot, "minecraft:leather_leggings", prot)
 	wear(c, inventory.BootsSlot, "minecraft:leather_boots", prot)
-	if got := c.absorbDamage(7); !near(got, 6.02*0.36) {
+	if got, _ := c.absorbDamage(7); !near(got, 6.02*0.36) {
 		t.Errorf("leather + Protection IV vs 7: %v, want %v", got, 6.02*0.36)
 	}
 }
@@ -64,14 +64,16 @@ func TestArmorWearsAndBreaks(t *testing.T) {
 	c.inv.Set(inventory.BootsSlot, inventory.Stack{ID: boots, Count: 1, Damage: 63})
 	wear(c, inventory.HelmetSlot, "minecraft:iron_helmet", nil)
 
-	c.absorbDamage(8) // wear = max(1, 8/4) = 2 per piece
+	_, n := c.absorbDamage(8) // wear = max(1, 8/4) = 2 per piece
+	c.wearArmor(n)
 	if st := c.inv.Get(inventory.BootsSlot); !st.Empty() {
 		t.Errorf("boots at 63+2 ≥ 65 should break, got %+v", st)
 	}
 	if st := c.inv.Get(inventory.HelmetSlot); st.Damage != 2 {
 		t.Errorf("helmet wear: %d, want 2", st.Damage)
 	}
-	c.absorbDamage(1)
+	_, n = c.absorbDamage(1)
+	c.wearArmor(n)
 	if st := c.inv.Get(inventory.HelmetSlot); st.Damage != 3 {
 		t.Errorf("small hits wear at least 1: %d, want 3", st.Damage)
 	}
@@ -148,5 +150,24 @@ func TestKnockbackEnchantAddsHorizontalStrength(t *testing.T) {
 	vx := func(b []byte) int16 { return int16(uint16(b[len(b)-6])<<8 | uint16(b[len(b)-5])) }
 	if vx(boosted) <= vx(plain) {
 		t.Errorf("Knockback II should launch harder: plain vx=%d boosted vx=%d", vx(plain), vx(boosted))
+	}
+}
+
+// TestArmorDoesNotWearOnSwallowedHits: a hit inside the invulnerability
+// frames deals nothing and wears nothing (click spam used to wear armour
+// about seven times faster than vanilla).
+func TestArmorDoesNotWearOnSwallowedHits(t *testing.T) {
+	_, a, v := duel(t)
+	a.instance.SetWeaponDamage(true)
+	hold(a, "minecraft:diamond_sword")
+	wear(v, inventory.ChestplateSlot, "minecraft:iron_chestplate", nil)
+	a.handleAttack(v)
+	after := v.inv.Get(inventory.ChestplateSlot).Damage
+	if after == 0 {
+		t.Fatal("the landed hit should wear the chestplate")
+	}
+	a.handleAttack(v) // same tick: inside the i-frames, and no stronger
+	if got := v.inv.Get(inventory.ChestplateSlot).Damage; got != after {
+		t.Errorf("a swallowed hit wore the chestplate: %d → %d", after, got)
 	}
 }

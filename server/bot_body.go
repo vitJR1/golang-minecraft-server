@@ -104,7 +104,7 @@ func (b botBody) SelectSlot(k int32) {
 }
 
 func (b botBody) SwapSlots(x, y int16) {
-	b.c.inv.Slots[x], b.c.inv.Slots[y] = b.c.inv.Slots[y], b.c.inv.Slots[x]
+	b.c.inv.Swap(x, y)
 }
 
 func (b botBody) CountItem(item string) int    { return b.c.countItemName(item) }

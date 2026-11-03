@@ -109,6 +109,12 @@ type Instance struct {
 	// instance, so one player's join can't observe another mid-join inside
 	// the same instance.
 	joinMu sync.Mutex
+	// removed is set by RemoveInstance (under joinMu): no join after it.
+	removed bool
+
+	// streams buffers block updates for players MovePlayer is streaming
+	// the world to (join_stream.go).
+	streams blockStreams
 
 	// ticks is the instance's clock (server/instances/tickloop): handlers, counter,
 	// /stats timings.
@@ -245,8 +251,15 @@ func (i *Instance) Stop() { i.ticks.Stop(i.fireStop) }
 // visibility packets that make c and the existing players mutually
 // visible. Run AFTER c.player and c.instance are set. Fires OnPlayerJoin
 // once everything is wired up so game logic sees a fully-joined player.
-func (i *Instance) JoinAndAnnounce(c *ClientConnection) {
+//
+// Returns false, and does nothing, once RemoveInstance has taken the
+// instance down.
+func (i *Instance) JoinAndAnnounce(c *ClientConnection) bool {
 	i.joinMu.Lock()
+	if i.removed {
+		i.joinMu.Unlock()
+		return false
+	}
 
 	i.Players.Add(c)
 
@@ -284,15 +297,29 @@ func (i *Instance) JoinAndAnnounce(c *ClientConnection) {
 	// Hooks fire outside the lock so game logic can call back into the
 	// instance without deadlocking.
 	i.fireJoin(c)
+	return true
+}
+
+// isRemoved reports whether RemoveInstance has taken the instance down.
+func (i *Instance) isRemoved() bool {
+	i.joinMu.Lock()
+	defer i.joinMu.Unlock()
+	return i.removed
 }
 
 // LeaveAndAnnounce removes the player from the instance and tells the
 // remaining players to despawn them. Fires OnPlayerLeave BEFORE the player
 // is dropped so game logic can still see them in the list. No-op when
-// c.player is nil (early disconnect before login completed).
-func (i *Instance) LeaveAndAnnounce(c *ClientConnection) {
+// c.player is nil (early disconnect before login completed) or c isn't in
+// the instance (a join RemoveInstance refused). Returns the UUIDs the
+// instance had right before c left, c's own included — what c's tab list
+// must drop — taken under joinMu so a concurrent join can't be missed.
+func (i *Instance) LeaveAndAnnounce(c *ClientConnection) [][16]byte {
 	if c.player == nil {
-		return
+		return nil
+	}
+	if m, ok := i.Players.Get(c.player.EntityID); !ok || m != c {
+		return nil
 	}
 
 	// Hooks outside joinMu so game cleanup can call into the instance.
@@ -300,6 +327,7 @@ func (i *Instance) LeaveAndAnnounce(c *ClientConnection) {
 
 	i.joinMu.Lock()
 	defer i.joinMu.Unlock()
+	uuids := i.Players.UUIDs()
 
 	i.Players.Broadcast(
 		packetid.CbPlayRemoveEntities,
@@ -319,6 +347,7 @@ func (i *Instance) LeaveAndAnnounce(c *ClientConnection) {
 	if tagged {
 		i.Players.Range(func(o *ClientConnection) { o.syncNameTags(i) })
 	}
+	return uuids
 }
 
 // safeHook runs a hook function with panic recovery and a labelled log
@@ -342,7 +371,7 @@ func (i *Instance) SetBlock(p world.Position, b world.Block) {
 	var buf bytes.Buffer
 	buf.Write(protocol.WritePosition(p.X, p.Y, p.Z))
 	protocol.WriteVarInt32ToBuffer(&buf, b.StateID)
-	i.Players.Broadcast(packetid.CbPlayBlockUpdate, buf.Bytes(), -1)
+	i.broadcastBlocks(packetid.CbPlayBlockUpdate, buf.Bytes())
 }
 
 // BroadcastChat sends a chat line to every player in this instance. Format

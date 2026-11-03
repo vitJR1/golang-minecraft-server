@@ -36,7 +36,7 @@ func (i *Instance) SetBlocks(changes []world.BlockChange) {
 		i.scheduleFluid(ch.Pos)
 	}
 	for _, payload := range sectionBlocksPayloads(changes) {
-		i.Players.Broadcast(packetid.CbPlayUpdateSectionBlocks, payload, -1)
+		i.broadcastBlocks(packetid.CbPlayUpdateSectionBlocks, payload)
 	}
 }
 

@@ -245,33 +245,48 @@ func (c *ClientConnection) digContext() world.DigContext {
 // Non-tools are untouched.
 func (c *ClientConnection) damageHeldTool(n int) {
 	slot := int16(inventory.HotbarStart) + int16(c.heldSlot.Load())
-	st := c.inv.Get(slot)
-	if st.Empty() {
+	st, worn, broke := c.wearSlot(slot, n)
+	if !worn {
 		return
 	}
-	name, ok := world.ItemName(st.ID)
-	if !ok {
-		return
+	if broke && c.player != nil {
+		s := c.player.Snapshot()
+		_ = c.safeWrite(packetid.CbPlaySoundEffect,
+			sound.EffectPayload("minecraft:entity.item.break", sound.CategoryPlayer, s.X, s.Y, s.Z, 0.8, 1))
 	}
-	maxDamage := world.ToolDurability(name)
-	if maxDamage == 0 {
-		return
-	}
-	if lvl := c.enchantOf(st, enchant.Unbreaking); lvl > 0 && enchant.UnbreakingSpares(lvl) {
-		return // Unbreaking: only 1/(lvl+1) of hits wear the tool
-	}
-	st.Damage += n
-	if st.Damage >= maxDamage {
-		st = inventory.Stack{}
-		if c.player != nil {
-			s := c.player.Snapshot()
-			_ = c.safeWrite(packetid.CbPlaySoundEffect,
-				sound.EffectPayload("minecraft:entity.item.break", sound.CategoryPlayer, s.X, s.Y, s.Z, 0.8, 1))
-		}
-	}
-	c.inv.Set(slot, st)
 	_ = c.sendSetSlot(0, slot, st)
 	c.equipmentChanged()
+}
+
+// wearSlot adds n damage to the tool or armour piece in slot, atomically
+// (a click can't slip in between): non-tools aren't worn, Unbreaking
+// spares the wear with probability lvl/(lvl+1), and a piece at its
+// durability cap breaks — the slot empties. Returns the slot's new stack.
+func (c *ClientConnection) wearSlot(slot int16, n int) (st inventory.Stack, worn, broke bool) {
+	c.inv.Edit(slot, func(cur inventory.Stack) inventory.Stack {
+		st = cur
+		if cur.Empty() {
+			return cur
+		}
+		name, ok := world.ItemName(cur.ID)
+		if !ok {
+			return cur
+		}
+		maxDamage := world.ToolDurability(name)
+		if maxDamage == 0 {
+			return cur
+		}
+		if lvl := c.enchantOf(cur, enchant.Unbreaking); lvl > 0 && enchant.UnbreakingSpares(lvl) {
+			return cur // Unbreaking: only 1/(lvl+1) of hits wear the tool
+		}
+		worn = true
+		st.Damage += n
+		if st.Damage >= maxDamage {
+			st, broke = inventory.Stack{}, true
+		}
+		return st
+	})
+	return st, worn, broke
 }
 
 // entityFlagsPayload builds Set Entity Metadata with just the index-0 byte

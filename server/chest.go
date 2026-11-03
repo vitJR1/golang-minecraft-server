@@ -32,15 +32,41 @@ func (c *ClientConnection) openBlockChest(pos world.Position) {
 	if chest.IsEnder(c.instance.World.GetBlock(pos)) && c.player != nil && c.server != nil {
 		store = c.server.enderChestFor(c.player.UUID)
 	}
-	c.openChestStore(store)
+	p := pos
+	c.openChest(&openMenu{kind: "chest", chest: store, inst: c.instance, at: &p})
 }
 
 // openChestStore shows store's contents in the chest GUI.
 func (c *ClientConnection) openChestStore(store chest.Store) {
+	c.openChest(&openMenu{kind: "chest", chest: store})
+}
+
+func (c *ClientConnection) openChest(m *openMenu) {
+	store := m.chest
 	c.drag.Reset()
-	c.menu.Store(&openMenu{kind: "chest", chest: store})
+	c.menu.Store(m)
 	_ = c.sendOpenScreen(store.Title(), chest.Rows)
 	_ = c.sendChestInventory(store.Contents())
+}
+
+// chestReach is vanilla's Container.stillValid distance: the player within 8
+// blocks of the block's centre.
+const chestReach = 8
+
+// chestStillValid is vanilla's stillValid for a chest opened on a block:
+// the player is still in that block's instance and within chestReach of it.
+func (c *ClientConnection) chestStillValid(m *openMenu) bool {
+	if m.at == nil {
+		return true
+	}
+	if m.inst != c.instance || c.player == nil {
+		return false
+	}
+	s := c.player.Snapshot()
+	dx := s.X - (float64(m.at.X) + 0.5)
+	dy := s.Y - (float64(m.at.Y) + 0.5)
+	dz := s.Z - (float64(m.at.Z) + 0.5)
+	return dx*dx+dy*dy+dz*dz <= chestReach*chestReach
 }
 
 // sendChestInventory streams a chest's contents (Set Container Content): the 27
@@ -48,5 +74,5 @@ func (c *ClientConnection) openChestStore(store chest.Store) {
 // mirror from c.inv), then the cursor.
 func (c *ClientConnection) sendChestInventory(slots [inventory.ChestSlots]inventory.Stack) error {
 	window := append(slots[:], c.inv.Mirror()...)
-	return c.safeWrite(packetid.CbPlaySetContainerContent, inventory.ContentsPayload(menuWindowID, window, c.cursor))
+	return c.safeWrite(packetid.CbPlaySetContainerContent, inventory.ContentsPayload(menuWindowID, window, c.inv.Cursor()))
 }

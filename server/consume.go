@@ -27,7 +27,8 @@ type useState struct {
 	slot      int32
 	item      string
 	startTick uint64
-	bow       bool // a bow draw rather than a consume
+	inst      *Instance // whose clock startTick is on (every instance has its own)
+	bow       bool      // a bow draw rather than a consume
 }
 
 // startUse records that the held item began being consumed.
@@ -35,7 +36,7 @@ func (c *ClientConnection) startUse(item string) {
 	if c.instance == nil {
 		return
 	}
-	c.beginUse(&useState{slot: c.heldSlot.Load(), item: item, startTick: c.instance.Tick()})
+	c.beginUse(&useState{slot: c.heldSlot.Load(), item: item, startTick: c.instance.Tick(), inst: c.instance})
 }
 
 // beginUse stores a new use and shows the pose (drawn bow, raised food)
@@ -95,7 +96,7 @@ func (i *Instance) consumeTick(tick uint64) {
 			}
 			continue
 		}
-		if tick-u.startTick < consume.Ticks {
+		if elapsedOn(i, u.inst, u.startTick, tick) < consume.Ticks {
 			continue
 		}
 		if !c.using.CompareAndSwap(u, nil) {
@@ -131,8 +132,15 @@ func (c *ClientConnection) finishConsume(u *useState) {
 		// The bottle stays behind (not in creative).
 		if c.gamemode() != player.Creative {
 			bottle, _ := world.ItemByName("minecraft:glass_bottle")
-			c.inv.Set(slot, inventory.Stack{ID: bottle, Count: 1})
-			_ = c.sendSetSlot(0, slot, c.inv.Get(slot))
+			var now inventory.Stack
+			c.inv.Edit(slot, func(cur inventory.Stack) inventory.Stack {
+				if cur.ID == st.ID { // still the potion (not clicked away meanwhile)
+					cur = inventory.Stack{ID: bottle, Count: 1}
+				}
+				now = cur
+				return cur
+			})
+			_ = c.sendSetSlot(0, slot, now)
 			c.equipmentChanged()
 		}
 		return

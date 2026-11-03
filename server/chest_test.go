@@ -90,8 +90,8 @@ func TestChestClickPersists(t *testing.T) {
 	if got := inst.chests.Contents(pos)[0]; got.ID != 764 || got.Count != 3 {
 		t.Fatalf("chest slot 0 = %+v, want diamond×3", got)
 	}
-	if !c.inv.Get(inventory.HotbarStart).Empty() || !c.cursor.Empty() {
-		t.Fatalf("diamonds duplicated: hotbar %+v cursor %+v", c.inv.Get(inventory.HotbarStart), c.cursor)
+	if !c.inv.Get(inventory.HotbarStart).Empty() || !c.inv.Cursor().Empty() {
+		t.Fatalf("diamonds duplicated: hotbar %+v cursor %+v", c.inv.Get(inventory.HotbarStart), c.inv.Cursor())
 	}
 
 	// Shift-click them back: into the player's inventory, chest empty.
@@ -121,8 +121,8 @@ func TestChestClickIgnoresClaimedItems(t *testing.T) {
 	if got := inst.chests.Contents(pos)[0]; !got.Empty() {
 		t.Fatalf("claimed diamonds stored in the chest: %+v", got)
 	}
-	if c.countItem(764) != 0 || !c.cursor.Empty() {
-		t.Fatalf("claimed diamonds reached the player: %d, cursor %+v", c.countItem(764), c.cursor)
+	if c.countItem(764) != 0 || !c.inv.Cursor().Empty() {
+		t.Fatalf("claimed diamonds reached the player: %d, cursor %+v", c.countItem(764), c.inv.Cursor())
 	}
 }
 

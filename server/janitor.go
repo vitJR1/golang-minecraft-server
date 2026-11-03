@@ -65,7 +65,9 @@ func (s *Server) janitorSweep(now time.Time) {
 		if !inst.Ephemeral {
 			continue
 		}
-		if inst.Players.Count() > 0 {
+		// Bots don't keep an arena alive: one left to bots alone (everyone
+		// watching or playing has gone) is as empty as one with nobody.
+		if humansIn(inst) > 0 {
 			inst.emptySince.Store(0)
 			continue
 		}
@@ -77,6 +79,9 @@ func (s *Server) janitorSweep(now time.Time) {
 		if now.Sub(time.Unix(0, since)) < emptyInstanceTTL {
 			continue
 		}
+		for _, b := range s.Bots(inst) {
+			s.RemoveBot(b)
+		}
 		if err := s.RemoveInstance(inst.ID); err != nil {
 			// Someone joined between our count check and the removal —
 			// clear the stamp and let the next sweep re-evaluate.
@@ -85,6 +90,17 @@ func (s *Server) janitorSweep(now time.Time) {
 		}
 		slog.Info("janitor: removed empty instance", "instance", inst.ID)
 	}
+}
+
+// humansIn counts inst's players that aren't bots.
+func humansIn(inst *Instance) int {
+	n := 0
+	inst.Players.Range(func(c *ClientConnection) {
+		if !c.isBot() {
+			n++
+		}
+	})
+	return n
 }
 
 // markEphemeral flags an instance as janitor-collectable and stamps it

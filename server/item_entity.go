@@ -105,10 +105,25 @@ func (i *Instance) DroppedItemsNear(x, y, z, radius float64, itemName string) in
 // land on a block, resting ones wait to be picked up or despawn. Registered
 // on every instance in NewInstance.
 func (i *Instance) itemTick(uint64) {
+	for _, p := range i.stepItems() {
+		i.Players.Broadcast(p.id, p.payload, -1)
+	}
+}
+
+// entityPacket is a packet built under an entity lock, sent after it.
+type entityPacket struct {
+	id      int32
+	payload []byte
+}
+
+// stepItems is itemTick's work under itemsMu; it returns the packets to
+// broadcast. The unlock is deferred: the tick loop recovers a panic in a
+// step, and a lock left held would freeze every later tick of the instance.
+func (i *Instance) stepItems() []entityPacket {
 	i.itemsMu.Lock()
+	defer i.itemsMu.Unlock()
 	if len(i.items) == 0 {
-		i.itemsMu.Unlock()
-		return
+		return nil
 	}
 
 	type pickup struct {
@@ -153,30 +168,22 @@ func (i *Instance) itemTick(uint64) {
 	i.items = kept
 
 	// Build every payload under the lock, send after.
-	type outPkt struct {
-		id      int32
-		payload []byte
-	}
-	var out []outPkt
+	var out []entityPacket
 	for _, it := range moved {
-		out = append(out, outPkt{packetid.CbPlayTeleportEntity, it.TeleportPayload()})
+		out = append(out, entityPacket{packetid.CbPlayTeleportEntity, it.TeleportPayload()})
 	}
 	for _, p := range pickups {
-		out = append(out, outPkt{packetid.CbPlayPickupItem, itementity.PickupPayload(p.it.EID, p.collector.player.EntityID, p.taken)})
+		out = append(out, entityPacket{packetid.CbPlayPickupItem, itementity.PickupPayload(p.it.EID, p.collector.player.EntityID, p.taken)})
 		if p.remaining > 0 {
-			out = append(out, outPkt{packetid.CbPlaySetEntityMetadata, p.it.MetadataPayload()})
+			out = append(out, entityPacket{packetid.CbPlaySetEntityMetadata, p.it.MetadataPayload()})
 		} else {
 			removed = append(removed, p.it.EID)
 		}
 	}
 	if len(removed) > 0 {
-		out = append(out, outPkt{packetid.CbPlayRemoveEntities, visibility.RemoveEntitiesPayload(removed)})
+		out = append(out, entityPacket{packetid.CbPlayRemoveEntities, visibility.RemoveEntitiesPayload(removed)})
 	}
-	i.itemsMu.Unlock()
-
-	for _, p := range out {
-		i.Players.Broadcast(p.id, p.payload, -1)
-	}
+	return out
 }
 
 // pickupCandidate is the first living, non-spectator player whose pickup box

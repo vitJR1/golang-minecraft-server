@@ -71,12 +71,13 @@ func (c *ClientConnection) handleAttack(victim *ClientConnection) {
 	if crit {
 		damage *= cfg.CritMultiplier
 	}
-	damage = victim.absorbDamage(damage) // armor + Protection
+	damage, wear := victim.absorbDamage(damage) // armor + Protection
 
 	applied, newHealth, killed := vp.ApplyDamage(damage, now, cfg.InvulnTicks)
 	if applied <= 0 {
 		return // swallowed by i-frames
 	}
+	victim.wearArmor(wear)
 	// Weapons wear on a landed hit: swords one point, other tools two.
 	if t := world.ToolFromItem(c.heldItemName()); t.Type == world.Sword {
 		c.damageHeldTool(1)

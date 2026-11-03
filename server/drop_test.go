@@ -80,8 +80,8 @@ func TestCursorDropOutsideWindowAndOnClose(t *testing.T) {
 
 	// Pick the stack up onto the cursor: nothing dropped yet.
 	clickSlot(t, c, int16(inventory.HotbarStart), 0, 0, map[int16]inventory.Stack{int16(inventory.HotbarStart): {}}, inventory.Stack{ID: iron, Count: 8})
-	if c.cursor.Count != 8 {
-		t.Fatalf("cursor should hold 8, got %+v", c.cursor)
+	if c.inv.Cursor().Count != 8 {
+		t.Fatalf("cursor should hold 8, got %+v", c.inv.Cursor())
 	}
 	if n := itemsIn(inst)[iron]; n != 0 {
 		t.Fatalf("pickup onto cursor must not drop, got %d", n)
@@ -100,8 +100,8 @@ func TestCursorDropOutsideWindowAndOnClose(t *testing.T) {
 	if itemsIn(inst)[iron] != 8 {
 		t.Errorf("closing should drop the cursor, ground has %v", itemsIn(inst))
 	}
-	if !c.cursor.Empty() {
-		t.Errorf("cursor should be cleared on close, got %+v", c.cursor)
+	if !c.inv.Cursor().Empty() {
+		t.Errorf("cursor should be cleared on close, got %+v", c.inv.Cursor())
 	}
 }
 
@@ -174,19 +174,19 @@ func TestNoDropItemStaysInInventory(t *testing.T) {
 
 	// Picked up onto the cursor and clicked outside: refused.
 	clickIn(t, c, 0, int16(inventory.HotbarStart), 0, inventory.ClickPickup)
-	if !inventory.Equal(c.cursor, wool) {
-		t.Fatalf("pickup onto the cursor: %+v", c.cursor)
+	if !inventory.Equal(c.inv.Cursor(), wool) {
+		t.Fatalf("pickup onto the cursor: %+v", c.inv.Cursor())
 	}
 	clickIn(t, c, 0, inventory.SlotOutside, 0, inventory.ClickPickup)
-	if !inventory.Equal(c.cursor, wool) {
+	if !inventory.Equal(c.inv.Cursor(), wool) {
 		t.Fatal("thrown from the cursor")
 	}
 	// Closing the inventory with it on the cursor puts it back.
 	var p bytes.Buffer
 	p.WriteByte(0)
 	play(t, c, packetid.SbPlayCloseContainer, p.Bytes())
-	if !c.cursor.Empty() || c.countItem(wool.ID) != 1 {
-		t.Fatalf("after close: cursor %+v, in inventory %d", c.cursor, c.countItem(wool.ID))
+	if !c.inv.Cursor().Empty() || c.countItem(wool.ID) != 1 {
+		t.Fatalf("after close: cursor %+v, in inventory %d", c.inv.Cursor(), c.countItem(wool.ID))
 	}
 	if n := len(itemsIn(inst)); n != 0 {
 		t.Fatalf("%d item entities on the ground", n)
@@ -208,7 +208,7 @@ func TestNoDropItemCantGoIntoChest(t *testing.T) {
 	if got := inst.chests.Contents(pos); !got[0].Empty() {
 		t.Fatalf("selector stashed in the chest: %+v", got[0])
 	}
-	if c.countItem(wool.ID)+int(c.cursor.Count) != 1 {
+	if c.countItem(wool.ID)+int(c.inv.Cursor().Count) != 1 {
 		t.Fatal("selector lost")
 	}
 }

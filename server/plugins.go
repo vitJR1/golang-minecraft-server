@@ -98,7 +98,12 @@ func (i *Instance) allowBlockBreak(c *ClientConnection, pos world.Position) bool
 		}
 	}
 	if hook := i.OnBlockBreak; hook != nil {
-		return hook(c, pos)
+		if c == nil {
+			// An anonymous blast (allowExplosionBreak): a hook that can't
+			// cope with no player allows, as for listeners.
+			return safeVeto(i, "OnBlockBreak", func() bool { return hook(c, pos) })
+		}
+		return safeGameVeto(i, "OnBlockBreak", func() bool { return hook(c, pos) })
 	}
 	return true
 }
@@ -140,7 +145,7 @@ func (i *Instance) rewritePlacedBlock(c *ClientConnection, pos world.Position, b
 		safeHook(i, "listener "+l.Name+" RewritePlacedBlock", func() { blk = rw.RewritePlacedBlock(ctx, p, pos, blk) })
 	}
 	if hook := i.OnRewritePlace; hook != nil {
-		blk = hook(c, pos, blk)
+		safeHook(i, "OnRewritePlace", func() { blk = hook(c, pos, blk) })
 	}
 	return blk
 }
@@ -153,7 +158,7 @@ func (i *Instance) allowBlockPlace(c *ClientConnection, pos world.Position, blk 
 		}
 	}
 	if hook := i.OnBlockPlace; hook != nil {
-		return hook(c, pos, blk)
+		return safeGameVeto(i, "OnBlockPlace", func() bool { return hook(c, pos, blk) })
 	}
 	return true
 }
@@ -169,7 +174,7 @@ func (i *Instance) allowBlockInteract(c *ClientConnection, click game.BlockInter
 		}
 	}
 	if hook := i.OnBlockInteract; hook != nil {
-		return hook(c, click)
+		return safeGameVeto(i, "OnBlockInteract", func() bool { return hook(c, click) })
 	}
 	return true
 }
@@ -184,7 +189,7 @@ func (i *Instance) allowEntityInteract(c *ClientConnection, ei game.EntityIntera
 		}
 	}
 	if hook := i.OnEntityInteract; hook != nil {
-		return hook(c, ei)
+		return safeGameVeto(i, "OnEntityInteract", func() bool { return hook(c, ei) })
 	}
 	return true
 }
@@ -199,7 +204,7 @@ func (i *Instance) allowItemUse(c *ClientConnection, use game.ItemUse) bool {
 		}
 	}
 	if hook := i.OnItemUse; hook != nil {
-		return hook(c, use)
+		return safeGameVeto(i, "OnItemUse", func() bool { return hook(c, use) })
 	}
 	return true
 }
@@ -218,7 +223,9 @@ func (i *Instance) fireItemConsume(c *ClientConnection, st inventory.Stack) bool
 		}
 	}
 	if hook := i.OnItemConsume; hook != nil {
-		return hook(c, st)
+		handled := false
+		safeHook(i, "OnItemConsume", func() { handled = hook(c, st) })
+		return handled
 	}
 	return false
 }
@@ -232,7 +239,7 @@ func (i *Instance) allowAttack(attacker, target *ClientConnection) bool {
 		}
 	}
 	if hook := i.OnPlayerAttack; hook != nil {
-		return hook(attacker, target)
+		return safeGameVeto(i, "OnPlayerAttack", func() bool { return hook(attacker, target) })
 	}
 	return true
 }
@@ -250,7 +257,9 @@ func (i *Instance) filterChat(c *ClientConnection, msg string) (string, bool) {
 		msg = rewrite
 	}
 	if hook := i.OnChat; hook != nil {
-		return hook(c, msg)
+		rewrite, allow := "", false // a panicking game hook drops the line
+		safeHook(i, "OnChat", func() { rewrite, allow = hook(c, msg) })
+		return rewrite, allow
 	}
 	return msg, true
 }
@@ -280,6 +289,20 @@ func safeVeto(i *Instance, name string, fn func() bool) (allow bool) {
 		if r := recover(); r != nil {
 			slog.Error("hook panic", "instance", i.ID, "hook", name, "panic", fmt.Sprint(r))
 			allow = true
+		}
+	}()
+	return fn()
+}
+
+// safeGameVeto runs the instance's own veto hook (the attached game, the
+// hub's protection) under panic recovery. Unlike a listener, a panicking
+// game hook denies: the game owns its map, and a bug in its rules must not
+// let a player break what it protects.
+func safeGameVeto(i *Instance, name string, fn func() bool) (allow bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("hook panic", "instance", i.ID, "hook", name, "panic", fmt.Sprint(r))
+			allow = false
 		}
 	}()
 	return fn()

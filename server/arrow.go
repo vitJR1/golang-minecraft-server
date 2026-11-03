@@ -49,7 +49,7 @@ func (c *ClientConnection) startDraw() {
 	if c.gamemode() != player.Creative && c.countItem(arrowItemID()) == 0 {
 		return
 	}
-	c.beginUse(&useState{slot: c.heldSlot.Load(), item: "minecraft:bow", startTick: c.instance.Tick(), bow: true})
+	c.beginUse(&useState{slot: c.heldSlot.Load(), item: "minecraft:bow", startTick: c.instance.Tick(), inst: c.instance, bow: true})
 }
 
 // shootBow looses the arrow of a finished draw.
@@ -60,7 +60,7 @@ func (c *ClientConnection) shootBow(u *useState) {
 	if c.heldSlot.Load() != u.slot || c.heldItemName() != "minecraft:bow" {
 		return
 	}
-	f := projectile.DrawForce(c.instance.Tick() - u.startTick)
+	f := projectile.DrawForce(elapsedOn(c.instance, u.inst, u.startTick, c.instance.Tick()))
 	if f < projectile.ArrowMinForce {
 		return
 	}
@@ -149,12 +149,13 @@ func (p *projectileEntity) arrowHit(i *Instance, victim *ClientConnection) {
 		return
 	}
 	speed := math.Sqrt(p.VX*p.VX + p.VY*p.VY + p.VZ*p.VZ)
-	dmg := victim.absorbDamage(projectile.ArrowDamage(speed, p.power, p.crit))
+	dmg, wear := victim.absorbDamage(projectile.ArrowDamage(speed, p.power, p.crit))
 	now := i.Tick()
 	applied, newHealth, killed := vp.ApplyDamage(dmg, now, i.Combat.InvulnTicks)
 	if applied <= 0 {
 		return
 	}
+	victim.wearArmor(wear)
 	s := vp.Snapshot()
 	i.Players.Broadcast(packetid.CbPlayHurtAnimation, combat.HurtAnimationPayload(s.EntityID, 0), -1)
 	i.playSound("minecraft:entity.arrow.hit_player", sound.CategoryPlayer, s.X, s.Y, s.Z, 1, 1)

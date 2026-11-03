@@ -14,11 +14,13 @@ import (
 // armorSlots are the window-0 indices of worn armor, helmet first.
 var armorSlots = [4]int16{inventory.HelmetSlot, inventory.ChestplateSlot, inventory.LeggingsSlot, inventory.BootsSlot}
 
-// absorbDamage returns dmg after this player's armor, and wears the armor.
-// A player with nothing on gets dmg back unchanged and nothing wears.
-func (c *ClientConnection) absorbDamage(dmg float32) float32 {
+// absorbDamage returns dmg after this player's armor and the wear the hit
+// would do to it. The caller wears the armor (wearArmor) only once the hit
+// is applied — one swallowed by the invulnerability frames wears nothing,
+// like vanilla. A player with nothing on gets dmg back and no wear.
+func (c *ClientConnection) absorbDamage(dmg float32) (out float32, wear int) {
 	if dmg <= 0 {
-		return dmg
+		return dmg, 0
 	}
 	var points, toughness float32
 	epf := 0
@@ -42,11 +44,9 @@ func (c *ClientConnection) absorbDamage(dmg float32) float32 {
 		epf += c.enchantOf(st, enchant.Protection)
 	}
 	if worn == 0 {
-		return dmg
+		return dmg, 0
 	}
-	out := combat.ArmorReduce(dmg, points, toughness, epf)
-	c.wearArmor(combat.ArmorWear(dmg))
-	return out
+	return combat.ArmorReduce(dmg, points, toughness, epf), combat.ArmorWear(dmg)
 }
 
 // wearArmor damages every worn piece by n (Unbreaking may spare a piece),
@@ -54,30 +54,14 @@ func (c *ClientConnection) absorbDamage(dmg float32) float32 {
 func (c *ClientConnection) wearArmor(n int) {
 	changed := false
 	for _, slot := range armorSlots {
-		st := c.inv.Get(slot)
-		if st.Empty() {
+		st, worn, broke := c.wearSlot(slot, n)
+		if !worn {
 			continue
 		}
-		name, ok := world.ItemName(st.ID)
-		if !ok {
-			continue
+		if broke && c.player != nil {
+			s := c.player.Snapshot()
+			c.instance.playSound("minecraft:entity.item.break", sound.CategoryPlayer, s.X, s.Y, s.Z, 0.8, 1)
 		}
-		maxDamage := world.ToolDurability(name)
-		if maxDamage == 0 {
-			continue
-		}
-		if lvl := c.enchantOf(st, enchant.Unbreaking); lvl > 0 && enchant.UnbreakingSpares(lvl) {
-			continue
-		}
-		st.Damage += n
-		if st.Damage >= maxDamage {
-			st = inventory.Stack{}
-			if c.player != nil {
-				s := c.player.Snapshot()
-				c.instance.playSound("minecraft:entity.item.break", sound.CategoryPlayer, s.X, s.Y, s.Z, 0.8, 1)
-			}
-		}
-		c.inv.Set(slot, st)
 		_ = c.sendSetSlot(0, slot, st)
 		changed = true
 	}

@@ -67,12 +67,14 @@ func (i *Instance) primeTNT(pos world.Position, fuse int, igniter *ClientConnect
 	eid := i.Server.nextEntityID.Add(1)
 	t := &primedTNT{TNT: explosion.Prime(eid, entityUUID(eid), pos, fuse), igniter: igniter}
 
+	// Spawned under tntMu: the tick (which moves t and later despawns it)
+	// takes the same lock, so its packets can't overtake the Spawn and leave
+	// a ghost on the client.
 	i.tntMu.Lock()
 	i.tnts = append(i.tnts, t)
-	i.tntMu.Unlock()
-
 	i.Players.Broadcast(packetid.CbPlaySpawnEntity, t.SpawnPayload(), -1)
 	i.Players.Broadcast(packetid.CbPlaySetEntityMetadata, t.MetadataPayload(), -1)
+	i.tntMu.Unlock()
 	i.playSound("minecraft:entity.tnt.primed", sound.CategoryBlocks, t.X, t.Y, t.Z, 1, 1)
 	return true
 }
@@ -86,13 +88,22 @@ func (i *Instance) passableForEntity(x, y, z float64) bool {
 // tntTick moves every primed TNT one step and explodes the ones whose fuse
 // ran out. Explosions run outside tntMu because they may prime more TNT.
 func (i *Instance) tntTick(uint64) {
-	i.tntMu.Lock()
-	if len(i.tnts) == 0 {
-		i.tntMu.Unlock()
-		return
+	exploding, removed := i.stepTNT()
+	if len(removed) > 0 {
+		i.Players.Broadcast(packetid.CbPlayRemoveEntities, visibility.RemoveEntitiesPayload(removed), -1)
 	}
-	var exploding []*primedTNT
-	var removed []int32
+	for _, t := range exploding {
+		x, y, z := t.Centre()
+		i.explode(x, y, z, world.TNTPower, t.igniter)
+	}
+}
+
+// stepTNT is tntTick's work under tntMu (the unlock deferred, as in
+// stepItems): it returns the TNT whose fuse ran out and the entity ids to
+// despawn.
+func (i *Instance) stepTNT() (exploding []*primedTNT, removed []int32) {
+	i.tntMu.Lock()
+	defer i.tntMu.Unlock()
 	kept := i.tnts[:0]
 	for _, t := range i.tnts {
 		t.Step(i.passableForEntity)
@@ -112,15 +123,7 @@ func (i *Instance) tntTick(uint64) {
 		i.tnts[j] = nil
 	}
 	i.tnts = kept
-	i.tntMu.Unlock()
-
-	if len(removed) > 0 {
-		i.Players.Broadcast(packetid.CbPlayRemoveEntities, visibility.RemoveEntitiesPayload(removed), -1)
-	}
-	for _, t := range exploding {
-		x, y, z := t.Centre()
-		i.explode(x, y, z, world.TNTPower, t.igniter)
-	}
+	return exploding, removed
 }
 
 // explode runs a vanilla-shaped explosion of the given power at (x,y,z).
@@ -145,8 +148,11 @@ func (i *Instance) explodeWith(x, y, z, power, knockback float64, igniter *Clien
 	for c, h := range hits {
 		hits[c] = explosionHit{vx: h.vx * knockback, vy: h.vy * knockback, vz: h.vz * knockback}
 	}
-	i.applyExplosionBlocks(destroyed, power, actor)
+	// Primed TNT is pushed before the blocks go, like vanilla (entities in
+	// explode, blocks in finalizeExplosion): the TNT this blast chain-primes
+	// isn't launched by the very blast that lit it.
 	i.knockbackTNT(x, y, z, power)
+	i.applyExplosionBlocks(destroyed, power, actor)
 
 	// One Explosion packet per player within explosion.PacketRange (vanilla:
 	// 64 blocks), carrying that player's own knockback (the client applies
@@ -262,11 +268,13 @@ func (i *Instance) explosionPlayers(x, y, z, power float64, actor *ClientConnect
 			continue
 		}
 		damage := float32(explosion.Damage(impact, power) * i.ExplosionDamage())
-		applied, newHealth, killed := p.ApplyDamage(c.absorbDamage(damage), now, i.Combat.InvulnTicks)
+		dmg, wear := c.absorbDamage(damage)
+		applied, newHealth, killed := p.ApplyDamage(dmg, now, i.Combat.InvulnTicks)
 		hits[c] = explosionHit{vx: dir.X * impact, vy: dir.Y * impact, vz: dir.Z * impact}
 		if applied <= 0 {
 			continue
 		}
+		c.wearArmor(wear)
 		i.Players.Broadcast(packetid.CbPlayHurtAnimation, combat.HurtAnimationPayload(s.EntityID, 0), -1)
 		i.playSound("minecraft:entity.player.hurt", sound.CategoryPlayer, s.X, s.Y, s.Z, 1, 1)
 		if killed {

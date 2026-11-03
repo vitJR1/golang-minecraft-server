@@ -24,28 +24,29 @@ import (
 // the selected hotbar slot and syncs the slot to the client.
 func (c *ClientConnection) dropHeld(all bool) {
 	slot := int16(inventory.HotbarStart) + int16(c.heldSlot.Load())
-	st := c.inv.Get(slot)
-	if st.Empty() || st.Undroppable() {
-		_ = c.sendSetSlot(0, slot, st) // undo the client's predicted drop
+	var st, thrown inventory.Stack
+	c.inv.Edit(slot, func(cur inventory.Stack) inventory.Stack {
+		st = cur
+		// Nothing droppable, or over the drop budget: keep the item.
+		if cur.Empty() || cur.Undroppable() || !c.ac.AllowDrop(time.Now()) {
+			return cur
+		}
+		n := 1
+		if all {
+			n = int(cur.Count)
+		}
+		thrown = cur
+		thrown.Count = byte(n)
+		st.Count -= byte(n)
+		if st.Count == 0 {
+			st = inventory.Stack{}
+		}
+		return st
+	})
+	_ = c.sendSetSlot(0, slot, st) // the new slot, or undo the client's predicted drop
+	if thrown.Empty() {
 		return
 	}
-	if !c.ac.AllowDrop(time.Now()) {
-		// Over the drop budget: keep the item, undo the client's prediction.
-		_ = c.sendSetSlot(0, slot, st)
-		return
-	}
-	n := 1
-	if all {
-		n = int(st.Count)
-	}
-	thrown := st
-	thrown.Count = byte(n)
-	st.Count -= byte(n)
-	if st.Count == 0 {
-		st = inventory.Stack{}
-	}
-	c.inv.Set(slot, st)
-	_ = c.sendSetSlot(0, slot, st)
 	c.equipmentChanged()
 	c.throwStack(thrown)
 }
@@ -64,15 +65,15 @@ func (c *ClientConnection) throwStack(st inventory.Stack) {
 // dropCursor throws whatever the client is carrying on its cursor (window
 // closed with an item picked up) and clears it.
 func (c *ClientConnection) dropCursor() {
-	if c.cursor.Empty() {
+	st := c.inv.Cursor()
+	if st.Empty() {
 		return
 	}
-	st := c.cursor
-	c.cursor = inventory.Stack{}
+	c.inv.SetCursor(inventory.Stack{})
 	if st.Undroppable() {
 		// Back into the inventory instead of onto the ground.
 		if left := c.GiveStack(st); left > 0 {
-			c.cursor = inventory.WithCount(st, left) // nowhere to go: keep it carried
+			c.inv.SetCursor(inventory.WithCount(st, left)) // nowhere to go: keep it carried
 		}
 		return
 	}

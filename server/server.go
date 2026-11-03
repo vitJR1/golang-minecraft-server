@@ -31,6 +31,7 @@ import (
 	"minecraft-server/templates"
 	"minecraft-server/world"
 	"net"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -303,10 +304,17 @@ func (s *Server) RemoveInstance(id string) error {
 		s.mu.Unlock()
 		return fmt.Errorf("no such instance: %s", id)
 	}
-	if inst.Players.Count() > 0 {
+	// The player count and the removed mark are settled under joinMu, so a
+	// MovePlayer streaming this instance either joins first (and the
+	// removal is refused) or finds it removed and goes to the hub.
+	inst.joinMu.Lock()
+	if n := inst.Players.Count(); n > 0 {
+		inst.joinMu.Unlock()
 		s.mu.Unlock()
-		return fmt.Errorf("instance %s still has %d players", id, inst.Players.Count())
+		return fmt.Errorf("instance %s still has %d players", id, n)
 	}
+	inst.removed = true
+	inst.joinMu.Unlock()
 	delete(s.instances, id)
 	s.mu.Unlock()
 	s.arenas.Remove(id) // clear arena tracking if this was a created arena
@@ -331,10 +339,12 @@ func (s *Server) RemoveInstance(id string) error {
 // the leaver to the players staying behind, and the new instance
 // broadcasts PI Add + SpawnPlayer for the newcomer.
 //
-// Must be called from the player's own readLoop goroutine (e.g. from a
-// command handler or an event hook). There is currently no synchronization
-// on c.instance, and a concurrent call from another goroutine would race
-// with handler_play's reads.
+// Moves of one connection are serialised (c.moveMu) — the matchmaker and
+// EndGame move players from their own goroutines — and a connection that
+// has closed isn't moved (cleanup takes the same lock to leave, so a
+// player can't end up registered in the target after disconnecting).
+// handler_play still reads c.instance without a lock: a move from another
+// goroutine races with the player's own packets for that instant.
 func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float64) error {
 	if c.player == nil {
 		return fmt.Errorf("player not logged in")
@@ -342,25 +352,55 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 	if target == nil {
 		return fmt.Errorf("target instance is nil")
 	}
+	if c.isBot() {
+		// A bot belongs to the game it was added to: when the game sends
+		// its players elsewhere (round over), the bot leaves the server.
+		// (Outside moveMu: its cleanup takes the lock.)
+		if c.instance != target {
+			s.RemoveBot(c)
+		}
+		return nil
+	}
+	c.moveMu.Lock()
+	defer c.moveMu.Unlock()
+	return s.moveLocked(c, target, x, y, z)
+}
+
+// moveLocked is MovePlayer under c.moveMu.
+func (s *Server) moveLocked(c *ClientConnection, target *Instance, x, y, z float64) error {
+	if c.isClosed() {
+		return fmt.Errorf("player disconnected")
+	}
 	old := c.instance
 	if old == target {
 		return nil
 	}
-	if c.isBot() {
-		// A bot belongs to the game it was added to: when the game sends
-		// its players elsewhere (round over), the bot leaves the server.
-		s.RemoveBot(c)
-		return nil
+	if target.isRemoved() {
+		return fmt.Errorf("instance %s is gone", target.ID)
+	}
+	// Entering anywhere directly (an arena, a lobby, spectating) gives up a
+	// place in a matchmaker queue — else the queue filling up would pull
+	// the player out of the round they're in. startGame's own moves find
+	// them already dequeued.
+	if s.Matchmaker != nil {
+		s.Matchmaker.Dequeue(c)
 	}
 
-	// Capture UUIDs we'll need to clear from the client's tab list AFTER
-	// LeaveAndAnnounce removes c — so include c itself.
-	oldUUIDs := old.Players.UUIDs()
+	// Whatever the player was doing in the old instance ends with it: a dig
+	// or a bow draw is timed on the old instance's clock, and an open chest
+	// or menu belongs to the old world (the Respawn closes the window on the
+	// client without a Close Container, so the server closes it here).
+	c.cancelDig()
+	c.consumedDig = nil
+	c.cancelUse()
+	c.closeWindows()
 
 	// 1. Tell old instance the player is gone (broadcasts to others +
 	//    removes c from old.Players). Whatever sidebar that instance's game
-	//    left up comes down with it, so the next game starts clean.
-	old.LeaveAndAnnounce(c)
+	//    left up comes down with it, so the next game starts clean. The
+	//    tab-list UUIDs to clear are taken under the same lock, so a player
+	//    joining old meanwhile can't leave a stale entry behind.
+	oldUUIDs := old.LeaveAndAnnounce(c)
 	c.endWatch(old)
 	c.ClearSidebar()
 
@@ -370,12 +410,14 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 		_ = c.safeWrite(packetid.CbPlayPlayerInfoRemove, visibility.InfoRemovePayload(oldUUIDs))
 	}
 
-	// 2b. Landing in the hub or a lobby means the game is over for this
-	//     player: shed whatever it left behind (spectator mode, the kit,
-	//     effects, a pending death) BEFORE the Respawn, which carries the
-	//     gamemode the client will be in.
+	// 2b. Leaving a game, or landing in the hub or a lobby, means that game
+	//     is over for this player: shed whatever it left behind (spectator
+	//     mode, the kit, effects, a pending death) BEFORE the Respawn, which
+	//     carries the gamemode the client will be in. Only hub → game keeps
+	//     the state (the hub already reset it on the way in).
 	toHub := target == s.Hub || lobby.Is(target.ID)
-	if toHub {
+	fromHub := old == s.Hub || lobby.Is(old.ID)
+	if toHub || !fromHub {
 		c.resetForHub()
 	}
 
@@ -407,6 +449,10 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 	if err := c.sendStartWaitingForChunks(); err != nil {
 		return fmt.Errorf("start waiting for chunks: %w", err)
 	}
+	// Block changes from here until c is in target.Players are replayed
+	// after the join (join_stream.go): the chunks below are a snapshot.
+	target.beginStream(c)
+	defer target.dropStream(c) // error paths: forget what was buffered
 	if err := c.sendWorldChunks(); err != nil {
 		return fmt.Errorf("world chunks: %w", err)
 	}
@@ -423,14 +469,31 @@ func (s *Server) MovePlayer(c *ClientConnection, target *Instance, x, y, z float
 	// the inventory model so the client shows what the server has.
 	if toHub {
 		_ = c.sendSetHealth(player.MaxHealth)
-		c.syncAbsorption(true)
 	} else {
 		c.stripNavigatorItems()
+	}
+	// Respawn dropped the client's effect icons, speed attribute and
+	// absorption hearts; whatever the player still has is shown again
+	// (with none, the Respawn's defaults are already right).
+	if len(c.activeEffects()) > 0 {
+		c.resendEffects()
+	} else if toHub {
+		c.syncAbsorption(true)
 	}
 	_ = c.sendInventoryContents()
 
 	// 7. Register in target + broadcast tab list and Spawn for everyone.
-	target.JoinAndAnnounce(c)
+	if !target.JoinAndAnnounce(c) {
+		// RemoveInstance took target down while we streamed it: the
+		// player goes to the hub instead of a world with no tick loop.
+		target.dropStream(c)
+		if target == s.Hub || s.Hub == nil {
+			return fmt.Errorf("instance %s is gone", target.ID)
+		}
+		sp := s.Hub.SpawnPoint
+		return s.moveLocked(c, s.Hub, sp.X, sp.Y, sp.Z)
+	}
+	target.endStream(c)
 	return nil
 }
 
@@ -457,10 +520,7 @@ func (c *ClientConnection) resetForHub() {
 	if c.gamemode() != player.Creative || c.server == nil || !c.server.Ops.Has(c.playerName) {
 		c.player.SetGamemode(player.Adventure)
 	}
-	for slot := int16(0); slot < inventory.PlayerSlots; slot++ {
-		c.inv.Set(slot, inventory.Stack{})
-	}
-	c.cursor = inventory.Stack{}
+	c.inv.Clear()
 }
 
 // ConnectionsFromIP returns every currently-connected ClientConnection
@@ -561,6 +621,15 @@ type ClientConnection struct {
 	// "finished digging" can be checked against the block's break time.
 	digPos       *world.Position
 	digStartTick uint64
+	digInst      *Instance // whose clock digStartTick is on
+
+	// inPlay mirrors state == StatePlay for the keepAlive goroutine: state
+	// itself is written and read on the readLoop only.
+	inPlay atomic.Bool
+
+	// moveMu serialises MovePlayer for this connection with itself and
+	// with cleanup's leave (see MovePlayer).
+	moveMu sync.Mutex
 
 	// sentAbsorption is the absorption value last written to the clients
 	// as player metadata (absorption.go), so syncAbsorption can skip
@@ -574,13 +643,6 @@ type ClientConnection struct {
 	// using is the eat/drink (or bow draw) in progress, nil when idle
 	// (consume.go). Set from the readLoop, read on the instance tick.
 	using atomic.Pointer[useState]
-
-	// cursor is the stack the client is carrying on its mouse cursor inside
-	// an inventory/chest window, as reported by its last Click Container.
-	// Whatever leaves the modelled slots without reaching the cursor (or
-	// leaves the cursor without reaching a slot) was dropped and becomes an
-	// item entity — see drop.go. Only touched from the readLoop goroutine.
-	cursor inventory.Stack
 
 	// bot is set when this connection is a server-driven bot (bot.go):
 	// no socket, an AI moves and acts for it.
@@ -634,6 +696,15 @@ type ClientConnection struct {
 
 func (c *ClientConnection) readLoop() {
 	defer c.cleanup()
+	// A panic in a handler (a hook, a malformed-input edge case) costs this
+	// connection, not the process: every other player's readLoop and every
+	// instance tick keeps running. cleanup (deferred above) runs after this.
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("connection handler panic, disconnecting",
+				"player", c.playerName, "panic", fmt.Sprint(r), "stack", string(debug.Stack()))
+		}
+	}()
 
 	for {
 		if c.isClosed() {
@@ -710,6 +781,7 @@ func (c *ClientConnection) processPacket(packet *bytes.Buffer) error {
 // sendPlayPackets dispatches the post-LoginSuccess sequence that the client
 // requires before it will render the world.
 func (c *ClientConnection) sendPlayPackets() error {
+	c.inPlay.Store(true) // keepAlive starts pinging (state is readLoop-only)
 	spawn := c.player.Snapshot()
 	// Order matters here. Vanilla 1.20.1 holds the "loading terrain"
 	// overlay until it has BOTH:

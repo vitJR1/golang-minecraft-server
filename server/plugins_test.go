@@ -176,11 +176,15 @@ func TestListenerChatRewriteComposes(t *testing.T) {
 	}
 }
 
-func TestPluginCommandDispatch(t *testing.T) {
-	var gotCtx *game.Ctx
-	var gotArgs []string
-	var gotPlayer string
-	game.RegisterCommand(&game.Command{
+// The plugin commands TestPluginCommandDispatch registers. Package-level:
+// the registry is global and takes the same command twice, not a new one
+// under the same name (go test -count=2).
+var (
+	gotCtx    *game.Ctx
+	gotArgs   []string
+	gotPlayer string
+	shadowRan atomic.Bool
+	ptestCmd  = &game.Command{
 		Name: "/ptest", Aliases: []string{"ptest-alias"},
 		Help: "//ptest — test",
 		Run: func(ctx *game.Ctx, p game.PlayerHandle, args []string) {
@@ -192,11 +196,18 @@ func TestPluginCommandDispatch(t *testing.T) {
 			}
 			return nil
 		},
-	})
-	game.RegisterCommand(&game.Command{
+	}
+	shadowedCmd = &game.Command{
 		Name: "help", Help: "shadowed by the built-in /help",
-		Run: func(*game.Ctx, game.PlayerHandle, []string) { t.Error("shadowed plugin command must not run") },
-	})
+		Run: func(*game.Ctx, game.PlayerHandle, []string) { shadowRan.Store(true) },
+	}
+)
+
+func TestPluginCommandDispatch(t *testing.T) {
+	gotCtx, gotArgs, gotPlayer = nil, nil, ""
+	shadowRan.Store(false)
+	game.RegisterCommand(ptestCmd)
+	game.RegisterCommand(shadowedCmd)
 
 	s := New()
 	cli := pipeClientOn(t, s)
@@ -217,8 +228,11 @@ func TestPluginCommandDispatch(t *testing.T) {
 	// A client that includes the slash still reaches a plain-named command.
 	s.RunCommand(c, "/help")
 
-	// Built-in wins over the shadowing plugin command (its Run would t.Error).
+	// Built-in wins over the shadowing plugin command.
 	s.RunCommand(c, "help")
+	if shadowRan.Load() {
+		t.Error("shadowed plugin command must not run")
+	}
 
 	// Visible in the command tree / help and tab-completes via Complete.
 	var seen bool

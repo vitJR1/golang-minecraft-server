@@ -15,7 +15,8 @@ import (
 // Content) from the model: after a Respawn, a cross-instance move, or a
 // closed menu window, so the client's view matches the server again.
 func (c *ClientConnection) sendInventoryContents() error {
-	return c.safeWrite(packetid.CbPlaySetContainerContent, inventory.ContentsPayload(0, c.inv.Slots[:], c.cursor))
+	slots, cursor := c.inv.Snapshot()
+	return c.safeWrite(packetid.CbPlaySetContainerContent, inventory.ContentsPayload(0, slots[:], cursor))
 }
 
 // stripNavigatorItems removes the server-given hub UI items (navigator rod,
@@ -132,10 +133,7 @@ func (c *ClientConnection) SetSlot(slot int16, st inventory.Stack) {
 // ClearInventory empties every slot (armour, main, hotbar, offhand, cursor)
 // and re-sends the whole window so the client agrees.
 func (c *ClientConnection) ClearInventory() {
-	for slot := int16(0); slot < inventory.PlayerSlots; slot++ {
-		c.inv.Set(slot, inventory.Stack{})
-	}
-	c.cursor = inventory.Stack{}
+	c.inv.Clear()
 	_ = c.sendInventoryContents()
 	c.equipmentChanged()
 }
