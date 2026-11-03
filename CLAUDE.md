@@ -118,7 +118,9 @@ server/net/
                + writer (writev batching), encryption swap, close, keep-alive
                bookkeeping.
   connlimit/
-               Pre-login connection caps (total / per IP / rate).
+               Pre-login connection caps (total / per IP / rate); Key — the
+               per-IP key (IPv4 as is, IPv6 by its /64) that server.ClientIP
+               and so the auth IP bans / /banip use too.
   favicon/
                Server-list icon loader + cache.
 server/instances/
@@ -225,8 +227,10 @@ server/access/
   auth/
                Offline-mode auth logic: bcrypt (HashPassword), Credentials
                (DBCredentials over store.PlayerRepo / MemCredentials), IPGuard
-               (wrong-password counter + IP bans in <auth>.ipbans.json,
-               name→last IP), Service (Register / Verify / Registered). The
+               (wrong-password counters per (IP, name) → IP ban, per IP over
+               all names ×4 → IP ban, per name → NameWait backoff; a login
+               clears only its own account's; IP bans in
+               <auth>.ipbans.json, saves serialised; name→last IP), Service (Register / Verify / Registered). The
                connection side is server/access/authgate.
   authgate/
                The offline-mode auth gate over server.AuthGate
@@ -256,7 +260,10 @@ server/features/
                right-click reaches it through Server.MenuItems.
   metrics/
                The ops HTTP endpoint (/stats JSON from a Source —
-               server.Server.Stats — and pprof): Start.
+               server.Server.Stats — and pprof): Start. METRICS_ADDR
+               (default 127.0.0.1:6060); a non-loopback address is refused
+               without METRICS_TOKEN (then "Authorization: Bearer <token>"
+               on every request).
   gamebridge/
                The plugin API's player: Player (game.PlayerHandle) over the
                connection's exported server-shaped methods (Conn), and the
@@ -332,9 +339,11 @@ Wire format: `VarInt(length) + VarInt(packetID) + payload`. Helpers in `protocol
 Flow in `handler_login.go`:
 1. `sendEncryptionRequest` — per-connection 4-byte verify token + global RSA public key.
 2. `recvAndVerifyEncryptionResponse` — reads response via `ReadPacketSplit`, RSA-decrypts shared secret + verify token, compares token bytes.
-3. `mojang.VerifyWithMojang` — POSTs to sessionserver. Mojang requires the "negative bigint hex" hash format (see `mojang/mojang.go`).
-4. `enableEncryption` — `c.link.Encrypt` wraps the socket with `encryption.WrapEncryptedConn` (AES-128 CFB8). Shared secret doubles as AES key and IV.
-5. `LoginSuccess` sent over the encrypted connection. Properties array count (VarInt 0) is required for both online and offline.
+3. `enableEncryption` — `c.link.Encrypt` wraps the socket with `encryption.WrapEncryptedConn` (AES-128 CFB8). Shared secret doubles as AES key and IV. Done **before** Mojang, like vanilla: the client encrypts from its Encryption Response on, so even the "Authentication failed" disconnect must be encrypted.
+4. `mojang.VerifyWithMojang(ctx, …)` — GET hasJoined (query escaped; `mojang.SessionServer` is the base URL, tests stub it). Mojang requires the "negative bigint hex" hash format (`mojang.ServerHash`).
+5. Ban list + player cap are checked against the **verified** profile name, then `LoginSuccess` goes out over the encrypted connection. Properties array count (VarInt 0) is required for both online and offline.
+
+The login phase (Login Start → Login Success) has a hard `loginTimeout` (30 s): a watchdog closes a connection that doesn't answer the Encryption Request, and the Mojang call shares the deadline (plus a 10 s `http.Client` timeout). Any login-state packet other than Login Start drops the connection.
 
 The RSA keypair is process-global, generated in `server.init()` via `login.NewKeys` (`server/net/login`). Errors panic immediately (not silently dropped).
 

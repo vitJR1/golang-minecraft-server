@@ -3,6 +3,8 @@ package server
 import (
 	"net"
 	"time"
+
+	"minecraft-server/server/net/connlimit"
 )
 
 // auth_gate.go: the hook the offline-mode auth gate (server/access/authgate) plugs
@@ -46,12 +48,15 @@ func gateAuth(c *ClientConnection, reason string) bool {
 // IP is the player's address without the port (see ClientIP).
 func (c *ClientConnection) IP() string { return ClientIP(c.link.RemoteAddr()) }
 
-// ClientIP extracts the IP portion of a net.Addr. Works for *net.TCPAddr
-// (the production case) and falls back to addr.String() for net.Pipe
+// ClientIP is the key the per-IP machinery (connection limits, auth IP
+// bans, /banip, ConnectionsFromIP) knows a client by: for a *net.TCPAddr
+// (the production case) its IPv4 address, or its IPv6 /64
+// (connlimit.Key — one host owns a whole /64, so the full address would let
+// it rotate past every per-IP limit); addr.String() for the net.Pipe
 // connections used in tests.
 func ClientIP(addr net.Addr) string {
 	if tcp, ok := addr.(*net.TCPAddr); ok {
-		return tcp.IP.String()
+		return connlimit.Key(tcp.IP)
 	}
 	if addr == nil {
 		return ""
@@ -69,6 +74,11 @@ func (c *ClientConnection) Disconnect(reason string) {
 	_ = c.sendPlayDisconnect(reason)
 	c.cleanup()
 }
+
+// ResendCommands re-sends the command tree (Declare Commands) — the client
+// highlights and tab-completes from it, and op-only commands are left out
+// for non-operators, so it is stale after /op or /deop.
+func (c *ClientConnection) ResendCommands() error { return c.sendDeclareCommands() }
 
 // SetExperience sets the XP bar overlay: bar fill 0..1, the level number.
 func (c *ClientConnection) SetExperience(bar float32, level, totalXP int32) error {

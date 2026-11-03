@@ -64,6 +64,8 @@ func cmdOp(c *server.ClientConnection, args []string) {
 	_ = c.SendMessage("Granted op to " + target)
 	if conn, _, ok := c.Server().FindPlayer(target); ok {
 		_ = conn.SendMessage("You are now an operator")
+		// The tree the client got at join hid the op-only commands.
+		_ = conn.ResendCommands()
 	}
 }
 
@@ -77,6 +79,7 @@ func cmdDeop(c *server.ClientConnection, args []string) {
 	_ = c.SendMessage("Revoked op from " + target)
 	if conn, _, ok := c.Server().FindPlayer(target); ok {
 		_ = conn.SendMessage("You are no longer an operator")
+		_ = conn.ResendCommands()
 	}
 }
 

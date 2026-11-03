@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"log/slog"
 	"minecraft-server/cfg"
@@ -16,12 +17,33 @@ import (
 	"minecraft-server/server/net/login"
 	"minecraft-server/server/net/packets"
 	"net"
+	"time"
 )
+
+// loginTimeout bounds the login phase from Login Start to Login Success:
+// the wait for the Encryption Response and the Mojang round trip share it,
+// so a client that stalls mid-handshake (or a hung session server) can't
+// hold a connection slot. A var so tests can shorten it.
+var loginTimeout = 30 * time.Second
+
+// errLoginAborted: the connection closed (or the login deadline hit) while
+// the login was in flight; nothing more to say to the client.
+var errLoginAborted = errors.New("login aborted")
+
+// identity is who the login proved the player to be: the Login Start name
+// (offline) or the Mojang-verified profile (online).
+type identity struct {
+	name string
+	uuid [16]byte
+}
 
 func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error {
 	if packetID != packetid.SbLoginStart {
-		slog.Warn("unknown login packet", "packet_id", fmt.Sprintf("0x%02X", packetID))
-		return nil
+		// Login Start is the only packet the client sends unprompted (the
+		// Encryption Response is read inline below; we never send a Login
+		// Plugin Request). Anything else is a misbehaving client — drop it
+		// instead of letting it keep the slot by trickling junk.
+		return fmt.Errorf("unexpected login packet 0x%02X", packetID)
 	}
 
 	name, err := packets.ReadLoginStart(packet)
@@ -54,6 +76,27 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 		}
 	}
 
+	deadline := time.Now().Add(loginTimeout)
+	var id identity
+	if cfg.OnlineMode {
+		id, err = c.runOnlineLogin(deadline)
+	} else {
+		id, err = c.runOfflineLogin()
+	}
+	if err != nil {
+		if errors.Is(err, errLoginAborted) {
+			slog.Info("login aborted", "player", c.playerName, "err", err)
+			c.cleanup()
+			return nil
+		}
+		return err
+	}
+	// From here on the name is the verified one (online: Mojang's profile
+	// name, which the ban list and ops are keyed by).
+	c.playerName = id.name
+
+	// Ban check on the verified name — before verification it is whatever
+	// the client typed (online mode), not who it is.
 	banned, err := c.server.Bans.IsBanned(context.Background(), c.playerName)
 	if err != nil {
 		// Backend hiccup (Postgres timeout etc.). Fail open: the ban list is
@@ -87,15 +130,14 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 		return nil
 	}
 
-	if cfg.OnlineMode {
-		if err := c.runOnlineLogin(); err != nil {
-			return err
-		}
-	} else {
-		if err := c.runOfflineLogin(); err != nil {
-			return err
-		}
+	c.player = player.New(c.server.nextEntityID.Add(1), id.name, id.uuid)
+	if err := c.enableCompression(); err != nil {
+		return err
 	}
+	if err := c.safeWrite(packetid.CbLoginSuccess, login.SuccessPayload(id.uuid, id.name)); err != nil {
+		return fmt.Errorf("sending login success: %w", err)
+	}
+	slog.Debug("login success sent", "player", id.name)
 
 	c.state = StatePlay
 	// Default landing: hub. With the auth plugin enabled, players go
@@ -145,70 +187,61 @@ func (c *ClientConnection) enableCompression() error {
 	return c.link.EnableCompression(packetid.CbLoginSetCompr, protocol.WriteVarInt32(CompressionThreshold), CompressionThreshold)
 }
 
-// runOfflineLogin skips Mojang verification: derives a v3 UUID from the
-// player's name and immediately sends LoginSuccess in plaintext.
-func (c *ClientConnection) runOfflineLogin() error {
+// runOfflineLogin skips Mojang verification: the Login Start name with its
+// v3 offline UUID.
+func (c *ClientConnection) runOfflineLogin() (identity, error) {
 	uuid, err := login.OfflineUUID(c.playerName)
 	if err != nil {
-		return err
+		return identity{}, err
 	}
 	slog.Debug("offline uuid resolved", "player", c.playerName, "uuid", protocol.UUIDString(uuid))
-	c.player = player.New(c.server.nextEntityID.Add(1), c.playerName, uuid)
-
-	if err := c.enableCompression(); err != nil {
-		return err
-	}
-
-	if err := c.safeWrite(packetid.CbLoginSuccess, login.SuccessPayload(uuid, c.playerName)); err != nil {
-		return fmt.Errorf("sending login success: %w", err)
-	}
-	return nil
+	return identity{name: c.playerName, uuid: uuid}, nil
 }
 
-// runOnlineLogin performs the full Mojang-verified handshake: Encryption
-// Request → Encryption Response → RSA decrypt → Mojang verify → enable AES
-// CFB8 → LoginSuccess.
-func (c *ClientConnection) runOnlineLogin() error {
+// runOnlineLogin performs the Mojang-verified handshake: Encryption Request
+// → Encryption Response → RSA decrypt → enable AES CFB8 → Mojang verify —
+// all before deadline. Encryption goes on before the Mojang call, as in
+// vanilla: the client encrypts from its Encryption Response on, so every
+// later frame — the "Authentication failed" disconnect included — has to be
+// encrypted to be readable.
+func (c *ClientConnection) runOnlineLogin(deadline time.Time) (identity, error) {
 	slog.Info("online-mode login: verifying with Mojang", "player", c.playerName)
 
 	verifyToken := make([]byte, 4)
 	_, _ = rand.Read(verifyToken)
 
 	if err := c.sendEncryptionRequest(verifyToken); err != nil {
-		return err
+		return identity{}, err
 	}
-	sharedSecret, err := c.recvAndVerifyEncryptionResponse(verifyToken)
+	sharedSecret, err := c.recvAndVerifyEncryptionResponse(verifyToken, deadline)
 	if err != nil {
-		return err
+		return identity{}, err
+	}
+	if err := c.enableEncryption(sharedSecret); err != nil {
+		return identity{}, err
 	}
 
-	profile, err := mojang.VerifyWithMojang(c.playerName, cfg.ServerId, sharedSecret, keys.Public)
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+	profile, err := mojang.VerifyWithMojang(ctx, c.playerName, cfg.ServerId, sharedSecret, keys.Public)
+	if err == nil && !login.ValidName(profile.Name) {
+		err = fmt.Errorf("mojang returned an invalid profile name %q", profile.Name)
+	}
 	if err != nil {
 		slog.Warn("mojang verification failed", "player", c.playerName, "err", err)
-		_ = c.safeWrite(packetid.CbLoginDisconnect, login.DisconnectPayload(login.AuthFailed(err)))
-		return fmt.Errorf("mojang verification: %w", err)
+		// The error itself (URL, response body) stays in the log.
+		_ = c.safeWrite(packetid.CbLoginDisconnect, login.DisconnectPayload(
+			login.AuthFailed(errors.New("couldn't verify your session with Mojang"))))
+		c.cleanup()
+		return identity{}, fmt.Errorf("%w: mojang verification: %w", errLoginAborted, err)
 	}
 	slog.Info("mojang verified", "player", profile.Name, "uuid", profile.ID)
 
-	if err := c.enableEncryption(sharedSecret); err != nil {
-		return err
-	}
-
 	uuid, err := login.ProfileUUID(profile.ID)
 	if err != nil {
-		return err
+		return identity{}, err
 	}
-	c.player = player.New(c.server.nextEntityID.Add(1), profile.Name, uuid)
-
-	if err := c.enableCompression(); err != nil {
-		return err
-	}
-
-	if err := c.safeWrite(packetid.CbLoginSuccess, login.SuccessPayload(uuid, profile.Name)); err != nil {
-		return fmt.Errorf("sending login success: %w", err)
-	}
-	slog.Debug("login success sent", "player", profile.Name)
-	return nil
+	return identity{name: profile.Name, uuid: uuid}, nil
 }
 
 // sendEncryptionRequest sends Encryption Request with the server's public
@@ -222,15 +255,21 @@ func (c *ClientConnection) sendEncryptionRequest(verifyToken []byte) error {
 
 // recvAndVerifyEncryptionResponse reads the Encryption Response off the still-
 // plaintext connection, RSA-decrypts the shared secret + verify token, and
-// confirms the verify token round-trips. Returns the AES key on success.
-func (c *ClientConnection) recvAndVerifyEncryptionResponse(verifyToken []byte) ([]byte, error) {
+// confirms the verify token round-trips. Returns the AES key on success. The
+// read itself has no deadline (conn.Conn.ReadSplit), so a watchdog closes
+// the connection at deadline; the read then fails with errLoginAborted.
+func (c *ClientConnection) recvAndVerifyEncryptionResponse(verifyToken []byte, deadline time.Time) ([]byte, error) {
+	watchdog := time.AfterFunc(time.Until(deadline), func() {
+		slog.Info("login timed out waiting for the encryption response", "player", c.playerName)
+		c.cleanup()
+	})
 	// Encryption Response arrives before Set Compression, so this read is
 	// always uncompressed regardless of the connection's current threshold.
 	id, data, err := c.link.ReadSplit()
+	if !watchdog.Stop() || c.isClosed() {
+		return nil, fmt.Errorf("%w: reading encryption response: %w", errLoginAborted, err)
+	}
 	if err != nil {
-		if c.isClosed() {
-			return nil, nil
-		}
 		return nil, fmt.Errorf("reading encryption response: %w", err)
 	}
 	if id != packetid.SbLoginEncResponse {
