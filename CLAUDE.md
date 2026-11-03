@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A from-scratch Minecraft Java Edition server in Go, targeting protocol **763 (1.20.1)**. The author's stated goal is to avoid third-party libraries — prefer writing protocol/NBT/encryption code directly over pulling in `go-mc` or similar. If you need to add a dependency, ask first.
 
-Module name: `minecraft-server` (Go 1.24).
+Module name: `minecraft-server` (Go 1.25).
 
 ## Build, run, test
 
@@ -17,7 +17,7 @@ go test ./...            # tests live in nbt/ and server/ (registry codec)
 go vet ./...             # static checks
 ```
 
-There's no CI, no linter config, no external deps (`go.sum` is empty).
+There's no CI and no linter config. Direct dependencies (`go.mod`): pgx/v5, golang-migrate, go-redis/v9, godotenv and x/crypto (bcrypt) — the protocol, NBT and encryption code is still hand-written.
 
 Online-mode auth is toggled via `cfg.OnlineMode` (a `var`) in `cfg/cfg.go`. Online mode hits `sessionserver.mojang.com` (see `mojang/mojang.go`).
 
@@ -284,6 +284,12 @@ game/          Plugin API: Definition/Logic (one mini-game in one instance)
                plus the server-wide half in plugin.go — RegisterListener
                (a Logic attached to every instance), RegisterCommand,
                BlockInteraction. Never imports server/.
+logger/        Process-wide slog setup (text or JSON, LOG_LEVEL).
+bots/          NoSleeperBot, the chat moderator (bad-words list
+               badwords.json → censor / mute). Not the AI players — those
+               are server/bots/.
+cmd/loadtest/  Load generator: N simulated 1.20.1 clients against an
+               in-process (or remote) server, throughput + error stats.
 plugins/       Server-wide plugins (blank-imported from main.go like games).
                worldedit/ is the reference: wand selection, //set //replace
                //undo //copy //paste, //schem save.
@@ -451,4 +457,4 @@ After LoginSuccess + state transition to play, `sendPlayPackets` (in `server.go`
 - Comments and log messages are a mix of Russian and English — match the surrounding file's language.
 - Errors wrap with `%w` and use a noun-phrase prefix (`"reading packet ID: %w"`).
 - File names are `snake_case.go`. Handlers are `handler_<state>.go` (play split into `handler_play_*.go`); packet decoding is `server/net/packets`, play senders `play_send.go`.
-- No structured logging — everything is `fmt.Printf`. Per-packet write logging is gated behind `protocol.DebugPackets = true`.
+- Logging is `log/slog` (stdlib), configured once by `logger.Init` (`LOG_FORMAT=json`, `LOG_LEVEL`). Per-packet write logging is gated behind `protocol.DebugPackets = true`.

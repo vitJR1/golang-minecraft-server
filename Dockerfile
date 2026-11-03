@@ -30,6 +30,7 @@ COPY --chown=mc:mc banlist.json auth.json badwords.json server-icon.png ./
 USER mc
 EXPOSE 25565
 # Метрики/pprof по умолчанию на loopback — внутри контейнера они недоступны
-# снаружи; переопределяется через METRICS_ADDR=0.0.0.0:6060.
+# снаружи; переопределяется через METRICS_ADDR=0.0.0.0:6060 вместе с
+# METRICS_TOKEN (без токена не-loopback адрес отклоняется).
 ENV PORT=25565
 ENTRYPOINT ["/usr/local/bin/minecraft-server"]

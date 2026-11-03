@@ -51,7 +51,9 @@ func newEffectTable() *effectTable { return &effectTable{} }
 
 // apply grants e at level (amplifier+1) for d, telling the client.
 func (t *effectTable) apply(c *ClientConnection, e effect.Effect, level int, d time.Duration) {
-	t.Apply(c, e, level, d)
+	// A weaker effect doesn't replace a stronger one (Table.Apply): show
+	// the client what the player actually has now.
+	level, d = t.Apply(c, e, level, d)
 	if c.player != nil {
 		_ = c.safeWrite(packetid.CbPlayEntityEffect, effect.EntityPayload(c.player.EntityID, e, level, d))
 	}

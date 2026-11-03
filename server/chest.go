@@ -30,7 +30,14 @@ func (s *Server) saveEnderChest(e *enderchest.Chest) { enderchest.Save(s.EnderCh
 func (c *ClientConnection) openBlockChest(pos world.Position) {
 	var store chest.Store = c.instance.chests.At(pos)
 	if chest.IsEnder(c.instance.World.GetBlock(pos)) && c.player != nil && c.server != nil {
-		store = c.server.enderChestFor(c.player.UUID)
+		e := c.server.enderChestFor(c.player.UUID)
+		if !e.Available() {
+			// The stored contents couldn't be loaded: an empty window would
+			// look like the items are gone.
+			_ = c.sendSystemMessage("Ender chest unavailable, try again later.")
+			return
+		}
+		store = e
 	}
 	p := pos
 	c.openChest(&openMenu{kind: "chest", chest: store, inst: c.instance, at: &p})
