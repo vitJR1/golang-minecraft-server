@@ -153,18 +153,44 @@ func TestRouteUsesAnExistingBridge(t *testing.T) {
 }
 
 func TestResumeAt(t *testing.T) {
+	w := testWorld{}
+	w.floor(63, 0, 2, -1, 1) // the island the route leaves
+	w.floor(63, 3, 3, 1, 1)  // a block beside the bridge
+	w.floor(59, 3, 3, 0, 0)  // ground far below it
+	w.floor(63, 9, 9, 9, 9)  // somewhere else
 	route := []Step{{Cell: at(1, 64, 0)}, {Cell: at(2, 64, 0)}, {Cell: at(3, 64, 0), Place: []world.Position{at(3, 63, 0)}}, {Cell: at(4, 64, 0), Place: []world.Position{at(4, 63, 0)}}}
-	if i := ResumeAt(route, at(2, 64, 0)); i != 2 {
+	if i := ResumeAt(w.at, route, at(2, 64, 0)); i != 2 {
 		t.Errorf("standing on step 1: resume at %d, want 2", i)
 	}
-	if i := ResumeAt(route, at(3, 64, 1)); i != 2 {
+	if i := ResumeAt(w.at, route, at(3, 64, 1)); i != 2 {
 		t.Errorf("knocked beside step 2: resume at %d, want 2 (walk back onto it)", i)
 	}
-	if i := ResumeAt(route, at(3, 60, 0)); i != -1 {
+	if i := ResumeAt(w.at, route, at(3, 60, 0)); i != -1 {
 		t.Errorf("fell below the route: resume at %d, want -1", i)
 	}
-	if i := ResumeAt(route, at(9, 64, 9)); i != -1 {
+	if i := ResumeAt(w.at, route, at(9, 64, 9)); i != -1 {
 		t.Errorf("far away: resume at %d, want -1", i)
+	}
+	// Feet in step 2's cell, its block not down: on the edge of step 1's
+	// floor, not on step 2.
+	if i := ResumeAt(w.at, route, at(3, 64, 0)); i != -1 {
+		t.Errorf("over step 2's missing block: resume at %d, want -1", i)
+	}
+}
+
+// TestResumeFrom: the resumed route starts at the step to go to; from
+// beside a leap's landing the move onto it is a plain step across.
+func TestResumeFrom(t *testing.T) {
+	route := []Step{{Cell: at(1, 64, 0)}, {Cell: at(4, 64, 0), Leap: true}, {Cell: at(5, 64, 0)}}
+	if r := ResumeFrom(route, 1, at(1, 64, 0)); len(r) != 2 || r[0].Cell != at(4, 64, 0) || !r[0].Leap {
+		t.Errorf("on the run-up cell: %v, want the leap kept", r)
+	}
+	r := ResumeFrom(route, 1, at(4, 64, 1))
+	if len(r) != 2 || r[0].Cell != at(4, 64, 0) || r[0].Leap {
+		t.Errorf("beside the landing: %v, want a plain step onto it", r)
+	}
+	if !route[1].Leap {
+		t.Error("ResumeFrom changed the route it was given")
 	}
 }
 

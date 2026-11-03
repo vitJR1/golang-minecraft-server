@@ -81,7 +81,12 @@ func (b botBody) Feet() anticheat.Vec { return b.c.feet() }
 func (b botBody) Eye() anticheat.Vec  { return b.c.eye() }
 
 func (b botBody) Move(x, y, z float64, yaw, pitch float32, onGround, show bool) {
+	// The move as the server's movement state sees it (what onMove records
+	// for a player): a crit needs a falling last move (LastDY < 0), so
+	// without it a bot never landed one.
+	from := b.c.feet()
 	b.c.player.MoveAndLook(x, y, z, yaw, pitch, onGround)
+	b.c.ac.Move.Moved(from, anticheat.Vec{X: x, Y: y, Z: z})
 	if show {
 		b.c.broadcastEntityTeleport()
 		b.c.broadcastHeadRotation()

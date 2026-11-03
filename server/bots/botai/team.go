@@ -233,13 +233,15 @@ func (b *Bot) teamTargets() []world.Position {
 }
 
 // teamIntruder is the enemy at the team's bed that this bot, a defender,
-// should go for — or nil.
-func (b *Bot) teamIntruder() Mob {
+// should go for — or nil. Not one it found no way to (ignored until a
+// tick): picked again every tick, that one kept it standing in front of it
+// instead of fortifying the bed.
+func (b *Bot) teamIntruder(now uint64) Mob {
 	if b.brain.role != RoleDefender {
 		return nil
 	}
 	tb := b.teamBrainFor()
-	if tb == nil || tb.intruder == nil || !b.targetValid(tb.intruder) {
+	if tb == nil || tb.intruder == nil || now < b.brain.ignore[tb.intruder.ID()] || !b.targetValid(tb.intruder) {
 		return nil
 	}
 	return tb.intruder

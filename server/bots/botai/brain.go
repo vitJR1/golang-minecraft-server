@@ -90,12 +90,13 @@ type brainState struct {
 	needBlocks int
 
 	// lastRoute is a far route the bot fell off (knocked, stuck), kept to
-	// pick up again (botnav.ResumeAt) rather than search afresh; resumedAt the step
-	// it was last resumed at, so a spot it keeps getting stuck on is searched
-	// anew after all.
+	// pick up again (botnav.ResumeAt) rather than search afresh; resumedAt the
+	// cell of the step it was last resumed at (resumed: there is one), so a
+	// spot it keeps getting stuck on is searched anew after all.
 	lastRoute []botnav.Step
 	lastKey   string
-	resumedAt int
+	resumedAt world.Position
+	resumed   bool
 	dig       *digJob
 	failed    map[world.Position]uint64
 	// around is the target it's walking round to a softer side of
@@ -173,10 +174,26 @@ type brainState struct {
 	yaw, pitch float32
 }
 
-// digJob is a block being dug and the tick it breaks.
+// digJob is a block being dug, the tick it breaks and the last tick it was
+// worked on.
 type digJob struct {
 	pos    world.Position
 	doneAt uint64
+	lastAt uint64
+}
+
+// digging is the job digging pos, carried on from last tick — nil when it
+// has to start over: another block, or the dig was left off (a fight, a
+// trip to the shop) and, like a player letting go of the button, lost its
+// progress. Kept across the break, a job came back long "done" and broke
+// the block on the spot.
+func (b *Bot) digging(now uint64, pos world.Position) *digJob {
+	d := b.brain.dig
+	if d == nil || d.pos != pos || now > d.lastAt+1 {
+		return nil
+	}
+	d.lastAt = now
+	return d
 }
 
 // Tick is one game tick of the bot: think, move, tell everyone. The server
@@ -324,7 +341,7 @@ func (b *Bot) pickTarget(now uint64) {
 		best, bestD = o, d
 	}
 	// A defender goes for whoever is at the team's bed, from any distance.
-	if in := b.teamIntruder(); in != nil {
+	if in := b.teamIntruder(now); in != nil {
 		best = in
 	}
 	if best != br.target {
@@ -345,13 +362,18 @@ func (b *Bot) fight(now uint64, t Mob) botnav.Input {
 	ts := t.Snapshot()
 	b.lookAt(anticheat.Vec{X: ts.X, Y: ts.Y + 1.2, Z: ts.Z})
 
-	if b.skill.retreat && b.self.Snapshot().Health <= botRetreatHP && !b.onEnemyBase() && br.role != RolePusher {
+	d := b.reach(t)
+	if b.skill.retreat && now >= br.retreatUntil && b.self.Snapshot().Health <= botRetreatHP && !b.onEnemyBase() && br.role != RolePusher {
 		br.retreatUntil = now + botRetreatTicks
+	}
+	// Falling back, it fights only an enemy too close to run from (think
+	// sends it here then). Dropping the target and standing still instead
+	// froze it in front of the enemy: the next tick picked the same enemy
+	// and came back here.
+	if now < br.retreatUntil && d >= botChaseClose {
 		br.target = nil
 		return botnav.Input{}
 	}
-
-	d := b.reach(t)
 	if br.drawAt != 0 || (d > botArcherRange && br.role == RoleArcher) {
 		// Mid-draw: finish the shot. An archer opens at range.
 		if in, ok := b.shoot(now, t); ok {
@@ -575,6 +597,15 @@ func (b *Bot) pursue(now uint64) botnav.Input {
 			continue
 		case farReady:
 			if need := b.bridgesLeft(); need > blocks {
+				if want == 0 {
+					// Not going back for more (at an enemy base, a defender
+					// done fortifying): this target is out of its reach for
+					// now. Dropping the route only to search it again next
+					// tick ran a far search every other tick, for ever.
+					b.giveUp(now, t)
+					br.route, br.needBlocks = nil, 0
+					continue
+				}
 				// Not enough to get there: buy (or earn) the rest first.
 				br.needBlocks = need + botBlockSpare
 				br.route = nil
@@ -611,7 +642,7 @@ func (b *Bot) breakTarget(now uint64, t world.Position) botnav.Input {
 		pos = cover
 	}
 	b.lookAt(blockCentre(pos))
-	if br.dig == nil || br.dig.pos != pos {
+	if b.digging(now, pos) == nil {
 		blk := at(pos)
 		if blk == world.Air {
 			br.dig = nil
@@ -640,7 +671,7 @@ func (b *Bot) breakTarget(now uint64, t world.Position) botnav.Input {
 			b.giveUp(now, t)
 			return botnav.Input{}
 		}
-		br.dig = &digJob{pos: pos, doneAt: now + uint64(ticks)}
+		br.dig = &digJob{pos: pos, doneAt: now + uint64(ticks), lastAt: now}
 	}
 	if now%4 == 0 {
 		b.body.Swing()
@@ -760,7 +791,7 @@ func (b *Bot) digBlock(now uint64, pos, target world.Position) botnav.Input {
 	br := &b.brain
 	at := b.world().Block
 	b.lookAt(blockCentre(pos))
-	if br.dig == nil || br.dig.pos != pos {
+	if b.digging(now, pos) == nil {
 		blk := at(pos)
 		if blk == world.Air {
 			br.dig = nil
@@ -772,7 +803,7 @@ func (b *Bot) digBlock(now uint64, pos, target world.Position) botnav.Input {
 			b.giveUp(now, target)
 			return botnav.Input{}
 		}
-		br.dig = &digJob{pos: pos, doneAt: now + uint64(ticks)}
+		br.dig = &digJob{pos: pos, doneAt: now + uint64(ticks), lastAt: now}
 	}
 	if now%4 == 0 {
 		b.body.Swing()
@@ -891,9 +922,10 @@ func (b *Bot) goToFar(now uint64, key string, aim world.Position, goal func(worl
 	// on (or by) it, instead of laying a new one from here.
 	if br.lastKey == key && br.lastRoute != nil && b.phys.OnGround {
 		here := b.feetCell()
-		if i := botnav.ResumeAt(br.lastRoute, here); i >= 0 && i < len(br.lastRoute) && i != br.resumedAt {
-			br.route, br.routeIdx, br.routeKey, br.routeStart, br.progressAt, br.farRoute = br.lastRoute, i, key, here, now, true
-			br.resumedAt, br.lastRoute = i, nil
+		if i := botnav.ResumeAt(b.world().Block, br.lastRoute, here); i >= 0 && i < len(br.lastRoute) && !(br.resumed && br.resumedAt == br.lastRoute[i].Cell) {
+			// From here: the rest of the route, its first move from this cell.
+			br.route, br.routeIdx, br.routeKey, br.routeStart, br.progressAt, br.farRoute = botnav.ResumeFrom(br.lastRoute, i, here), 0, key, here, now, true
+			br.resumedAt, br.resumed, br.lastRoute = br.lastRoute[i].Cell, true, nil
 			return b.follow(now), farReady
 		}
 		br.lastRoute = nil
@@ -906,7 +938,7 @@ func (b *Bot) goToFar(now uint64, key string, aim world.Position, goal func(worl
 				return botnav.Input{}, farFailed
 			}
 			br.route, br.routeIdx, br.routeKey, br.routeAt, br.routeStart, br.progressAt = route, 0, key, now, br.farStart, now
-			br.farRoute, br.resumedAt = true, -1
+			br.farRoute, br.resumed = true, false
 			return b.follow(now), farReady
 		default:
 			return botnav.Input{}, farPending
@@ -980,10 +1012,13 @@ func (b *Bot) follow(now uint64) botnav.Input {
 	}
 	here := b.feetCell()
 	// A hop (or a push) can carry the bot past steps: landed on a later one
-	// of the route, it carries on from there.
+	// of the route, it carries on from there. Not onto a step whose blocks
+	// aren't down yet: the feet are in its cell, but the bot stands on the
+	// edge of the block before, and skipping the step left it unbuilt — the
+	// next move went into the void.
 	if b.phys.OnGround && here != step.Cell && here != prev {
 		for k := br.routeIdx + 1; k < len(br.route) && k <= br.routeIdx+botHopSkip; k++ {
-			if br.route[k].Cell == here {
+			if _, unbuilt := nextPlacement(at, br.route[k]); br.route[k].Cell == here && !unbuilt {
 				br.routeIdx, br.progressAt = k+1, now
 				return b.follow(now)
 			}
