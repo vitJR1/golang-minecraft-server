@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -72,6 +73,28 @@ func (r *PlayerRepo) SetPassword(ctx context.Context, playerID int64, hash strin
 		return ErrNotFound
 	}
 	return nil
+}
+
+// PasswordHashByName returns the password hash that owns username, matched
+// case-insensitively: player names are case-insensitive everywhere else
+// (ops, bans, the online list), so "admin" must not get a fresh account
+// beside a registered "Admin". The exact-UUID row wins, then the oldest
+// registered one. ok is false when no variant of the name has a password.
+func (r *PlayerRepo) PasswordHashByName(ctx context.Context, uuid, username string) (hash string, ok bool, err error) {
+	var h string
+	err = r.db.QueryRow(ctx,
+		`SELECT password_hash FROM players
+		 WHERE (uuid = $1::uuid OR lower(username) = lower($2))
+		   AND password_hash IS NOT NULL AND password_hash <> ''
+		 ORDER BY (uuid = $1::uuid) DESC, id
+		 LIMIT 1`, uuid, username).Scan(&h)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return h, true, nil
 }
 
 // PasswordHash returns the player's stored hash and whether one is set. A

@@ -225,3 +225,20 @@ func TestCrossModeTotals(t *testing.T) {
 		t.Errorf("Totals wrong: %+v", totals)
 	}
 }
+
+// TestPasswordHashByNameIgnoresCase: a registered "Admin" owns "admin" too,
+// so the lowercase name can't get its own account (OpSet.Has ignores case).
+func TestPasswordHashByNameIgnoresCase(t *testing.T) {
+	s, ctx := testStore(t)
+	admin, _ := s.Players.Upsert(ctx, "99999999-9999-9999-9999-999999999999", "Admin")
+	if err := s.Players.SetPassword(ctx, admin.ID, "$2a$10$adminhash"); err != nil {
+		t.Fatal(err)
+	}
+	hash, ok, err := s.Players.PasswordHashByName(ctx, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "admin")
+	if err != nil || !ok || hash != "$2a$10$adminhash" {
+		t.Fatalf("admin → %q ok=%v err=%v, want Admin's hash", hash, ok, err)
+	}
+	if _, ok, err := s.Players.PasswordHashByName(ctx, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "nobody"); err != nil || ok {
+		t.Fatalf("unknown name: ok=%v err=%v", ok, err)
+	}
+}

@@ -134,3 +134,26 @@ func ServerFull(online, max int) string {
 
 // AuthFailed: Mojang didn't verify the session.
 func AuthFailed(err error) string { return "Authentication failed: " + err.Error() }
+
+// InvalidName: the Login Start name fails ValidName.
+const InvalidName = "Invalid username"
+
+// MaxNameLength is the longest username vanilla accepts.
+const MaxNameLength = 16
+
+// ValidName is vanilla 1.20.1's StringUtil.isValidPlayerName plus the
+// non-empty check: 1..16 characters, none of them a control character,
+// space or beyond ASCII. Longer names used to reach protocol.WriteString in
+// the play packets (a panic past 32767 bytes) or break every client's tab
+// list.
+func ValidName(name string) bool {
+	if name == "" || len(name) > MaxNameLength {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		if name[i] <= ' ' || name[i] >= 0x7F {
+			return false
+		}
+	}
+	return true
+}

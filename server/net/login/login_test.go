@@ -84,3 +84,16 @@ func TestDisconnectPayloadEscapes(t *testing.T) {
 		t.Error("reason texts")
 	}
 }
+
+func TestValidName(t *testing.T) {
+	for _, ok := range []string{"a", "Steve", "BOT_Max", "abcdefghijklmnop", "x-y.z!"} {
+		if !ValidName(ok) {
+			t.Errorf("%q rejected", ok)
+		}
+	}
+	for _, bad := range []string{"", "abcdefghijklmnopq", "two words", "tab\t", "имя", "§cRed", strings.Repeat("a", 40000)} {
+		if ValidName(bad) {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}

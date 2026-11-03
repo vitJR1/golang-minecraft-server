@@ -54,6 +54,7 @@ type Drag struct {
 	status int // 0 idle, 1 collecting slots
 	typ    int // 0 split evenly (left), 1 one each (right), 2 full stacks (middle, creative)
 	Slots  []int
+	size   int // len(View.Slots) of the window the drag started in
 }
 
 func (d *Drag) Reset() { *d = Drag{} }
@@ -408,10 +409,14 @@ func (v *View) quickCraft(slot, button int, d *Drag) {
 		d.Reset()
 	case header == 0:
 		if typ == 0 || typ == 1 || (typ == 2 && v.Creative) {
-			d.status, d.typ, d.Slots = 1, typ, nil
+			d.status, d.typ, d.Slots, d.size = 1, typ, nil, len(v.Slots)
 		} else {
 			d.Reset()
 		}
+	case d.size != len(v.Slots):
+		// The drag started in another window (its slots were checked
+		// against that one): drop it, like vanilla on a window change.
+		d.Reset()
 	case header == 1:
 		if !v.valid(slot) {
 			return
@@ -439,7 +444,7 @@ func (v *View) quickCraft(slot, button int, d *Drag) {
 		carried := v.Cursor
 		left := int(carried.Count)
 		for _, s := range slots {
-			if !v.quickReplaceable(s, carried) || !v.mayPlace(s, carried) ||
+			if !v.valid(s) || !v.quickReplaceable(s, carried) || !v.mayPlace(s, carried) ||
 				(typ != 2 && int(carried.Count) < len(slots)) {
 				continue
 			}

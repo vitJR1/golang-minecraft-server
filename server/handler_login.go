@@ -28,6 +28,12 @@ func (c *ClientConnection) handleLogin(packet *bytes.Buffer, packetID int) error
 	if err != nil {
 		return err
 	}
+	if !login.ValidName(name) {
+		slog.Info("invalid username, rejecting", "len", len(name))
+		_ = c.safeWrite(packetid.CbLoginDisconnect, login.DisconnectPayload(login.InvalidName))
+		c.cleanup()
+		return nil
+	}
 	c.playerName = name
 	slog.Info("player connecting", "player", c.playerName)
 

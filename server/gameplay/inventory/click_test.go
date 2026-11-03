@@ -366,3 +366,23 @@ func TestClickNeverCreatesItems(t *testing.T) {
 		}
 	}
 }
+
+// TestClickDragAcrossWindowsDropped: a drag started in a chest window and
+// ended in window 0 used to index window 0 with the chest's slot numbers
+// (60 of 46) and panic; now the window change drops the drag.
+func TestClickDragAcrossWindowsDropped(t *testing.T) {
+	var d Drag
+	chest := chestView()
+	chest.Cursor = stack(t, "minecraft:stone", 10)
+	chest.Click(-999, 0, ClickQuickCraft, &d)
+	chest.Click(60, 1, ClickQuickCraft, &d)
+	chest.Click(61, 1, ClickQuickCraft, &d)
+
+	inv := invView()
+	inv.Cursor = chest.Cursor
+	inv.Click(-999, 2, ClickQuickCraft, &d) // must not panic
+	wantCursor(t, inv, stack(t, "minecraft:stone", 10))
+	if len(d.Slots) != 0 {
+		t.Fatalf("drag kept across windows: %v", d.Slots)
+	}
+}

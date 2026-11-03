@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"sync"
 
@@ -24,15 +23,12 @@ type Credentials interface {
 // DBCredentials keeps credentials in the players table (password_hash column).
 type DBCredentials struct{ Players *store.PlayerRepo }
 
-func (d DBCredentials) Hash(ctx context.Context, uuid, _ string) (string, bool, error) {
-	p, err := d.Players.GetByUUID(ctx, uuid)
-	if errors.Is(err, store.ErrNotFound) {
-		return "", false, nil
-	}
-	if err != nil {
-		return "", false, err
-	}
-	return d.Players.PasswordHash(ctx, p.ID)
+// Hash looks the name up case-insensitively (store.PlayerRepo.
+// PasswordHashByName), like MemCredentials: keyed by the exact-case UUID
+// alone, "admin" could register beside op "Admin" and pass OpSet.Has, which
+// ignores case.
+func (d DBCredentials) Hash(ctx context.Context, uuid, name string) (string, bool, error) {
+	return d.Players.PasswordHashByName(ctx, uuid, name)
 }
 
 func (d DBCredentials) Set(ctx context.Context, uuid, name, hash string) error {
