@@ -6,10 +6,10 @@ import (
 	"minecraft-server/anticheat"
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/combat"
-	"minecraft-server/server/enchant"
-	"minecraft-server/server/projectile"
-	"minecraft-server/server/sound"
+	"minecraft-server/server/gameplay/combat"
+	"minecraft-server/server/gameplay/enchant"
+	"minecraft-server/server/gameplay/projectile"
+	"minecraft-server/server/gameplay/sound"
 	"minecraft-server/world"
 )
 

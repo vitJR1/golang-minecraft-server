@@ -3,7 +3,7 @@ package server
 import (
 	"bytes"
 	"minecraft-server/player"
-	"minecraft-server/server/inventory"
+	"minecraft-server/server/gameplay/inventory"
 	"testing"
 
 	"minecraft-server/protocol"

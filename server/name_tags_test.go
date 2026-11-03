@@ -10,7 +10,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/botai"
+	"minecraft-server/server/bots/botai"
 	"minecraft-server/world"
 )
 

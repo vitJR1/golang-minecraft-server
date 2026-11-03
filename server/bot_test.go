@@ -8,9 +8,9 @@ import (
 
 	"minecraft-server/game"
 	"minecraft-server/player"
-	"minecraft-server/server/botai"
-	"minecraft-server/server/combat"
-	"minecraft-server/server/inventory"
+	"minecraft-server/server/bots/botai"
+	"minecraft-server/server/gameplay/combat"
+	"minecraft-server/server/gameplay/inventory"
 	"minecraft-server/world"
 )
 
@@ -505,7 +505,7 @@ type teamsGuide struct{ fakeGuide }
 
 func (*teamsGuide) BotTeams(*game.Ctx) []string { return []string{"red", "blue"} }
 
-// TestBotCompletionSources: what /bot's tab completion (server/commands)
+// TestBotCompletionSources: what /bot's tab completion (server/features/commands)
 // lists — the game's team names and the bots.
 func TestBotCompletionSources(t *testing.T) {
 	inst, _ := botWorld()

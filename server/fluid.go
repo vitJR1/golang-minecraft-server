@@ -3,13 +3,13 @@ package server
 import (
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/combat"
-	"minecraft-server/server/fluid"
-	"minecraft-server/server/sound"
+	"minecraft-server/server/gameplay/combat"
+	"minecraft-server/server/gameplay/fluid"
+	"minecraft-server/server/gameplay/sound"
 	"minecraft-server/world"
 )
 
-// fluid.go: fluids in an instance — the flow model is server/fluid (Of,
+// fluid.go: fluids in an instance — the flow model is server/gameplay/fluid (Of,
 // Update, Queue) — and what they do to players: lava burns, fire, water
 // puts it out.
 

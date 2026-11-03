@@ -7,7 +7,7 @@ import (
 
 	_ "minecraft-server/games/bedwars"
 	"minecraft-server/schem"
-	"minecraft-server/server/botai"
+	"minecraft-server/server/bots/botai"
 	"minecraft-server/templates"
 )
 

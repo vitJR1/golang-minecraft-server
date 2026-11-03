@@ -10,7 +10,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/effect"
+	"minecraft-server/server/gameplay/effect"
 	"minecraft-server/world"
 )
 

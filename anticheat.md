@@ -43,7 +43,7 @@ nuker, fly); **P2** — эвристики и полировка.
   шаг: инвариант «суммы предметов по id не растут» (`itemTotals` до/после) —
   при росте откат и ресинк. Это закрывает генерацию предметов почти без кода.
   Также проверять State ID (сейчас читается и выбрасывается, `handler_play.go:492`).
-- **Сделано:** сразу полная симуляция (`server/inventory/click.go`, порт vanilla
+- **Сделано:** сразу полная симуляция (`server/gameplay/inventory/click.go`, порт vanilla
   `doClick` 1.20.1: все режимы 0–6, drag между пакетами, shift-click по
   `quickMoveStack` для инвентаря и сундука, слоты брони, F/цифры). Ответ
   клиента только сравнивается, при расхождении — ресинк окна. Сундук
@@ -53,7 +53,7 @@ nuker, fly); **P2** — эвристики и полировка.
   (результат не выдаётся), сетка возвращается в инвентарь при закрытии.
 
 ### 3. ~~Чары и NBT предметов берутся от клиента~~ — исправлено
-`inventory.ReadSlot` (`server/inventory/stack.go`) парсит `Enchantments`/`Damage` из NBT
+`inventory.ReadSlot` (`server/gameplay/inventory/stack.go`) парсит `Enchantments`/`Damage` из NBT
 клиента, а `heldEnchant` использует их в бою (`server/combat.go` Sharpness,
 Knockback, Protection в `armor.go`, Efficiency в копании).
 

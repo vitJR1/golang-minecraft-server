@@ -1,6 +1,6 @@
 package server
 
-import "minecraft-server/server/command"
+import "minecraft-server/server/features/command"
 
 // Command is a slash command run by a player connection (command.Command).
 type Command = command.Command[*ClientConnection]

@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"log/slog"
 	"minecraft-server/game"
-	"minecraft-server/server/matchmaker"
+	"minecraft-server/server/instances/matchmaker"
 )
 
-// Matchmaker holds the per-game waiting queues (server/matchmaker). When a
+// Matchmaker holds the per-game waiting queues (server/instances/matchmaker). When a
 // queue reaches a game's MinPlayers it spawns a fresh Instance via
 // Server.StartGame and moves the waiting players in.
 //

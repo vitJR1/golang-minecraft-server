@@ -7,14 +7,14 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/chest"
-	"minecraft-server/server/inventory"
+	"minecraft-server/server/gameplay/chest"
+	"minecraft-server/server/gameplay/inventory"
 	"minecraft-server/world"
 )
 
 // menu.go: chest-window GUIs. A connection has at most one open (c.menu):
 // a chest (block or ender, simulated clicks — click.go) or a menu whose
-// clicks go to a callback (plugin GUIs, the hub's navigation — server/hub —
+// clicks go to a callback (plugin GUIs, the hub's navigation — server/features/hub —
 // through OpenMenu). Click Container and Close Container route here
 // (handler_play_player.go).
 

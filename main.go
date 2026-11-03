@@ -15,11 +15,11 @@ import (
 	"minecraft-server/redisc"
 	"minecraft-server/schem"
 	"minecraft-server/server"
-	"minecraft-server/server/authgate"
-	"minecraft-server/server/enderchest"
-	"minecraft-server/server/favicon"
-	"minecraft-server/server/hub"
-	"minecraft-server/server/metrics"
+	"minecraft-server/server/access/authgate"
+	"minecraft-server/server/features/hub"
+	"minecraft-server/server/features/metrics"
+	"minecraft-server/server/gameplay/enderchest"
+	"minecraft-server/server/net/favicon"
 	"minecraft-server/store"
 	"minecraft-server/templates"
 	"net"
@@ -35,7 +35,7 @@ import (
 
 	// Server features built over its exported API (server/api.go): each
 	// registers itself in init(). The built-in slash commands live here.
-	_ "minecraft-server/server/commands"
+	_ "minecraft-server/server/features/commands"
 
 	// Each blank import registers a mini-game with game.Register during
 	// its init(). Drop a game by deleting the line.

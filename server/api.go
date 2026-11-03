@@ -7,14 +7,14 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/botai"
-	"minecraft-server/server/effect"
-	"minecraft-server/server/inventory"
-	"minecraft-server/server/lobby"
-	"minecraft-server/server/sound"
+	"minecraft-server/server/bots/botai"
+	"minecraft-server/server/gameplay/effect"
+	"minecraft-server/server/gameplay/inventory"
+	"minecraft-server/server/gameplay/sound"
+	"minecraft-server/server/instances/lobby"
 )
 
-// api.go: what the feature packages built over the server (server/commands,
+// api.go: what the feature packages built over the server (server/features/commands,
 // …) may do with a connection and the server. They import server; server
 // never imports them — main blank-imports them so their init() registers
 // them.

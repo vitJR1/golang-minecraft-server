@@ -8,7 +8,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/title"
+	"minecraft-server/server/hud/title"
 	"minecraft-server/world"
 )
 

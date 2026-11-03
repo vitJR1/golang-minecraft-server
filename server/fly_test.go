@@ -6,10 +6,10 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/abilities"
+	"minecraft-server/server/gameplay/abilities"
 )
 
-// fly_test.go: flight permission (/fly is server/commands) and its interplay
+// fly_test.go: flight permission (/fly is server/features/commands) and its interplay
 // with the movement checks.
 
 // abilitiesSent returns the flags of the Player Abilities packets c sent.

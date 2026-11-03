@@ -2,7 +2,7 @@ package server
 
 import (
 	"minecraft-server/game"
-	"minecraft-server/server/scoreboard"
+	"minecraft-server/server/hud/scoreboard"
 )
 
 // name_tags.go: players grouped under a coloured prefix — "● Name" in the
@@ -11,7 +11,7 @@ import (
 // BedWars team); everyone in the instance gets the group as a team "nt_…"
 // with the prefix, the name colour and the members.
 //
-// The groups and their packets are server/scoreboard (Tags, SyncTags).
+// The groups and their packets are server/hud/scoreboard (Tags, SyncTags).
 // Like the sidebar (sidebar.go), the client keeps its teams across our
 // Respawn and kicks on a team created twice, so each connection remembers
 // what it has (nameTags, under sidebarMu) and syncNameTags sends only the

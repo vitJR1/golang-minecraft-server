@@ -6,9 +6,9 @@ import (
 	"minecraft-server/anticheat"
 	"minecraft-server/game"
 	"minecraft-server/player"
-	"minecraft-server/server/botai"
-	"minecraft-server/server/effect"
-	"minecraft-server/server/inventory"
+	"minecraft-server/server/bots/botai"
+	"minecraft-server/server/gameplay/effect"
+	"minecraft-server/server/gameplay/inventory"
 	"minecraft-server/world"
 )
 

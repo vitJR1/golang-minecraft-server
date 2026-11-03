@@ -7,7 +7,7 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/schem"
-	"minecraft-server/server/botai"
+	"minecraft-server/server/bots/botai"
 	"minecraft-server/templates"
 )
 

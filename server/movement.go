@@ -6,7 +6,7 @@ import (
 
 	"minecraft-server/anticheat"
 	"minecraft-server/player"
-	"minecraft-server/server/effect"
+	"minecraft-server/server/gameplay/effect"
 )
 
 // movement.go: server-side movement checks (anticheat.md #9) — the timer,

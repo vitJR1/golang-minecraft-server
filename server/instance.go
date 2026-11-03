@@ -7,16 +7,16 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/botai"
-	"minecraft-server/server/chat"
-	"minecraft-server/server/chest"
-	"minecraft-server/server/combat"
-	"minecraft-server/server/fluid"
-	"minecraft-server/server/inventory"
-	"minecraft-server/server/itementity"
-	"minecraft-server/server/rules"
-	"minecraft-server/server/tickloop"
-	"minecraft-server/server/visibility"
+	"minecraft-server/server/bots/botai"
+	"minecraft-server/server/gameplay/chest"
+	"minecraft-server/server/gameplay/combat"
+	"minecraft-server/server/gameplay/fluid"
+	"minecraft-server/server/gameplay/inventory"
+	"minecraft-server/server/gameplay/itementity"
+	"minecraft-server/server/hud/chat"
+	"minecraft-server/server/hud/visibility"
+	"minecraft-server/server/instances/rules"
+	"minecraft-server/server/instances/tickloop"
 	"minecraft-server/world"
 	"sync"
 	"sync/atomic"
@@ -110,7 +110,7 @@ type Instance struct {
 	// the same instance.
 	joinMu sync.Mutex
 
-	// ticks is the instance's clock (server/tickloop): handlers, counter,
+	// ticks is the instance's clock (server/instances/tickloop): handlers, counter,
 	// /stats timings.
 	ticks tickloop.Loop
 

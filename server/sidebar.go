@@ -3,11 +3,11 @@ package server
 import (
 	"sync"
 
-	"minecraft-server/server/scoreboard"
+	"minecraft-server/server/hud/scoreboard"
 )
 
 // sidebar.go: the per-player scoreboard sidebar (the panel on the right) —
-// the state and its packets are server/scoreboard; the connection keeps
+// the state and its packets are server/hud/scoreboard; the connection keeps
 // what its client shows (c.sidebar, under sidebarMu) so only changes go
 // out. The client's scoreboard survives our two-hop Respawn, so nothing is
 // re-sent on resync; MovePlayer clears the sidebar before the next instance

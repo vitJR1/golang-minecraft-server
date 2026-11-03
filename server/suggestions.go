@@ -2,7 +2,7 @@ package server
 
 import (
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/command"
+	"minecraft-server/server/features/command"
 )
 
 // Suggestions computes the tab-completion reply for text (the whole chat

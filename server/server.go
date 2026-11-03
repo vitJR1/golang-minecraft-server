@@ -14,19 +14,19 @@ import (
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
 	"minecraft-server/redisc"
-	"minecraft-server/server/arena"
-	"minecraft-server/server/botai"
-	"minecraft-server/server/chat"
-	"minecraft-server/server/conn"
-	"minecraft-server/server/connlimit"
-	"minecraft-server/server/enchant"
-	"minecraft-server/server/enderchest"
-	"minecraft-server/server/inventory"
-	"minecraft-server/server/lobby"
-	"minecraft-server/server/login"
-	"minecraft-server/server/moderation"
-	"minecraft-server/server/scoreboard"
-	"minecraft-server/server/visibility"
+	"minecraft-server/server/access/moderation"
+	"minecraft-server/server/bots/botai"
+	"minecraft-server/server/gameplay/enchant"
+	"minecraft-server/server/gameplay/enderchest"
+	"minecraft-server/server/gameplay/inventory"
+	"minecraft-server/server/hud/chat"
+	"minecraft-server/server/hud/scoreboard"
+	"minecraft-server/server/hud/visibility"
+	"minecraft-server/server/instances/arena"
+	"minecraft-server/server/instances/lobby"
+	"minecraft-server/server/net/conn"
+	"minecraft-server/server/net/connlimit"
+	"minecraft-server/server/net/login"
 	"minecraft-server/store"
 	"minecraft-server/templates"
 	"minecraft-server/world"
@@ -54,7 +54,7 @@ type Server struct {
 	Hub *Instance
 	// Auth is the holding-pen instance where unauthenticated players
 	// land in offline mode. Nil when the auth gate is off — see
-	// server/authgate. Players move to Hub via MovePlayer once /register
+	// server/access/authgate. Players move to Hub via MovePlayer once /register
 	// or /login succeeds.
 	Auth *Instance
 	// authGate is the offline-mode auth gate (SetAuthGate); nil = none.
@@ -63,7 +63,7 @@ type Server struct {
 	Mutes      *moderation.MuteSet
 	Matchmaker *Matchmaker
 	// MenuItems, when set, handles a right click with a server-given menu
-	// item (inventory.NavigatorName / SelectorName, by name): server/hub
+	// item (inventory.NavigatorName / SelectorName, by name): server/features/hub
 	// opens its menus there.
 	MenuItems func(c *ClientConnection, item string)
 	// ChatModerator, when non-nil, gets a chance to inspect every chat
@@ -523,7 +523,7 @@ func (s *Server) HandleConn(sock net.Conn) {
 type ClientConnection struct {
 	server *Server
 
-	// link is the transport (server/conn): socket, framing, compression,
+	// link is the transport (server/net/conn): socket, framing, compression,
 	// the outbound queue and its writer, encryption, close, keep-alive.
 	link *conn.Conn
 

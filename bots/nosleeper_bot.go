@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"minecraft-server/server"
-	"minecraft-server/server/chat"
+	"minecraft-server/server/hud/chat"
 )
 
 // DefaultBadwordsPath is where NewNosleeperBot looks for the bad-words

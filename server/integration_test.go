@@ -6,7 +6,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/servertest"
+	"minecraft-server/server/net/servertest"
 	"minecraft-server/world"
 	"sync/atomic"
 	"testing"
@@ -16,7 +16,7 @@ import (
 // testClient speaks the wire protocol to a HandleConn running over net.Pipe.
 // The threshold field mirrors the server's compression state and must be
 // updated when the test client receives Set Compression.
-// The protocol-level client is server/servertest; these keep the names the
+// The protocol-level client is server/net/servertest; these keep the names the
 // server's tests have always used.
 type testClient = servertest.Client
 

@@ -5,8 +5,8 @@ import (
 	"log/slog"
 
 	"minecraft-server/game"
-	"minecraft-server/server/gamebridge"
-	"minecraft-server/server/inventory"
+	"minecraft-server/server/features/gamebridge"
+	"minecraft-server/server/gameplay/inventory"
 	"minecraft-server/world"
 )
 

@@ -4,10 +4,10 @@ import (
 	"runtime"
 	"time"
 
-	"minecraft-server/server/metrics"
+	"minecraft-server/server/features/metrics"
 )
 
-// Stats is the /stats snapshot (server/metrics): players per instance, the
+// Stats is the /stats snapshot (server/features/metrics): players per instance, the
 // connection counters, tick timings, goroutines and heap.
 func (s *Server) Stats() metrics.Stats {
 	s.mu.RLock()

@@ -3,13 +3,13 @@ package server
 import (
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/inventory"
-	"minecraft-server/server/itementity"
-	"minecraft-server/server/visibility"
+	"minecraft-server/server/gameplay/inventory"
+	"minecraft-server/server/gameplay/itementity"
+	"minecraft-server/server/hud/visibility"
 	"minecraft-server/world"
 )
 
-// item_entity.go keeps an instance's dropped items (server/itementity) and
+// item_entity.go keeps an instance's dropped items (server/gameplay/itementity) and
 // mirrors them to the clients: spawning (with merging into a stack close by),
 // the tick — physics, pickup by the first player whose pickup box holds the
 // item, despawn — and the stream for joining players.

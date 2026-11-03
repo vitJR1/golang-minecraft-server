@@ -13,8 +13,8 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/login"
-	"minecraft-server/server/packets"
+	"minecraft-server/server/net/login"
+	"minecraft-server/server/net/packets"
 	"net"
 )
 

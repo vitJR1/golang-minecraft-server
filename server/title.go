@@ -3,11 +3,11 @@ package server
 import (
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/title"
+	"minecraft-server/server/hud/title"
 )
 
 // title.go: on-screen titles ("You died!", trap alerts) — the packet
-// rules are server/title; SendTitle sends times → subtitle → title.
+// rules are server/hud/title; SendTitle sends times → subtitle → title.
 
 // SendTitle shows text (big) and subtitle (small; "" for none) to this
 // client with the given fade-in / stay / fade-out ticks (≤0 → vanilla

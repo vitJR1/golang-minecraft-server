@@ -3,9 +3,9 @@ package server
 import (
 	"fmt"
 	"minecraft-server/game"
-	"minecraft-server/server/gamebridge"
-	"minecraft-server/server/inventory"
-	"minecraft-server/server/sound"
+	"minecraft-server/server/features/gamebridge"
+	"minecraft-server/server/gameplay/inventory"
+	"minecraft-server/server/gameplay/sound"
 	"minecraft-server/world"
 	"time"
 )

@@ -2,7 +2,7 @@ package server
 
 import (
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/registry"
+	"minecraft-server/server/net/registry"
 )
 
 // sendUpdateTags sends Update Tags with registry.ServerTags.

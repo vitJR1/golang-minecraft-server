@@ -5,17 +5,17 @@ import (
 	"minecraft-server/anticheat"
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/combat"
-	"minecraft-server/server/itementity"
-	"minecraft-server/server/projectile"
-	"minecraft-server/server/visibility"
+	"minecraft-server/server/gameplay/combat"
+	"minecraft-server/server/gameplay/itementity"
+	"minecraft-server/server/gameplay/projectile"
+	"minecraft-server/server/hud/visibility"
 	"minecraft-server/world"
 )
 
 // projectile.go implements thrown items in an instance: egg, snowball, ender
 // pearl, fire charge and arrows (arrow.go). Using one of these (right-click
 // in air → SbPlayUseItem) spawns a projectile entity that the instance
-// simulates on its tick loop with server/projectile's flight. On impact an
+// simulates on its tick loop with server/gameplay/projectile's flight. On impact an
 // ender pearl teleports its thrower to the landing spot, a fireball
 // explodes; egg/snowball just vanish. There's no item consumption (creative).
 

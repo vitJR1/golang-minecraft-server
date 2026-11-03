@@ -4,15 +4,15 @@ import (
 	"math/rand"
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/combat"
-	"minecraft-server/server/explosion"
-	"minecraft-server/server/sound"
-	"minecraft-server/server/visibility"
+	"minecraft-server/server/gameplay/combat"
+	"minecraft-server/server/gameplay/explosion"
+	"minecraft-server/server/gameplay/sound"
+	"minecraft-server/server/hud/visibility"
 	"minecraft-server/world"
 )
 
 // tnt.go: TNT and explosions in an instance (the physics and maths are
-// server/explosion): lighting TNT, ticking the primed entities, and an
+// server/gameplay/explosion): lighting TNT, ticking the primed entities, and an
 // explosion's effects — the game's break vetoes, drops, chain reactions,
 // player damage and knockback, the Explosion packets.
 

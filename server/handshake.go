@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/packets"
+	"minecraft-server/server/net/packets"
 )
 
 func (c *ClientConnection) handleHandshake(packet *bytes.Buffer, packetID int) error {

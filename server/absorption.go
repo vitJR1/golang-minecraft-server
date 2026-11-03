@@ -4,7 +4,7 @@ import (
 	"math"
 
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/effect"
+	"minecraft-server/server/gameplay/effect"
 )
 
 // absorption.go: the Absorption effect's yellow hearts. The pool lives on

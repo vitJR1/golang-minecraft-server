@@ -8,9 +8,9 @@ import (
 	"minecraft-server/nbt"
 	"minecraft-server/player"
 	"minecraft-server/protocol"
-	"minecraft-server/server/effect"
-	"minecraft-server/server/enchant"
-	"minecraft-server/server/inventory"
+	"minecraft-server/server/gameplay/effect"
+	"minecraft-server/server/gameplay/enchant"
+	"minecraft-server/server/gameplay/inventory"
 	"minecraft-server/world"
 )
 

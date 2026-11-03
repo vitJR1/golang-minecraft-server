@@ -2,7 +2,7 @@ package server
 
 import (
 	"minecraft-server/anticheat"
-	"minecraft-server/server/projectile"
+	"minecraft-server/server/gameplay/projectile"
 	"minecraft-server/world"
 )
 

@@ -4,8 +4,8 @@ import (
 	"time"
 
 	"minecraft-server/player"
-	"minecraft-server/server/chest"
-	"minecraft-server/server/inventory"
+	"minecraft-server/server/gameplay/chest"
+	"minecraft-server/server/gameplay/inventory"
 )
 
 // clickInventory handles a Click Container on window 0.

@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"minecraft-server/anticheat"
 	"minecraft-server/player"
-	"minecraft-server/server/enderchest"
-	"minecraft-server/server/inventory"
-	"minecraft-server/server/packets"
+	"minecraft-server/server/gameplay/enderchest"
+	"minecraft-server/server/gameplay/inventory"
+	"minecraft-server/server/net/packets"
 )
 
 // handler_play_player.go: the play packets about the player — movement,

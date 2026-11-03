@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/packets"
+	"minecraft-server/server/net/packets"
 )
 
 func (c *ClientConnection) handlePlay(packet *bytes.Buffer, packetID int) error {

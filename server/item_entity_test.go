@@ -4,9 +4,9 @@ import (
 	"testing"
 
 	"minecraft-server/player"
-	"minecraft-server/server/conn"
-	"minecraft-server/server/inventory"
-	"minecraft-server/server/itementity"
+	"minecraft-server/server/gameplay/inventory"
+	"minecraft-server/server/gameplay/itementity"
+	"minecraft-server/server/net/conn"
 	"minecraft-server/world"
 )
 

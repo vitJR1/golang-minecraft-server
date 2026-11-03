@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"minecraft-server/player"
-	"minecraft-server/server/combat"
-	"minecraft-server/server/fluid"
+	"minecraft-server/server/gameplay/combat"
+	"minecraft-server/server/gameplay/fluid"
 	"minecraft-server/world"
 )
 

@@ -6,9 +6,9 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/combat"
-	"minecraft-server/server/enchant"
-	"minecraft-server/server/inventory"
+	"minecraft-server/server/gameplay/combat"
+	"minecraft-server/server/gameplay/enchant"
+	"minecraft-server/server/gameplay/inventory"
 	"minecraft-server/world"
 )
 

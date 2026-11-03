@@ -6,7 +6,7 @@ import (
 
 	"minecraft-server/game"
 	"minecraft-server/player"
-	"minecraft-server/server/conn"
+	"minecraft-server/server/net/conn"
 	"minecraft-server/world"
 )
 

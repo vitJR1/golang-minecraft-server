@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/conn"
+	"minecraft-server/server/net/conn"
 	"time"
 )
 

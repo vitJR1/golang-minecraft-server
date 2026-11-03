@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 
 	"minecraft-server/player"
-	"minecraft-server/server/botai"
+	"minecraft-server/server/bots/botai"
 )
 
 // spectate.go: watching a game without playing it. /spectate <arena> puts

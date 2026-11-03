@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/visibility"
+	"minecraft-server/server/hud/visibility"
 )
 
 // tabEntries is conns as tab-list entries.

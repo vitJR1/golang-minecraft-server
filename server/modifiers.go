@@ -7,17 +7,17 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/attributes"
-	"minecraft-server/server/effect"
-	"minecraft-server/server/enchant"
-	"minecraft-server/server/inventory"
-	"minecraft-server/server/sound"
+	"minecraft-server/server/gameplay/attributes"
+	"minecraft-server/server/gameplay/effect"
+	"minecraft-server/server/gameplay/enchant"
+	"minecraft-server/server/gameplay/inventory"
+	"minecraft-server/server/gameplay/sound"
 	"minecraft-server/world"
 )
 
 // modifiers.go: the pluggable sources of dig / durability / combat
-// modifiers — enchantments (server/enchant: Server.Enchantments, default
-// enchant.NBT) and potion effects (server/effect: Server.Effects, default
+// modifiers — enchantments (server/gameplay/enchant: Server.Enchantments, default
+// enchant.NBT) and potion effects (server/gameplay/effect: Server.Effects, default
 // effectTable, timed effects per connection granted by /effect and games and
 // shown through Entity Effect packets) — and what effects do to a player.
 

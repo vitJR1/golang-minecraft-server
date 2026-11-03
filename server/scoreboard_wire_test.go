@@ -1,7 +1,7 @@
 package server
 
 // Wire values the sidebar / name-tag tests check the packets against
-// (minecraft-data 1.20), kept apart from server/scoreboard's own so the tests
+// (minecraft-data 1.20), kept apart from server/hud/scoreboard's own so the tests
 // pin the protocol rather than echo the implementation.
 const (
 	nameTagTeamPrefix = "nt_"

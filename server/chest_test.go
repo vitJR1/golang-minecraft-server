@@ -7,10 +7,10 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/chest"
-	"minecraft-server/server/conn"
-	"minecraft-server/server/enderchest"
-	"minecraft-server/server/inventory"
+	"minecraft-server/server/gameplay/chest"
+	"minecraft-server/server/gameplay/enderchest"
+	"minecraft-server/server/gameplay/inventory"
+	"minecraft-server/server/net/conn"
 	"minecraft-server/world"
 )
 

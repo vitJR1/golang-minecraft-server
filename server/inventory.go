@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/inventory"
+	"minecraft-server/server/gameplay/inventory"
 
 	"minecraft-server/protocol"
 	"minecraft-server/world"

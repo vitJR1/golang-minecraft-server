@@ -7,8 +7,8 @@ import (
 	"minecraft-server/cfg"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/favicon"
-	"minecraft-server/server/status"
+	"minecraft-server/server/net/favicon"
+	"minecraft-server/server/net/status"
 )
 
 func (c *ClientConnection) handleStatus(packet *bytes.Buffer, packetID int) error {

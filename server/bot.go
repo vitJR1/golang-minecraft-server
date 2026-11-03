@@ -10,8 +10,8 @@ import (
 	"minecraft-server/game"
 	"minecraft-server/player"
 	"minecraft-server/protocol"
-	"minecraft-server/server/botai"
-	"minecraft-server/server/conn"
+	"minecraft-server/server/bots/botai"
+	"minecraft-server/server/net/conn"
 )
 
 // bot.go: server-side players driven by an AI instead of a client (/bot).
@@ -19,7 +19,7 @@ import (
 // drained into the void — so to the rest of the server, the games and the
 // other players it is a player like any other: it shows in the tab list,
 // fights, takes damage and knockback, dies, picks up items, holds a kit.
-// Its mind is a botai.Bot (server/botai), which moves it with botnav's
+// Its mind is a botai.Bot (server/bots/botai), which moves it with botnav's
 // physics and pathfinding and acts through botBody (bot_body.go), guided by
 // the game (game.BotGuide).
 

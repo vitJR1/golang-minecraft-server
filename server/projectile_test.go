@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"minecraft-server/player"
-	"minecraft-server/server/conn"
-	"minecraft-server/server/projectile"
+	"minecraft-server/server/gameplay/projectile"
+	"minecraft-server/server/net/conn"
 	"minecraft-server/world"
 )
 

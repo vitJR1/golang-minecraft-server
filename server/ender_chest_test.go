@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"minecraft-server/protocol"
-	"minecraft-server/server/enderchest"
-	"minecraft-server/server/inventory"
+	"minecraft-server/server/gameplay/enderchest"
+	"minecraft-server/server/gameplay/inventory"
 )
 
 // TestEnderChestPersistsThroughFileStore: a click saves to the file store,

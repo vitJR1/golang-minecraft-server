@@ -1,7 +1,7 @@
 package server
 
 import (
-	"minecraft-server/server/chat"
+	"minecraft-server/server/hud/chat"
 	"time"
 )
 

@@ -5,8 +5,8 @@ import (
 
 	"minecraft-server/game"
 	"minecraft-server/player"
-	"minecraft-server/server/botai"
-	"minecraft-server/server/combat"
+	"minecraft-server/server/bots/botai"
+	"minecraft-server/server/gameplay/combat"
 	"minecraft-server/world"
 )
 

@@ -5,11 +5,11 @@ import (
 
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/abilities"
+	"minecraft-server/server/gameplay/abilities"
 )
 
 // fly.go: /fly — lets a survival or adventure player fly (double-tap jump),
-// through Player Abilities (server/abilities).
+// through Player Abilities (server/gameplay/abilities).
 //
 // The client resets its abilities on every gamemode change and Respawn, so
 // the permission ends there too (dropFlight): flight granted in the hub

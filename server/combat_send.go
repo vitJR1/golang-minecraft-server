@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/combat"
-	"minecraft-server/server/sound"
+	"minecraft-server/server/gameplay/combat"
+	"minecraft-server/server/gameplay/sound"
 )
 
 // playSound broadcasts a positional sound to the players who can hear it.

@@ -7,11 +7,11 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/protocol"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/combat"
-	"minecraft-server/server/conn"
-	"minecraft-server/server/explosion"
-	"minecraft-server/server/inventory"
-	"minecraft-server/server/sound"
+	"minecraft-server/server/gameplay/combat"
+	"minecraft-server/server/gameplay/explosion"
+	"minecraft-server/server/gameplay/inventory"
+	"minecraft-server/server/gameplay/sound"
+	"minecraft-server/server/net/conn"
 	"minecraft-server/world"
 )
 

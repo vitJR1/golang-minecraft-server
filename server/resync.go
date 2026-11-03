@@ -3,7 +3,7 @@ package server
 import (
 	"fmt"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/visibility"
+	"minecraft-server/server/hud/visibility"
 )
 
 // resyncView wipes everything the client currently sees and rebuilds it from

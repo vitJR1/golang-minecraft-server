@@ -1,8 +1,8 @@
 package server
 
 import (
-	"minecraft-server/server/inventory"
-	"minecraft-server/server/itementity"
+	"minecraft-server/server/gameplay/inventory"
+	"minecraft-server/server/gameplay/itementity"
 	"time"
 )
 

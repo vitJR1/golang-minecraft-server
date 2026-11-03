@@ -2,12 +2,12 @@ package server
 
 import (
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/attributes"
-	"minecraft-server/server/effect"
+	"minecraft-server/server/gameplay/attributes"
+	"minecraft-server/server/gameplay/effect"
 )
 
 // attributes.go: syncs the generic.movement_speed attribute (built by
-// server/attributes) — the 1.20.1 client only applies Speed / Slowness
+// server/gameplay/attributes) — the 1.20.1 client only applies Speed / Slowness
 // through it, never from the Entity Effect packet.
 
 // sendMovementAttributes syncs the player's movement speed (Speed /

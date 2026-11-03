@@ -3,8 +3,8 @@ package server
 import (
 	"minecraft-server/anticheat"
 	"minecraft-server/player"
-	"minecraft-server/server/fluid"
-	"minecraft-server/server/inventory"
+	"minecraft-server/server/gameplay/fluid"
+	"minecraft-server/server/gameplay/inventory"
 	"minecraft-server/world"
 )
 

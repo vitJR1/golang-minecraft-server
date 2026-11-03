@@ -2,10 +2,10 @@ package server
 
 import (
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/equipment"
+	"minecraft-server/server/gameplay/equipment"
 )
 
-// equipment.go: Set Equipment (Cb 0x55, payload: server/equipment) — what
+// equipment.go: Set Equipment (Cb 0x55, payload: server/gameplay/equipment) — what
 // other players see in a player's hands and on their body.
 //
 // It is broadcast to everyone else in the instance whenever something that

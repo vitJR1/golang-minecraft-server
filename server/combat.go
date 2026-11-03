@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/combat"
-	"minecraft-server/server/effect"
-	"minecraft-server/server/enchant"
-	"minecraft-server/server/sound"
-	"minecraft-server/server/tickloop"
+	"minecraft-server/server/gameplay/combat"
+	"minecraft-server/server/gameplay/effect"
+	"minecraft-server/server/gameplay/enchant"
+	"minecraft-server/server/gameplay/sound"
+	"minecraft-server/server/instances/tickloop"
 	"minecraft-server/world"
 )
 

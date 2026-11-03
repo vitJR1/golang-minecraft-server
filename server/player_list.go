@@ -3,7 +3,7 @@ package server
 import (
 	"log/slog"
 
-	"minecraft-server/server/playerlist"
+	"minecraft-server/server/instances/playerlist"
 )
 
 // PlayerList tracks the connections of every logged-in player in an

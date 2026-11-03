@@ -2,7 +2,7 @@ package server
 
 import (
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/command"
+	"minecraft-server/server/features/command"
 )
 
 // sendDeclareCommands sends the command tree (command.Tree) of the commands

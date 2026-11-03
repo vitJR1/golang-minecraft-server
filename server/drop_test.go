@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"minecraft-server/game"
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/inventory"
+	"minecraft-server/server/gameplay/inventory"
 	"testing"
 
 	"minecraft-server/player"
@@ -236,7 +236,7 @@ func TestGameNoDropReachesTheModel(t *testing.T) {
 	}
 }
 
-// navigatorHub hands the navigator out on hub joins, as server/hub does.
+// navigatorHub hands the navigator out on hub joins, as server/features/hub does.
 func navigatorHub(s *Server) {
 	s.Hub.OnPlayerJoin = func(c *ClientConnection) {
 		id, _ := world.ItemByName("minecraft:blaze_rod")

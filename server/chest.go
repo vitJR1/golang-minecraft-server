@@ -2,9 +2,9 @@ package server
 
 import (
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/chest"
-	"minecraft-server/server/enderchest"
-	"minecraft-server/server/inventory"
+	"minecraft-server/server/gameplay/chest"
+	"minecraft-server/server/gameplay/enderchest"
+	"minecraft-server/server/gameplay/inventory"
 	"minecraft-server/world"
 )
 
@@ -12,8 +12,8 @@ import (
 // streams its saved contents; the player rearranging items is simulated by
 // the server (click.go) and the result stored. Regular chests store per (instance, block position); an ender chest
 // is one 27-slot inventory per player, shared by every ender chest block in
-// every instance (enderchest.Chests on Server). The storage is server/chest
-// and server/enderchest; this file opens them. There's no item NBT model, so
+// every instance (enderchest.Chests on Server). The storage is server/gameplay/chest
+// and server/gameplay/enderchest; this file opens them. There's no item NBT model, so
 // stacks are just (item id, count) plus the tool fields below.
 
 // enderChestFor returns the player's ender chest, loading it on first use.

@@ -16,7 +16,7 @@ const (
 	// covers without help: a sprint-jump peaks around 0.62 blocks/tick.
 	maxHorizontal = 0.75
 	// speedPerLevel is Speed's +20% movement per level (vanilla
-	// MobEffects.MOVEMENT_SPEED, the modifier server/attributes sends).
+	// MobEffects.MOVEMENT_SPEED, the modifier server/gameplay/attributes sends).
 	speedPerLevel = 0.2
 	// iceBonus / blueIceBonus: ice keeps momentum, sprint-jumping on it
 	// goes much faster (blue ice fastest).

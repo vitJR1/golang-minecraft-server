@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"minecraft-server/anticheat"
 	"minecraft-server/game"
-	"minecraft-server/server/chest"
-	"minecraft-server/server/consume"
-	"minecraft-server/server/inventory"
-	"minecraft-server/server/packets"
-	"minecraft-server/server/projectile"
+	"minecraft-server/server/gameplay/chest"
+	"minecraft-server/server/gameplay/consume"
+	"minecraft-server/server/gameplay/inventory"
+	"minecraft-server/server/gameplay/projectile"
+	"minecraft-server/server/net/packets"
 	"minecraft-server/world"
 )
 
@@ -262,7 +262,7 @@ func (c *ClientConnection) onUseItem() {
 	held := c.inv.Held(c.heldSlot.Load())
 	switch {
 	case held.Name == inventory.NavigatorName || held.Name == inventory.SelectorName:
-		// The hub's menus (server/hub) open them.
+		// The hub's menus (server/features/hub) open them.
 		if h := c.server.MenuItems; h != nil {
 			h(c, held.Name)
 		}

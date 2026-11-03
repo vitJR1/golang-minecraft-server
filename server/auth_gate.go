@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// auth_gate.go: the hook the offline-mode auth gate (server/authgate) plugs
+// auth_gate.go: the hook the offline-mode auth gate (server/access/authgate) plugs
 // into. While a gate is set, players log into s.Auth unauthenticated: chat
 // is dropped and only the commands the gate lets through run until it calls
 // SetAuthed(true).

@@ -2,7 +2,7 @@ package server
 
 import (
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/tickloop"
+	"minecraft-server/server/instances/tickloop"
 	"testing"
 	"time"
 )

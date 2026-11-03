@@ -2,11 +2,11 @@ package server
 
 import (
 	"minecraft-server/protocol/packetid"
-	"minecraft-server/server/hologram"
-	"minecraft-server/server/visibility"
+	"minecraft-server/server/hud/hologram"
+	"minecraft-server/server/hud/visibility"
 )
 
-// hologram.go keeps an instance's floating text (server/hologram) and
+// hologram.go keeps an instance's floating text (server/hud/hologram) and
 // mirrors it to the clients: spawn, text changes, removal, the stream for
 // joiners.
 

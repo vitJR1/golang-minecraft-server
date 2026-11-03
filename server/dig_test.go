@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"minecraft-server/player"
-	"minecraft-server/server/inventory"
+	"minecraft-server/server/gameplay/inventory"
 	"minecraft-server/world"
 )
 
