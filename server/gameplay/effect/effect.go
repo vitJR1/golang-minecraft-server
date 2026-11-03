@@ -78,31 +78,37 @@ type timed struct {
 	expires time.Time
 }
 
-// Table holds timed effects per player key. Expired entries read as 0 and
-// are dropped lazily (Level) or by Sweep. Safe for concurrent use; the zero
-// value is ready.
+// Table holds timed effects per player key. Expired entries read as 0 but
+// stay in the table until Sweep (or Remove / Forget) drops them: Sweep is
+// what reports an ended effect, so the server can send Remove Entity Effect
+// and resync attributes — a read must never swallow that. Safe for
+// concurrent use; the zero value is ready.
 type Table[K comparable] struct {
 	mu      sync.Mutex
 	players map[K]map[string]timed
 }
 
-// Level is k's amplifier+1 of e (0 = none).
+// Level is k's amplifier+1 of e (0 = none or expired). Read-only: an
+// expired effect is left for Sweep to report.
 func (t *Table[K]) Level(k K, e Effect) int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	ae, ok := t.players[k][e.Name]
-	if !ok {
-		return 0
-	}
-	if time.Now().After(ae.expires) {
-		delete(t.players[k], e.Name)
+	if !ok || !time.Now().Before(ae.expires) {
 		return 0
 	}
 	return ae.level
 }
 
-// Apply grants k effect e at level (amplifier+1) for d.
-func (t *Table[K]) Apply(k K, e Effect, level int, d time.Duration) {
+// Apply grants k effect e at level (amplifier+1) for d, combined with what
+// k already has like vanilla's MobEffectInstance.update: a higher level
+// replaces the current effect, the same level extends it to the later end,
+// a lower level never weakens or shortens a stronger one (vanilla would keep
+// it as a hidden effect resumed afterwards; we drop it). It returns the
+// effect k ends up with — what the client must be told, which isn't
+// necessarily (level, d).
+func (t *Table[K]) Apply(k K, e Effect, level int, d time.Duration) (int, time.Duration) {
+	now := time.Now()
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.players == nil {
@@ -111,7 +117,17 @@ func (t *Table[K]) Apply(k K, e Effect, level int, d time.Duration) {
 	if t.players[k] == nil {
 		t.players[k] = map[string]timed{}
 	}
-	t.players[k][e.Name] = timed{level: level, expires: time.Now().Add(d)}
+	next := timed{level: level, expires: now.Add(d)}
+	if cur, ok := t.players[k][e.Name]; ok && now.Before(cur.expires) {
+		switch {
+		case level < cur.level:
+			next = cur
+		case level == cur.level && cur.expires.After(next.expires):
+			next = cur
+		}
+	}
+	t.players[k][e.Name] = next
+	return next.level, next.expires.Sub(now)
 }
 
 // Active lists k's unexpired effects, sorted by name.
@@ -130,8 +146,8 @@ func (t *Table[K]) Active(k K) []Active {
 	return out
 }
 
-// Sweep drops every expired effect and returns them per player — the lazy
-// expiry in Level isn't enough for effects whose end must be visible.
+// Sweep drops every expired effect and returns them per player, so the
+// server can show each end (Remove Entity Effect, attributes, flags).
 func (t *Table[K]) Sweep() map[K][]Effect {
 	now := time.Now()
 	t.mu.Lock()

@@ -54,9 +54,35 @@ func ChatFormatting(code byte) int32 {
 // SyncTags is the packets that turn the groups a client has into want:
 // new groups created with their members, changed prefixes / colours
 // updated, members added and removed, gone groups removed.
+//
+// Order matters: the vanilla client moves a player that joins a team out of
+// its old one, and "remove X from A" for a player no longer in A throws
+// (Scoreboard.removePlayerFromTeam → IllegalStateException → kick). So every
+// member removal and every gone group goes first, then the creates, updates
+// and additions; teams are walked in sorted order so the output is
+// deterministic.
 func SyncTags(have, want Tags) []Packet {
 	var out []Packet
-	for team, w := range want {
+	for _, team := range sortedTeams(have) {
+		h := have[team]
+		w, ok := want[team]
+		if !ok {
+			out = append(out, teams(teamRemovePayload(team)))
+			continue
+		}
+		var remove []string
+		for n := range h.members {
+			if !w.members[n] {
+				remove = append(remove, n)
+			}
+		}
+		if len(remove) > 0 {
+			sort.Strings(remove)
+			out = append(out, teams(teamMembersPayload(team, teamModeRemoveMembers, remove)))
+		}
+	}
+	for _, team := range sortedTeams(want) {
+		w := want[team]
 		h, ok := have[team]
 		if !ok {
 			out = append(out, teams(teamPayload(team, teamModeCreate, w.colour, w.prefix, sortedNames(w.members))))
@@ -65,31 +91,26 @@ func SyncTags(have, want Tags) []Packet {
 		if h.prefix != w.prefix || h.colour != w.colour {
 			out = append(out, teams(teamPayload(team, teamModeUpdate, w.colour, w.prefix, nil)))
 		}
-		var add, remove []string
+		var add []string
 		for n := range w.members {
 			if !h.members[n] {
 				add = append(add, n)
-			}
-		}
-		for n := range h.members {
-			if !w.members[n] {
-				remove = append(remove, n)
 			}
 		}
 		if len(add) > 0 {
 			sort.Strings(add)
 			out = append(out, teams(teamMembersPayload(team, teamModeAddMembers, add)))
 		}
-		if len(remove) > 0 {
-			sort.Strings(remove)
-			out = append(out, teams(teamMembersPayload(team, teamModeRemoveMembers, remove)))
-		}
 	}
-	for team := range have {
-		if _, ok := want[team]; !ok {
-			out = append(out, teams(teamRemovePayload(team)))
-		}
+	return out
+}
+
+func sortedTeams(t Tags) []string {
+	out := make([]string, 0, len(t))
+	for team := range t {
+		out = append(out, team)
 	}
+	sort.Strings(out)
 	return out
 }
 

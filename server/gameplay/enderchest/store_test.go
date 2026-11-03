@@ -56,3 +56,28 @@ func TestEnderSlotsCodecRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// TestEnderSlotsCodecKeepsEveryField: potions keep their effect, dyed
+// leather its colour, lore and glint survive a restart — Encode/Decode
+// round-trip every NBT-bound field of inventory.Stack.
+func TestEnderSlotsCodecKeepsEveryField(t *testing.T) {
+	potion, _ := world.ItemByName("minecraft:potion")
+	chest, _ := world.ItemByName("minecraft:leather_chestplate")
+	var slots [inventory.ChestSlots]inventory.Stack
+	slots[1] = inventory.Stack{ID: potion, Count: 1, Name: "Speed II", Potion: "minecraft:strong_swiftness", Lore: []string{"§745 s"}}
+	slots[2] = inventory.Stack{ID: chest, Count: 1, Color: 0xB02E26, Glint: true, Damage: 3,
+		Enchantments: map[string]int{"minecraft:protection": 1}}
+	data, err := Encode(slots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, i := range []int{1, 2} {
+		if !back[i].SameKind(slots[i]) || back[i].Count != slots[i].Count {
+			t.Errorf("slot %d: got %+v, want %+v", i, back[i], slots[i])
+		}
+	}
+}
