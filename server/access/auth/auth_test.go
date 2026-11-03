@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+
 	"path/filepath"
 	"testing"
 	"time"
@@ -112,13 +113,13 @@ func guardAt(t *testing.T) (*IPGuard, *time.Time) {
 
 func TestIPGuardBansAtMaxAttemptsAndExpires(t *testing.T) {
 	g, now := guardAt(t)
-	if g.RecordFail("1.2.3.4", 2, time.Hour) {
+	if g.RecordFail("1.2.3.4", "victim", 2, time.Hour) {
 		t.Fatal("first fail must not ban")
 	}
 	if _, ok := g.Allowed("1.2.3.4"); !ok {
 		t.Fatal("one fail is still allowed")
 	}
-	if !g.RecordFail("1.2.3.4", 2, time.Hour) {
+	if !g.RecordFail("1.2.3.4", "Victim", 2, time.Hour) {
 		t.Fatal("second fail must ban")
 	}
 	if until, ok := g.Allowed("1.2.3.4"); ok || !until.Equal(now.Add(time.Hour)) {
@@ -131,19 +132,19 @@ func TestIPGuardBansAtMaxAttemptsAndExpires(t *testing.T) {
 	if _, ok := g.Allowed("1.2.3.4"); !ok {
 		t.Fatal("ban should have expired")
 	}
-	if g.Fails("1.2.3.4") != 0 {
+	if g.Fails("1.2.3.4", "victim") != 0 {
 		t.Error("an expired ban resets the fail count")
 	}
 }
 
 func TestIPGuardClearFailsAndUnknownIP(t *testing.T) {
 	g, _ := guardAt(t)
-	g.RecordFail("1.2.3.4", 3, time.Hour)
-	g.ClearFails("1.2.3.4")
-	if g.Fails("1.2.3.4") != 0 {
+	g.RecordFail("1.2.3.4", "me", 3, time.Hour)
+	g.ClearFails("1.2.3.4", "me")
+	if g.Fails("1.2.3.4", "me") != 0 {
 		t.Error("ClearFails should reset the counter")
 	}
-	if g.RecordFail("", 1, time.Hour) {
+	if g.RecordFail("", "me", 1, time.Hour) {
 		t.Error("an unknown IP is never banned")
 	}
 	if _, ok := g.Allowed(""); !ok {

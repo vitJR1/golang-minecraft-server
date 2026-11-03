@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"minecraft-server/cfg"
 	"minecraft-server/server"
@@ -133,7 +134,7 @@ func cmdUnbanIP(c *server.ClientConnection, args []string) {
 func (g *Gate) admit(c *server.ClientConnection, greeting string) {
 	c.SetAuthed(true)
 	pushCountdownClear(c)
-	g.svc.IPs.ClearFails(c.IP())
+	g.svc.IPs.ClearFails(c.IP(), c.Name())
 	_ = c.SendMessage(greeting)
 	if g.srv.Hub == nil {
 		return
@@ -180,9 +181,11 @@ func cmdRegister(c *server.ClientConnection, args []string) {
 	g.admit(c, "Registered. Welcome aboard.")
 }
 
-// cmdLogin handles "/login <pass>". Wrong-password failures get
-// counted per-IP; cfg.AuthMaxAttempts of them in a row trips an IP ban
-// for cfg.AuthBanDuration and disconnects the player immediately.
+// cmdLogin handles "/login <pass>". Wrong-password failures are counted
+// per (IP, name), per IP and per name (auth.IPGuard): cfg.AuthMaxAttempts
+// of them for one name from one IP trip an IP ban for cfg.AuthBanDuration
+// and disconnect the player immediately; a name guessed at from many IPs
+// makes every further /login for it wait (NameWait), unchecked.
 func cmdLogin(c *server.ClientConnection, args []string) {
 	g := of(c)
 	if g == nil {
@@ -198,13 +201,20 @@ func cmdLogin(c *server.ClientConnection, args []string) {
 		return
 	}
 
+	if wait := g.svc.IPs.NameWait(c.Name(), cfg.AuthMaxAttempts(), cfg.AuthBanDuration()); wait > 0 {
+		_ = c.SendMessage(fmt.Sprintf("Too many failed logins for this name — try again in %s.",
+			(wait + time.Second - 1).Truncate(time.Second)))
+		slog.Info("auth: login throttled", "player", c.Name(), "wait", wait)
+		return
+	}
+
 	switch err := g.svc.Verify(context.Background(), c.Name(), args[0]); {
 	case errors.Is(err, auth.ErrNoAccount):
 		_ = c.SendMessage("No account — use /register <password> <password>.")
 		return
 	case errors.Is(err, auth.ErrWrongPassword):
 		ip := c.IP()
-		if g.svc.IPs.RecordFail(ip, cfg.AuthMaxAttempts(), cfg.AuthBanDuration()) {
+		if g.svc.IPs.RecordFail(ip, c.Name(), cfg.AuthMaxAttempts(), cfg.AuthBanDuration()) {
 			slog.Warn("auth: IP banned for repeated failures",
 				"player", c.Name(), "ip", ip,
 				"duration", cfg.AuthBanDuration())

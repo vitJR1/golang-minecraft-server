@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"minecraft-server/game"
+	"minecraft-server/protocol/packetid"
 	"minecraft-server/server"
 	"minecraft-server/server/gameplay/effect"
 	"minecraft-server/server/net/servertest"
@@ -86,9 +87,16 @@ func loginChunks() []int {
 }
 
 // registerMMGame registers a tiny game definition for one test (ids are
-// unique per test: the registry has no reset).
+// unique per test). The registry is process-global with no reset, so a
+// repeated run (go test -count=2) finds it already there and keeps it.
 func registerMMGame(t *testing.T, id string, min, max int) {
 	t.Helper()
+	if d, ok := game.GetDef(id); ok {
+		if d.MinPlayers != min || d.MaxPlayers != max {
+			t.Fatalf("game %q already registered as %d..%d", id, d.MinPlayers, d.MaxPlayers)
+		}
+		return
+	}
 	game.Register(&game.Definition{
 		ID:         id,
 		Name:       "MM Test " + id,
@@ -97,4 +105,38 @@ func registerMMGame(t *testing.T, id string, min, max int) {
 		Template:   world.NewTemplate(),
 		New:        func() game.Logic { return game.NoopLogic{} },
 	})
+}
+
+// /op and /deop re-send the target's command tree: the one sent at join
+// hid the op-only commands, so a fresh op had no highlighting / completion
+// for them until a rejoin.
+func TestOpResendsCommandTree(t *testing.T) {
+	s := server.New()
+	s.Ops.Add("Boss")
+	_, boss := login(t, s, "Boss")
+	cli := servertest.Dial(t, s)
+	cli.Login(t, "Pal")
+	ids := cli.StartDrain()
+
+	waitTree := func(what string) {
+		t.Helper()
+		deadline := time.After(2 * time.Second)
+		for {
+			select {
+			case id, ok := <-ids:
+				if !ok {
+					t.Fatalf("%s: connection closed", what)
+				}
+				if id == packetid.CbPlayDeclareCommands {
+					return
+				}
+			case <-deadline:
+				t.Fatalf("%s: no Declare Commands", what)
+			}
+		}
+	}
+	s.RunCommand(boss, "op Pal")
+	waitTree("after /op")
+	s.RunCommand(boss, "deop Pal")
+	waitTree("after /deop")
 }

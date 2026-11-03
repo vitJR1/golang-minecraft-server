@@ -78,10 +78,12 @@ func main() {
 	hub.SetupLobbies(srv)
 	hub.Setup(srv)
 
-	// Ops endpoint (pprof + /stats JSON). Unauthenticated — keep it on
-	// loopback and reach it via SSH; "off" disables entirely.
+	// Ops endpoint (pprof + /stats JSON). Loopback by default (reach it via
+	// SSH); any other address needs METRICS_TOKEN (sent as "Authorization:
+	// Bearer <token>"), which also guards a loopback one when set. "off"
+	// disables entirely.
 	if maddr := getEnv("METRICS_ADDR", "127.0.0.1:6060"); maddr != "off" {
-		if _, err := metrics.Start(srv, maddr); err != nil {
+		if _, err := metrics.Start(srv, maddr, getEnv("METRICS_TOKEN", "")); err != nil {
 			slog.Warn("metrics endpoint failed to start", "addr", maddr, "err", err)
 		} else {
 			slog.Info("metrics endpoint up", "addr", maddr)
@@ -368,17 +370,53 @@ func importBanlist(ctx context.Context, dst ban.Store) {
 		"added", res.Added, "kept_existing", res.Kept, "expired", res.Expired, "renamed_to", done)
 }
 
-// envEnabled reads a boolean-ish env var, returning def when unset or
-// unrecognized. Mirrors the truthy/falsy words accepted elsewhere.
+// envEnabled reads a boolean-ish env var (surrounding whitespace ignored),
+// returning def when unset or unrecognized — the latter with a warning, so
+// a typo doesn't silently keep the default.
 func envEnabled(name string, def bool) bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
+	switch v {
 	case "true", "1", "yes", "on":
 		return true
 	case "false", "0", "no", "off":
 		return false
+	case "":
+		return def
 	default:
+		slog.Warn("env: not a boolean, using the default", "var", name, "value", v, "default", def)
 		return def
 	}
+}
+
+// envInt reads an integer env var ≥ min, returning def when unset; a value
+// that doesn't parse or is below min is ignored with a warning.
+func envInt(name string, def, min int) int {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < min {
+		slog.Warn("env: bad integer, using the default", "var", name, "value", v, "min", min, "default", def)
+		return def
+	}
+	return n
+}
+
+// envDuration reads a positive duration env var ("30s", "5m", "1h30m"),
+// returning def when unset; a bad or non-positive value is ignored with a
+// warning.
+func envDuration(name string, def time.Duration) time.Duration {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return def
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		slog.Warn("env: bad duration, using the default", "var", name, "value", v, "default", def)
+		return def
+	}
+	return d
 }
 
 // loadDotenv reads a `.env` file from the working directory (if present)
@@ -406,70 +444,36 @@ func loadDotenv() {
 //
 // Vars: see .env.example for the full list with defaults.
 func loadEnv() {
-	switch strings.ToLower(os.Getenv("ONLINE_MODE")) {
-	case "true", "1", "yes", "on":
-		cfg.OnlineMode = true
-	case "false", "0", "no", "off":
-		cfg.OnlineMode = false
-	}
+	// The helpers trim whitespace (" true" from a .env / compose file used
+	// to be ignored) and warn about values they can't use.
+	cfg.OnlineMode = envEnabled("ONLINE_MODE", cfg.OnlineMode)
 
 	// Auth plugin default: on for offline mode, off for online mode.
 	// AUTH_ENABLED env var explicitly overrides if set — useful for
 	// flipping auth off in offline-mode for testing, or on in online-
 	// mode for defense in depth.
-	cfg.AuthEnabled = !cfg.OnlineMode
-	switch strings.ToLower(os.Getenv("AUTH_ENABLED")) {
-	case "true", "1", "yes", "on":
-		cfg.AuthEnabled = true
-	case "false", "0", "no", "off":
-		cfg.AuthEnabled = false
-	}
-	if v := os.Getenv("MAX_PLAYERS"); v != "" {
-		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
-			cfg.MaxPlayers = n
-		}
-	}
+	cfg.AuthEnabled = envEnabled("AUTH_ENABLED", !cfg.OnlineMode)
+	cfg.MaxPlayers = envInt("MAX_PLAYERS", cfg.MaxPlayers, 1)
 	// Connection-flood limits. Unlike MAX_PLAYERS, zero is meaningful here
 	// (= disable that limit), so >= 0 is accepted.
-	if v := os.Getenv("MAX_CONNS"); v != "" {
-		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n >= 0 {
-			cfg.MaxConns = n
-		}
-	}
-	if v := os.Getenv("MAX_CONNS_PER_IP"); v != "" {
-		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n >= 0 {
-			cfg.MaxConnsPerIP = n
-		}
-	}
-	if v := os.Getenv("CONN_RATE_PER_IP"); v != "" {
-		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n >= 0 {
-			cfg.ConnRatePerIP = n
-		}
-	}
+	cfg.MaxConns = envInt("MAX_CONNS", cfg.MaxConns, 0)
+	cfg.MaxConnsPerIP = envInt("MAX_CONNS_PER_IP", cfg.MaxConnsPerIP, 0)
+	cfg.ConnRatePerIP = envInt("CONN_RATE_PER_IP", cfg.ConnRatePerIP, 0)
 	// Auth knobs. time.ParseDuration handles "30s", "5m", "1h30m", etc.
-	if v := os.Getenv("AUTH_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(strings.TrimSpace(v)); err == nil && d > 0 {
-			cfg.SetAuthTimeout(d)
-		}
-	}
-	if v := os.Getenv("AUTH_MAX_ATTEMPTS"); v != "" {
-		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
-			cfg.SetAuthMaxAttempts(n)
-		}
-	}
-	if v := os.Getenv("AUTH_BAN_DURATION"); v != "" {
-		if d, err := time.ParseDuration(strings.TrimSpace(v)); err == nil && d > 0 {
-			cfg.SetAuthBanDuration(d)
-		}
-	}
+	cfg.SetAuthTimeout(envDuration("AUTH_TIMEOUT", cfg.AuthTimeout()))
+	cfg.SetAuthMaxAttempts(envInt("AUTH_MAX_ATTEMPTS", cfg.AuthMaxAttempts(), 1))
+	cfg.SetAuthBanDuration(envDuration("AUTH_BAN_DURATION", cfg.AuthBanDuration()))
 	// Combat model: PVP_VERSION=1 → 1.8, 2 → 1.9. Anything else is ignored
 	// (keeps the default). Only 1/2 are valid so a typo can't silently pick
 	// a bogus mode.
-	switch strings.TrimSpace(os.Getenv("PVP_VERSION")) {
+	switch v := strings.TrimSpace(os.Getenv("PVP_VERSION")); v {
 	case "1":
 		cfg.PvPVersion = 1
 	case "2":
 		cfg.PvPVersion = 2
+	case "":
+	default:
+		slog.Warn("env: PVP_VERSION must be 1 or 2, using the default", "value", v, "default", cfg.PvPVersion)
 	}
 	if ops := os.Getenv("INITIAL_OPS"); ops != "" {
 		var parsed []string

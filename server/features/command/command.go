@@ -12,6 +12,7 @@ import (
 	"minecraft-server/protocol"
 	"sort"
 	"strings"
+	"unicode/utf16"
 )
 
 // Sender is who runs a command.
@@ -144,8 +145,11 @@ func (r *Registry[S]) Resolve(line string) (cmd *Command[S], name string, args [
 // Suggest computes the tab-completion reply for text (the whole chat box,
 // e.g. "/op _LD"): the offset in text that the matches replace, its length,
 // and the matches. The first word completes to the commands s may run;
-// later ones come from the command's Complete. Matches start with the word
-// under the cursor (case-insensitive) and are sorted.
+// later ones come from the command's Complete — only for a command s may
+// run, so an op-only command's completer (instance ids, arena / bot names…)
+// never answers a non-operator. Matches start with the word under the cursor
+// (case-insensitive) and are sorted. start and length count UTF-16 code
+// units, as the client's brigadier (Java strings) reads them, not bytes.
 func (r *Registry[S]) Suggest(s S, text string) (start, length int32, matches []string) {
 	raw := text
 	var offset int32
@@ -165,7 +169,7 @@ func (r *Registry[S]) Suggest(s S, text string) (start, length int32, matches []
 		for _, c := range r.VisibleTo(s) {
 			candidates = append(candidates, c.Name)
 		}
-	} else if c, ok := r.Lookup(parts[0]); ok && c.Complete != nil {
+	} else if c, ok := r.Lookup(parts[0]); ok && c.Complete != nil && (!c.NeedsOp || s.IsOp()) {
 		args := append([]string{}, parts[1:]...)
 		if trailingSpace {
 			args = append(args, "")
@@ -180,7 +184,17 @@ func (r *Registry[S]) Suggest(s S, text string) (start, length int32, matches []
 		}
 	}
 	sort.Strings(matches)
-	return wordStart, int32(len(prefix)), matches
+	return utf16Len(text[:wordStart]), utf16Len(prefix), matches
+}
+
+// utf16Len is the length of s in UTF-16 code units (a rune above U+FFFF
+// takes two).
+func utf16Len(s string) int32 {
+	var n int32
+	for _, r := range s {
+		n += int32(utf16.RuneLen(r))
+	}
+	return n
 }
 
 // SuggestionsPayload builds Command Suggestions Response (Cb 0x11, 1.20.1):

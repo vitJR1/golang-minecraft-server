@@ -4,6 +4,8 @@ package connlimit
 
 import (
 	"minecraft-server/cfg"
+	"net"
+	"strings"
 	"sync"
 	"time"
 )
@@ -103,4 +105,28 @@ func (l *Limiter) maybeSweep(now time.Time) {
 			delete(l.perIP, ip)
 		}
 	}
+}
+
+// Key is the per-IP limits' key for a client address: an IPv4 address (an
+// IPv4-mapped IPv6 one included) as itself, an IPv6 address as its /64 —
+// one subscriber usually holds a whole /64, so keying by the full address
+// let a single host open unlimited connections (and dodge IP bans) by
+// rotating through it.
+func Key(ip net.IP) string {
+	if v4 := ip.To4(); v4 != nil {
+		return v4.String()
+	}
+	if len(ip) == net.IPv6len {
+		return (&net.IPNet{IP: ip.Mask(net.CIDRMask(64, 128)), Mask: net.CIDRMask(64, 128)}).String()
+	}
+	return ip.String()
+}
+
+// KeyString is Key for an address in text (an admin's /banip argument, a
+// saved ban); anything that doesn't parse as an IP is returned unchanged.
+func KeyString(s string) string {
+	if ip := net.ParseIP(strings.TrimSpace(s)); ip != nil {
+		return Key(ip)
+	}
+	return s
 }

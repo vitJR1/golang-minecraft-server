@@ -4,12 +4,16 @@
 package metrics
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/pprof"
+	"strings"
+	"time"
 )
 
 // Stats is the /stats JSON shape — a point-in-time operational
@@ -51,9 +55,14 @@ type Source interface {
 //	/stats          — JSON snapshot of live server state (Stats)
 //	/debug/pprof/*  — Go profiling (CPU, heap, goroutines, …)
 //
-// There is NO authentication — bind to loopback (the default) and reach it
-// over SSH; never expose this port to the internet.
-func Start(src Source, addr string) (net.Listener, error) {
+// pprof can burn CPU on demand and dump memory, so the endpoint is never
+// open to the network unauthenticated: with a token every request must
+// carry "Authorization: Bearer <token>" (else 401); without one Start
+// refuses any addr that isn't loopback.
+func Start(src Source, addr, token string) (net.Listener, error) {
+	if token == "" && !loopback(addr) {
+		return nil, fmt.Errorf("metrics on non-loopback %q needs a token (METRICS_TOKEN)", addr)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
 	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
@@ -67,13 +76,46 @@ func Start(src Source, addr string) (net.Listener, error) {
 
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("listening on %s: %w", addr, err)
 	}
+	srv := &http.Server{Handler: requireToken(token, mux), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		// net.ErrClosed is the normal shutdown path (listener closed).
-		if err := http.Serve(lis, mux); err != nil && !errors.Is(err, net.ErrClosed) {
+		if err := srv.Serve(lis); err != nil && !errors.Is(err, net.ErrClosed) {
 			slog.Error("metrics server failed", "err", err)
 		}
 	}()
 	return lis, nil
+}
+
+// requireToken lets a request through only with "Authorization: Bearer
+// token" (compared in constant time); an empty token lets everything
+// through.
+func requireToken(token string, next http.Handler) http.Handler {
+	if token == "" {
+		return next
+	}
+	want := []byte("Bearer " + token)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), want) != 1 {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="metrics"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// loopback reports whether addr (host:port) binds only the loopback
+// interface. An empty host, 0.0.0.0 or :: listen everywhere.
+func loopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

@@ -104,8 +104,34 @@ func TestSuggest(t *testing.T) {
 		{sender{op: true}, "/tp Alice ", 10, 0, ""},
 		{sender{op: true}, "/help ", 6, 0, ""}, // no Complete
 		{sender{op: true}, "/nope ", 6, 0, ""},
+		{sender{op: false}, "/tp ", 4, 0, ""},         // an op-only completer stays silent
+		{sender{op: false}, "/teleport A", 10, 1, ""}, // through an alias too
 	} {
 		st, ln, m := r.Suggest(tc.who, tc.text)
+		if st != tc.start || ln != tc.length || strings.Join(m, ",") != tc.want {
+			t.Errorf("%q → %d %d %v, want %d %d %s", tc.text, st, ln, m, tc.start, tc.length, tc.want)
+		}
+	}
+}
+
+// TestSuggestOffsetsUTF16: start/length are UTF-16 code units (what the
+// client's brigadier counts), not UTF-8 bytes — with Cyrillic or an emoji
+// before the cursor the byte offsets point past the word and the client
+// inserts the match in the wrong place (or throws on Tab).
+func TestSuggestOffsetsUTF16(t *testing.T) {
+	r := &Registry[sender]{}
+	r.Register(&Command[sender]{Name: "say", Run: func(sender, []string) {},
+		Complete: func(sender, []string) []string { return []string{"Привет", "Пока", "ok"} }})
+	for _, tc := range []struct {
+		text          string
+		start, length int32
+		want          string
+	}{
+		{"/say ёж П", 8, 1, "Пока,Привет"}, // "/say ёж " = 8 units (10 bytes)
+		{"/say 😀 Пр", 8, 2, "Привет"},      // the emoji is a surrogate pair: 2 units, 4 bytes
+		{"/say 😀 o", 8, 1, "ok"},
+	} {
+		st, ln, m := r.Suggest(sender{}, tc.text)
 		if st != tc.start || ln != tc.length || strings.Join(m, ",") != tc.want {
 			t.Errorf("%q → %d %d %v, want %d %d %s", tc.text, st, ln, m, tc.start, tc.length, tc.want)
 		}

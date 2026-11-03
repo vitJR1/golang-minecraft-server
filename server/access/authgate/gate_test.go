@@ -292,7 +292,7 @@ func TestSuccessfulLoginClearsFailCounter(t *testing.T) {
 		"jane to log in")
 
 	// Fail counter should be cleared.
-	count := g.svc.IPs.Fails(server.ClientIP(cli.Conn.RemoteAddr()))
+	count := g.svc.IPs.Fails(server.ClientIP(cli.Conn.RemoteAddr()), "jane")
 	if count != 0 {
 		t.Errorf("fail counter not cleared after success: got %d", count)
 	}

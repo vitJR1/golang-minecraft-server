@@ -13,9 +13,12 @@
 //     whitelist (register, login, help) are rejected.
 //  4. cfg.AuthTimeout (default 30s) — if not authed by then, kick
 //     with "Auth timed out".
-//  5. cfg.AuthMaxAttempts (default 3) consecutive wrong passwords on
-//     the same IP → IP banned for cfg.AuthBanDuration (default 1h);
-//     future connections from that IP are dropped at login.
+//  5. cfg.AuthMaxAttempts (default 3) wrong passwords for one name from
+//     one IP (or 4× that over all names) → IP banned for
+//     cfg.AuthBanDuration (default 1h); future connections from that IP
+//     (an IPv6 /64) are dropped at login. A name guessed at from many IPs
+//     gets a growing /login delay (auth.IPGuard.NameWait). A successful
+//     login clears only its own account's counters.
 //  6. On success → MovePlayer to Hub (player sees Respawn + hub
 //     chunks).
 //
