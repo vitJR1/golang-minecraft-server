@@ -72,10 +72,58 @@ type Active struct {
 	Remaining time.Duration
 }
 
-// timed is one timed effect on a player.
+// timed is one timed effect on a player. hidden is a weaker effect of the
+// same kind that outlasts it (vanilla's hiddenEffect): it takes over when
+// this one ends. Its expiry is absolute, so it runs down meanwhile, as in
+// vanilla.
 type timed struct {
 	level   int // amplifier+1
 	expires time.Time
+	hidden  *timed
+}
+
+// live is the effect in force at now: t, or the first unexpired effect of
+// its hidden chain.
+func (t timed) live(now time.Time) (timed, bool) {
+	for {
+		if now.Before(t.expires) {
+			return t, true
+		}
+		if t.hidden == nil {
+			return timed{}, false
+		}
+		t = *t.hidden
+	}
+}
+
+// update merges other into cur (both in force) like vanilla's
+// MobEffectInstance.update: a higher level takes over (cur hidden under it
+// when cur outlasts it), the same level extends to the later end, a lower
+// level that outlasts cur waits hidden under it.
+func (cur timed) update(other timed) timed {
+	switch {
+	case other.level > cur.level:
+		next := other
+		next.hidden = cur.hidden
+		if other.expires.Before(cur.expires) {
+			h := cur
+			next.hidden = &h
+		}
+		return next
+	case !other.expires.After(cur.expires):
+		return cur // shorter and no stronger: nothing changes
+	case other.level == cur.level:
+		cur.expires = other.expires
+		return cur
+	case cur.hidden == nil:
+		h := other
+		cur.hidden = &h
+		return cur
+	default:
+		h := cur.hidden.update(other)
+		cur.hidden = &h
+		return cur
+	}
 }
 
 // Table holds timed effects per player key. Expired entries read as 0 but
@@ -94,18 +142,22 @@ func (t *Table[K]) Level(k K, e Effect) int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	ae, ok := t.players[k][e.Name]
-	if !ok || !time.Now().Before(ae.expires) {
+	if !ok {
+		return 0
+	}
+	ae, ok = ae.live(time.Now())
+	if !ok {
 		return 0
 	}
 	return ae.level
 }
 
 // Apply grants k effect e at level (amplifier+1) for d, combined with what
-// k already has like vanilla's MobEffectInstance.update: a higher level
-// replaces the current effect, the same level extends it to the later end,
-// a lower level never weakens or shortens a stronger one (vanilla would keep
-// it as a hidden effect resumed afterwards; we drop it). It returns the
-// effect k ends up with — what the client must be told, which isn't
+// k already has like vanilla's MobEffectInstance.update (timed.update): a
+// higher level replaces the current effect, the same level extends it to
+// the later end, a lower level never weakens or shortens a stronger one but
+// waits hidden under it if it lasts longer, resumed by Sweep. It returns
+// the effect k ends up with — what the client must be told, which isn't
 // necessarily (level, d).
 func (t *Table[K]) Apply(k K, e Effect, level int, d time.Duration) (int, time.Duration) {
 	now := time.Now()
@@ -118,12 +170,9 @@ func (t *Table[K]) Apply(k K, e Effect, level int, d time.Duration) (int, time.D
 		t.players[k] = map[string]timed{}
 	}
 	next := timed{level: level, expires: now.Add(d)}
-	if cur, ok := t.players[k][e.Name]; ok && now.Before(cur.expires) {
-		switch {
-		case level < cur.level:
-			next = cur
-		case level == cur.level && cur.expires.After(next.expires):
-			next = cur
+	if cur, ok := t.players[k][e.Name]; ok {
+		if cur, ok = cur.live(now); ok {
+			next = cur.update(next)
 		}
 	}
 	t.players[k][e.Name] = next
@@ -137,7 +186,8 @@ func (t *Table[K]) Active(k K) []Active {
 	now := time.Now()
 	out := make([]Active, 0, len(t.players[k]))
 	for name, ae := range t.players[k] {
-		if !now.Before(ae.expires) {
+		ae, ok := ae.live(now)
+		if !ok {
 			continue
 		}
 		out = append(out, Active{Effect: Known[name], Level: ae.level, Remaining: ae.expires.Sub(now)})
@@ -147,24 +197,32 @@ func (t *Table[K]) Active(k K) []Active {
 }
 
 // Sweep drops every expired effect and returns them per player, so the
-// server can show each end (Remove Entity Effect, attributes, flags).
-func (t *Table[K]) Sweep() map[K][]Effect {
+// server can show each end (Remove Entity Effect, attributes, flags). An
+// expired effect with a hidden one still in force is replaced by it and
+// returned in resumed instead — the client must be shown the weaker level.
+func (t *Table[K]) Sweep() (expired map[K][]Effect, resumed map[K][]Active) {
 	now := time.Now()
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	expired := map[K][]Effect{}
+	expired, resumed = map[K][]Effect{}, map[K][]Active{}
 	for k, effects := range t.players {
 		for name, ae := range effects {
-			if !now.Before(ae.expires) {
-				delete(effects, name)
-				expired[k] = append(expired[k], Known[name])
+			if now.Before(ae.expires) {
+				continue
 			}
+			if next, ok := ae.live(now); ok {
+				effects[name] = next
+				resumed[k] = append(resumed[k], Active{Effect: Known[name], Level: next.level, Remaining: next.expires.Sub(now)})
+				continue
+			}
+			delete(effects, name)
+			expired[k] = append(expired[k], Known[name])
 		}
 		if len(effects) == 0 {
 			delete(t.players, k)
 		}
 	}
-	return expired
+	return expired, resumed
 }
 
 // Remove clears one effect (or all, when e is nil) from k and returns what

@@ -69,10 +69,25 @@ func (t *effectTable) apply(c *ClientConnection, e effect.Effect, level int, d t
 }
 
 // sweep drops every expired effect, telling each client (and, for
-// invisibility, everyone).
+// invisibility, everyone), and shows the effects a weaker hidden one took
+// over from (Table.Sweep).
 func (t *effectTable) sweep() {
-	for c, list := range t.Sweep() {
+	expired, resumed := t.Sweep()
+	for c, list := range expired {
 		c.sendEffectsRemoved(list)
+	}
+	for c, list := range resumed {
+		if c.player == nil {
+			continue
+		}
+		movement := false
+		for _, ae := range list {
+			_ = c.safeWrite(packetid.CbPlayEntityEffect, effect.EntityPayload(c.player.EntityID, ae.Effect, ae.Level, ae.Remaining))
+			movement = movement || attributes.AffectsMovementSpeed(ae.Effect)
+		}
+		if movement {
+			_ = c.sendMovementAttributes() // the weaker speed / slowness
+		}
 	}
 }
 

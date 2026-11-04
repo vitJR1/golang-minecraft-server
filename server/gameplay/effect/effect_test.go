@@ -20,7 +20,7 @@ func TestTable(t *testing.T) {
 	}
 	tb.Apply("a", Blindness, 1, -time.Second)
 	// Both expired effects (Haste, Blindness) go; Speed stays.
-	if exp := tb.Sweep(); len(exp["a"]) != 2 || tb.Level("a", Speed) != 2 {
+	if exp, _ := tb.Sweep(); len(exp["a"]) != 2 || tb.Level("a", Speed) != 2 {
 		t.Fatalf("sweep %v", exp)
 	}
 	if got := tb.Remove("a", &Speed); len(got) != 1 || tb.Level("a", Speed) != 0 {
@@ -60,7 +60,7 @@ func TestLevelDoesNotSwallowExpiry(t *testing.T) {
 	if tb.Level("a", JumpBoost) != 0 {
 		t.Fatal("an expired effect reads as 0")
 	}
-	if exp := tb.Sweep(); len(exp["a"]) != 1 || exp["a"][0] != JumpBoost {
+	if exp, _ := tb.Sweep(); len(exp["a"]) != 1 || exp["a"][0] != JumpBoost {
 		t.Fatalf("sweep after a read lost the expired effect: %v", exp)
 	}
 }
@@ -92,5 +92,52 @@ func TestApplyNeverWeakens(t *testing.T) {
 	tb.Apply("a", Haste, 3, -time.Millisecond) // expired, not yet swept
 	if lvl, _ := tb.Apply("a", Haste, 1, time.Minute); lvl != 1 {
 		t.Fatalf("an expired effect must not block a new one: level %d", lvl)
+	}
+}
+
+// TestWeakerEffectResumesAfterStronger: a weaker effect that outlasts a
+// stronger one waits hidden under it and takes over when it ends (vanilla's
+// hiddenEffect) — a golden apple's Regeneration II over a Heal Pool's
+// longer Regeneration I falls back to I, not to nothing.
+func TestWeakerEffectResumesAfterStronger(t *testing.T) {
+	var tb Table[string]
+	tb.Apply("a", Regeneration, 1, 400*time.Millisecond)
+	if lvl, _ := tb.Apply("a", Regeneration, 2, 50*time.Millisecond); lvl != 2 {
+		t.Fatalf("the stronger effect should show, got level %d", lvl)
+	}
+	time.Sleep(80 * time.Millisecond)
+	if got := tb.Level("a", Regeneration); got != 1 {
+		t.Errorf("after the stronger one ran out the hidden one is in force: level %d", got)
+	}
+	expired, resumed := tb.Sweep()
+	if len(expired["a"]) != 0 {
+		t.Errorf("reported as ended: %v", expired["a"])
+	}
+	if r := resumed["a"]; len(r) != 1 || r[0].Level != 1 || r[0].Remaining <= 0 || r[0].Remaining > 400*time.Millisecond {
+		t.Fatalf("resumed: %+v", r)
+	}
+	time.Sleep(350 * time.Millisecond)
+	if expired, _ := tb.Sweep(); len(expired["a"]) != 1 {
+		t.Error("the hidden effect should end in its turn")
+	}
+}
+
+// TestHiddenChainKeepsOrder: II over I over a longer weaker chain — each
+// level comes back in turn, strongest first.
+func TestHiddenChainKeepsOrder(t *testing.T) {
+	var tb Table[string]
+	tb.Apply("a", Speed, 1, 300*time.Millisecond)
+	tb.Apply("a", Speed, 3, 50*time.Millisecond)
+	tb.Apply("a", Speed, 2, 150*time.Millisecond) // weaker than 3, outlasts it
+	if got := tb.Level("a", Speed); got != 3 {
+		t.Fatalf("level %d, want 3", got)
+	}
+	time.Sleep(80 * time.Millisecond)
+	if got := tb.Level("a", Speed); got != 2 {
+		t.Errorf("after III: level %d, want 2", got)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if got := tb.Level("a", Speed); got != 1 {
+		t.Errorf("after II: level %d, want 1", got)
 	}
 }
