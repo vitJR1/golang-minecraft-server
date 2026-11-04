@@ -70,14 +70,38 @@ func TestEquipmentBroadcastToOthersOnly(t *testing.T) {
 	if eq[equipHelmet].ID != helmet {
 		t.Errorf("helmet: %+v", eq[equipHelmet])
 	}
-	if !eq[equipBoots].Empty() || !eq[equipOffHand].Empty() {
-		t.Error("empty slots must be sent empty")
-	}
-	if len(eq) != 6 {
-		t.Errorf("all six slots expected, got %d", len(eq))
+	if len(eq) != 2 {
+		t.Errorf("only the two changed slots expected, got %d", len(eq))
 	}
 	if lastPacket(t, alice, packetid.CbPlaySetEquipment) != nil {
 		t.Error("the player must not receive their own equipment packet")
+	}
+}
+
+// TestEquipmentSendsOnlyChanges: nothing changed → no packet (a pickup into
+// the main inventory); a cleared slot goes out empty, alone.
+func TestEquipmentSendsOnlyChanges(t *testing.T) {
+	inst := bareInstance(New(), world.NewMemoryWorld())
+	alice := tntConn(inst, "Alice", player.Survival, 0, 64, 0)
+	bob := tntConn(inst, "Bob", player.Survival, 2, 64, 0)
+	helmet, _ := world.ItemByName("minecraft:iron_helmet")
+	alice.inv.Set(inventory.HelmetSlot, inventory.Stack{ID: helmet, Count: 1})
+	alice.equipmentChanged()
+	drain(bob)
+
+	alice.equipmentChanged() // nothing shown changed
+	if lastPacket(t, bob, packetid.CbPlaySetEquipment) != nil {
+		t.Error("an unchanged equipment was re-sent")
+	}
+
+	alice.inv.Set(inventory.HelmetSlot, inventory.Stack{})
+	alice.equipmentChanged()
+	body := lastPacket(t, bob, packetid.CbPlaySetEquipment)
+	if body == nil {
+		t.Fatal("a cleared helmet must be sent")
+	}
+	if _, eq := readEquipment(t, body); len(eq) != 1 || !eq[equipHelmet].Empty() {
+		t.Errorf("want just the empty helmet, got %+v", eq)
 	}
 }
 

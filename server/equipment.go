@@ -13,19 +13,39 @@ import (
 // equipmentChanged, and sent for every present player to a joining or
 // resyncing client next to Spawn Player (sendOthersEquipment).
 
-// equipmentPayload is this player's Set Equipment (equipment.Payload).
+// equipmentPayload is this player's full Set Equipment (equipment.Payload),
+// for viewers that know nothing yet.
 func (c *ClientConnection) equipmentPayload() []byte {
 	return equipment.Payload(c.player.EntityID, &c.inv, c.heldSlot.Load())
 }
 
+// announceEquipment broadcasts the full Set Equipment to the instance (a
+// join) and records it as what the viewers were shown.
+func (c *ClientConnection) announceEquipment(i *Instance) {
+	c.equipMu.Lock()
+	defer c.equipMu.Unlock()
+	c.shownEquipment = equipment.Of(&c.inv, c.heldSlot.Load())
+	i.Players.Broadcast(packetid.CbPlaySetEquipment, c.shownEquipment.Payload(c.player.EntityID), c.player.EntityID)
+}
+
 // equipmentChanged tells everyone else in the instance what this player now
-// holds and wears. Call after any change to the held slot, the held stack,
-// armor or the off hand. Safe before login / outside an instance (no-op).
+// holds and wears — only the slots that differ from what they were shown
+// (it runs on every pickup and placed block, mostly changing nothing or one
+// slot). Call after any change to the held slot, the held stack, armor or
+// the off hand. Safe before login / outside an instance (no-op).
 func (c *ClientConnection) equipmentChanged() {
 	if c.player == nil || c.instance == nil {
 		return
 	}
-	c.instance.Players.Broadcast(packetid.CbPlaySetEquipment, c.equipmentPayload(), c.player.EntityID)
+	c.equipMu.Lock()
+	defer c.equipMu.Unlock()
+	now := equipment.Of(&c.inv, c.heldSlot.Load())
+	payload, changed := now.Diff(c.player.EntityID, c.shownEquipment)
+	if !changed {
+		return
+	}
+	c.shownEquipment = now
+	c.instance.Players.Broadcast(packetid.CbPlaySetEquipment, payload, c.player.EntityID)
 }
 
 // sendOthersEquipment sends this client the equipment of every other player

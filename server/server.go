@@ -18,6 +18,7 @@ import (
 	"minecraft-server/server/bots/botai"
 	"minecraft-server/server/gameplay/enchant"
 	"minecraft-server/server/gameplay/enderchest"
+	"minecraft-server/server/gameplay/equipment"
 	"minecraft-server/server/gameplay/inventory"
 	"minecraft-server/server/hud/chat"
 	"minecraft-server/server/hud/scoreboard"
@@ -96,6 +97,9 @@ type Server struct {
 	// enderchest.FileStore (enderchests.json) or nil for RAM only. Set by main
 	// before players connect.
 	EnderChests enderchest.Store
+	// enderSaver writes changed ender chests in the background (flushed
+	// by Shutdown).
+	enderSaver enderchest.Saver
 
 	// Bans is the player-ban backend the login handler and /ban //unban use.
 	// New() installs an in-memory store; main swaps in store.BanStore
@@ -622,6 +626,13 @@ type ClientConnection struct {
 	digPos       *world.Position
 	digStartTick uint64
 	digInst      *Instance // whose clock digStartTick is on
+
+	// shownEquipment is what the other players in the instance were last
+	// sent of this player's equipment (equipment.go), so a change sends only
+	// the slots that differ. Guarded by equipMu (readLoop and tick goroutine
+	// both change gear).
+	equipMu        sync.Mutex
+	shownEquipment equipment.Set
 
 	// inPlay mirrors state == StatePlay for the keepAlive goroutine: state
 	// itself is written and read on the readLoop only.

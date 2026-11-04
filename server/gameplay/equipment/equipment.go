@@ -22,31 +22,66 @@ const (
 	helmet     byte = 5
 )
 
+// Set is what a player shows: the stack in each equipment slot, indexed by
+// the slot id (main hand 0 … helmet 5).
+type Set [6]inventory.Stack
+
+// Of is the equipment of inventory inv with hotbar slot heldSlot selected.
+func Of(inv *inventory.Player, heldSlot int32) Set {
+	var s Set
+	s[mainHand] = inv.Held(heldSlot)
+	s[offHand] = inv.Get(inventory.OffhandSlot)
+	s[boots] = inv.Get(inventory.BootsSlot)
+	s[leggings] = inv.Get(inventory.LeggingsSlot)
+	s[chestplate] = inv.Get(inventory.ChestplateSlot)
+	s[helmet] = inv.Get(inventory.HelmetSlot)
+	return s
+}
+
 // Payload encodes all six equipment slots of the player with entity id eid,
-// inventory inv and hotbar slot heldSlot selected: entity id, then (slot
-// byte | 0x80 while more follow, Slot) per entry. Sending every slot each
-// time means a cleared slot is cleared on the client too.
+// inventory inv and hotbar slot heldSlot selected. Sending every slot means
+// a cleared slot is cleared on the client too — what a viewer that knows
+// nothing yet (a joiner) needs.
 func Payload(eid int32, inv *inventory.Player, heldSlot int32) []byte {
-	entries := []struct {
-		slot byte
-		st   inventory.Stack
-	}{
-		{mainHand, inv.Held(heldSlot)},
-		{offHand, inv.Get(inventory.OffhandSlot)},
-		{boots, inv.Get(inventory.BootsSlot)},
-		{leggings, inv.Get(inventory.LeggingsSlot)},
-		{chestplate, inv.Get(inventory.ChestplateSlot)},
-		{helmet, inv.Get(inventory.HelmetSlot)},
+	return Of(inv, heldSlot).Payload(eid)
+}
+
+// Payload encodes every slot of s.
+func (s Set) Payload(eid int32) []byte { return s.encode(eid, func(int) bool { return true }) }
+
+// Diff encodes only the slots where s differs from was (what the viewers
+// were last shown, a cleared slot included), and reports false when nothing
+// differs. Vanilla sends just the changed slots too.
+func (s Set) Diff(eid int32, was Set) ([]byte, bool) {
+	changed := func(i int) bool { return !inventory.Equal(s[i], was[i]) }
+	any := false
+	for i := range s {
+		any = any || changed(i)
+	}
+	if !any {
+		return nil, false
+	}
+	return s.encode(eid, changed), true
+}
+
+// encode writes entity id, then (slot byte | 0x80 while more follow, Slot)
+// for every slot keep selects.
+func (s Set) encode(eid int32, keep func(int) bool) []byte {
+	var slots []int
+	for i := range s {
+		if keep(i) {
+			slots = append(slots, i)
+		}
 	}
 	var buf bytes.Buffer
 	protocol.WriteVarInt32ToBuffer(&buf, eid)
-	for i, e := range entries {
-		slot := e.slot
-		if i < len(entries)-1 {
+	for n, i := range slots {
+		slot := byte(i)
+		if n < len(slots)-1 {
 			slot |= 0x80 // another entry follows
 		}
 		buf.WriteByte(slot)
-		inventory.WriteSlot(&buf, e.st)
+		inventory.WriteSlot(&buf, s[i])
 	}
 	return buf.Bytes()
 }

@@ -288,7 +288,7 @@ func (i *Instance) JoinAndAnnounce(c *ClientConnection) bool {
 	spawnNewcomer := visibility.SpawnPlayerPayload(c.player.Snapshot())
 	i.Players.Broadcast(packetid.CbPlayPlayerInfoUpdate, addNewcomer, c.player.EntityID)
 	i.Players.Broadcast(packetid.CbPlaySpawnPlayer, spawnNewcomer, c.player.EntityID)
-	i.Players.Broadcast(packetid.CbPlaySetEquipment, c.equipmentPayload(), c.player.EntityID)
+	c.announceEquipment(i)
 
 	i.joinMu.Unlock()
 
