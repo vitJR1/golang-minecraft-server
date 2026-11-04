@@ -21,8 +21,10 @@ func (s *Server) enderChestFor(uuid [16]byte) *enderchest.Chest {
 	return s.enderChests.For(s.EnderChests, uuid)
 }
 
-// saveEnderChest writes e through Server.EnderChests (after every click).
-func (s *Server) saveEnderChest(e *enderchest.Chest) { enderchest.Save(s.EnderChests, e) }
+// saveEnderChest schedules e to be written through Server.EnderChests
+// (after every click; the write happens in the background, coalesced —
+// enderchest.Saver).
+func (s *Server) saveEnderChest(e *enderchest.Chest) { s.enderSaver.Mark(s.EnderChests, e) }
 
 // openBlockChest opens the chest block at pos for this client: a regular
 // chest binds the menu to that position; an ender chest binds it to the

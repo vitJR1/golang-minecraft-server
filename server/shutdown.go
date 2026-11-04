@@ -49,6 +49,7 @@ func (s *Server) Shutdown(reason string) {
 	for _, inst := range instances {
 		inst.Stop()
 	}
+	s.enderSaver.Flush() // ender chests changed in the last second
 	s.stopJanitor()
 	slog.Info("server shut down", "kicked_instances", len(instances))
 }

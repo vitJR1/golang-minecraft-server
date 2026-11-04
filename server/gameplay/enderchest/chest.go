@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"time"
 
 	"minecraft-server/protocol"
 	"minecraft-server/server/gameplay/inventory"
@@ -111,6 +112,10 @@ func load(store Store, e *Chest) bool {
 	return true
 }
 
+// saveTimeout bounds one chest's write (a stuck database must not hold the
+// saver forever).
+const saveTimeout = 5 * time.Second
+
 // Save writes e's current contents through store (nil: RAM only).
 func Save(store Store, e *Chest) {
 	if store == nil || e.unavailable {
@@ -122,7 +127,63 @@ func Save(store Store, e *Chest) {
 		return
 	}
 	id := protocol.UUIDString(e.uuid)
-	if err := store.SaveEnderChest(context.Background(), id, data); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), saveTimeout)
+	defer cancel()
+	if err := store.SaveEnderChest(ctx, id, data); err != nil {
 		slog.Error("ender chest save failed", "uuid", id, "err", err)
+	}
+}
+
+// Saver writes changed chests in the background. A click used to save on
+// the player's readLoop — an upsert (or a rewrite of the whole JSON file)
+// per click, stalling the player's packets on the database. Mark only
+// records the chest; a goroutine saves everything marked SaveDelay after
+// the first mark, so a burst of clicks is one write per chest. The zero
+// value is ready; Flush writes what's pending at once (shutdown).
+type Saver struct {
+	mu      sync.Mutex
+	pending map[*Chest]Store
+	running bool
+
+	flushMu sync.Mutex // one flush at a time: an older snapshot never lands last
+}
+
+// SaveDelay is how long the Saver gathers marks before writing.
+var SaveDelay = time.Second
+
+// Mark schedules e to be saved through store.
+func (s *Saver) Mark(store Store, e *Chest) {
+	if store == nil || e.unavailable {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pending == nil {
+		s.pending = make(map[*Chest]Store)
+	}
+	s.pending[e] = store
+	if !s.running {
+		s.running = true
+		time.AfterFunc(SaveDelay, s.flushScheduled)
+	}
+}
+
+func (s *Saver) flushScheduled() {
+	s.mu.Lock()
+	s.running = false
+	s.mu.Unlock()
+	s.Flush()
+}
+
+// Flush saves every marked chest now.
+func (s *Saver) Flush() {
+	s.flushMu.Lock()
+	defer s.flushMu.Unlock()
+	s.mu.Lock()
+	pending := s.pending
+	s.pending = nil
+	s.mu.Unlock()
+	for e, store := range pending {
+		Save(store, e)
 	}
 }
