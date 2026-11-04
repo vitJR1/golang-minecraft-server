@@ -102,7 +102,7 @@ func cmdPlay(c *server.ClientConnection, args []string) {
 				_ = c.SendMessage("Already in " + arena)
 				return
 			}
-			if err := c.Server().MovePlayer(c, target, 0, 80, 0); err != nil {
+			if err := c.Server().Join(c, target); err != nil {
 				_ = c.SendMessage("Couldn't join " + arena + ": " + err.Error())
 				return
 			}
@@ -122,7 +122,7 @@ func cmdPlay(c *server.ClientConnection, args []string) {
 // can run it (no NeedsOp) since games need an "escape" back to the
 // lobby. From hub itself it's a polite no-op.
 //
-// Default spawn (0.5, 67, 0.5) mirrors player.New's defaults so the
+// The hub's Arrival (0.5, 67, 0.5) mirrors player.New's defaults so the
 // player lands on top of the spawn schematic in the centre column.
 func cmdHub(c *server.ClientConnection, _ []string) {
 	moved, err := c.Server().ToHub(c)

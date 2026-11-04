@@ -75,11 +75,6 @@ func (c *ClientConnection) Disconnect(reason string) {
 	c.cleanup()
 }
 
-// ResendCommands re-sends the command tree (Declare Commands) — the client
-// highlights and tab-completes from it, and op-only commands are left out
-// for non-operators, so it is stale after /op or /deop.
-func (c *ClientConnection) ResendCommands() error { return c.sendDeclareCommands() }
-
 // SetExperience sets the XP bar overlay: bar fill 0..1, the level number.
 func (c *ClientConnection) SetExperience(bar float32, level, totalXP int32) error {
 	return c.sendExperience(bar, level, totalXP)

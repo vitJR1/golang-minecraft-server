@@ -137,7 +137,7 @@ func enterLobby(c *server.ClientConnection, key string) {
 		return
 	}
 	c.CloseMenu()
-	if err := c.Server().MovePlayer(c, target, 0.5, 67, 0.5); err != nil {
+	if err := c.Server().Join(c, target); err != nil {
 		_ = c.SendMessage("Couldn't enter lobby: " + err.Error())
 		slog.Warn("hub menu: move failed", "player", c.Name(), "lobby", lobbyID, "err", err)
 		return

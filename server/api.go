@@ -46,6 +46,11 @@ func (c *ClientConnection) Kick(reason string) {
 	go c.cleanup()
 }
 
+// ResendCommands re-sends the command tree (Declare Commands) — the client
+// highlights and tab-completes from it, and op-only commands are left out
+// for non-operators, so it is stale after /op or /deop.
+func (c *ClientConnection) ResendCommands() error { return c.sendDeclareCommands() }
+
 // SetGamemode changes the player's gamemode and tells the client.
 func (c *ClientConnection) SetGamemode(mode player.Gamemode) {
 	c.player.SetGamemode(mode)
@@ -70,13 +75,19 @@ func (c *ClientConnection) ClearEffects() { c.clearEffects() }
 // ToHub sends the player to the hub, out of any matchmaker queue. An error
 // is reported for the caller to show; being in the hub already is not one
 // (ok is false then).
+// Join moves c into target, landing at target.Arrival.
+func (s *Server) Join(c *ClientConnection, target *Instance) error {
+	a := target.Arrival
+	return s.MovePlayer(c, target, a.X, a.Y, a.Z)
+}
+
 func (s *Server) ToHub(c *ClientConnection) (ok bool, err error) {
 	// Choosing the hub means "no game right now", wherever the player is.
 	s.Matchmaker.Dequeue(c)
 	if c.instance == s.Hub {
 		return false, nil
 	}
-	return true, s.MovePlayer(c, s.Hub, 0.5, 67, 0.5)
+	return true, s.Join(c, s.Hub)
 }
 
 // LeaveGame sends the player out of the running game into its mode's
@@ -98,7 +109,7 @@ func (s *Server) LeaveGame(c *ClientConnection) (reason string, err error) {
 			target = dest
 		}
 	}
-	return "", s.MovePlayer(c, target, 0.5, 67, 0.5)
+	return "", s.Join(c, target)
 }
 
 // IsBot reports whether the connection is an AI player (/bot); Bot is its

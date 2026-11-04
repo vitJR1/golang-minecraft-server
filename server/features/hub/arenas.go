@@ -141,7 +141,7 @@ func joinArena(c *server.ClientConnection, name string) {
 	if target == c.Instance() {
 		return
 	}
-	if err := c.Server().MovePlayer(c, target, 0, 80, 0); err != nil {
+	if err := c.Server().Join(c, target); err != nil {
 		_ = c.SendMessage("Couldn't join " + name + ": " + err.Error())
 		slog.Warn("join arena failed", "player", c.Name(), "arena", name, "err", err)
 		return

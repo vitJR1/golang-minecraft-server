@@ -2,6 +2,7 @@ package server
 
 import (
 	"testing"
+	"time"
 
 	"minecraft-server/player"
 	"minecraft-server/protocol/packetid"
@@ -154,5 +155,28 @@ func TestChestClickFromAfarCloses(t *testing.T) {
 	}
 	if c.countItem(apple) != 0 {
 		t.Error("items left the chest from 20 blocks away")
+	}
+}
+
+// TestEndGameLandsOnHubPad: a finished round sends its players to the
+// hub's arrival point (the spawn pad), not into the air above it — EndGame
+// used (0, 80, 0) while every other way to the hub used the pad.
+func TestEndGameLandsOnHubPad(t *testing.T) {
+	s := New()
+	round := NewGameInstance("round", s, world.NewMemoryWorld())
+	t.Cleanup(round.Stop)
+	s.AddInstance(round)
+	c := offlineConn(round, "Winner", player.Survival, 3, 70, 3)
+	instanceBridge{server: s, inst: round}.EndGame()
+	waitFor(t, 2*time.Second, func() bool {
+		c.moveMu.Lock() // the move runs on EndGame's goroutine
+		defer c.moveMu.Unlock()
+		return c.instance == s.Hub
+	}, "moved to the hub")
+	if p, a := c.player.Snapshot(), s.Hub.Arrival; p.X != a.X || p.Y != a.Y || p.Z != a.Z {
+		t.Errorf("landed at (%v,%v,%v), want the hub pad (%v,%v,%v)", p.X, p.Y, p.Z, a.X, a.Y, a.Z)
+	}
+	if round.Arrival != gameArrival {
+		t.Errorf("a game instance arrives at %+v, want %+v", round.Arrival, gameArrival)
 	}
 }

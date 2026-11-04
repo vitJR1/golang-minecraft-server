@@ -67,6 +67,10 @@ type Instance struct {
 	// SpawnPoint is where players respawn after death (and the world spawn
 	// for this instance). Defaults to the origin column.
 	SpawnPoint Spawn
+	// Arrival is where a player moved in lands (Server.Join): the spawn
+	// pad for the hub and lobbies (= SpawnPoint), above the map for a game
+	// world (NewGameInstance) — the game places its players itself.
+	Arrival Spawn
 
 	// worldEntities are the non-player entities (item frames) in this
 	// instance's world. Baked ones get a stable server entity ID at
@@ -206,6 +210,19 @@ type Instance struct {
 	listeners []game.Listener
 }
 
+// gameArrival is where players moved into a game world land: above the
+// map's centre column, wherever its ground is — the game's join hook
+// places them (team spawn, lobby spot).
+var gameArrival = Spawn{X: 0, Y: 80, Z: 0}
+
+// NewGameInstance is NewInstance for a game world (a round, an arena, an
+// /instance from a template): players arrive at gameArrival.
+func NewGameInstance(id string, srv *Server, w world.World) *Instance {
+	i := NewInstance(id, srv, w)
+	i.Arrival = gameArrival
+	return i
+}
+
 // NewInstance creates an instance and starts its tick loop. Caller
 // registers it on the server (currently just by assigning to Server.Hub
 // or by future matchmaker logic).
@@ -217,6 +234,7 @@ func NewInstance(id string, srv *Server, w world.World) *Instance {
 		Players:    NewPlayerList(),
 		Combat:     combat.DefaultConfig(),
 		SpawnPoint: Spawn{X: 0.5, Y: 67, Z: 0.5},
+		Arrival:    Spawn{X: 0.5, Y: 67, Z: 0.5},
 	}
 	i.ticks.Label = id
 	i.SetPvP(true) // instances default to PvP on (hub turns it off)

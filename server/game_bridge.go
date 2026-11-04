@@ -102,7 +102,7 @@ func (b instanceBridge) EndGame() {
 		// EndGame is called from a Logic method on a different goroutine
 		// than the moving player.
 		for _, c := range inst.Players.snapshot() {
-			_ = srv.MovePlayer(c, srv.Hub, 0, 80, 0)
+			_ = srv.Join(c, srv.Hub)
 		}
 		_ = srv.RemoveInstance(inst.ID)
 	}()
@@ -205,7 +205,7 @@ func (s *Server) StartGame(defID string) (*Instance, error) {
 		return nil, fmt.Errorf("game %s has no template", defID)
 	}
 	id := fmt.Sprintf("%s-%d", def.ID, s.nextInstanceSerial())
-	inst := NewInstance(id, s, def.Template.Instantiate())
+	inst := NewGameInstance(id, s, def.Template.Instantiate())
 	inst.GameID = def.ID
 	// Ephemeral: normally EndGame removes the round, but if every player
 	// disconnects instead, the janitor collects the leftover.

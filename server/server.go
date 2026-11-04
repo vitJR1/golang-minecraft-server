@@ -579,6 +579,18 @@ func (s *Server) HandleConn(sock net.Conn) {
 	slog.Info("new connection", "addr", sock.RemoteAddr().String())
 	defer client.cleanup()
 
+	// A connection gets prePlayTimeout from accept to reach the play
+	// state: the per-read deadline alone let a client that trickles a
+	// packet every few seconds (or idles in the status state) hold a slot
+	// indefinitely.
+	prePlay := time.AfterFunc(prePlayTimeout, func() {
+		if !client.inPlay.Load() {
+			slog.Info("pre-play timeout, closing", "addr", sock.RemoteAddr().String())
+			client.cleanup()
+		}
+	})
+	defer prePlay.Stop()
+
 	client.link.Serve()
 	go client.keepAlive()
 	client.readLoop()

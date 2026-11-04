@@ -72,7 +72,7 @@ func (m *Matchmaker) startGame(def *game.Definition, players []*ClientConnection
 	// Spawn was already broadcast to them, so they'd never see each other.
 	// Sequential moves keep the per-client order correct.
 	for _, c := range players {
-		if err := m.server.MovePlayer(c, inst, 0, 80, 0); err != nil {
+		if err := m.server.Join(c, inst); err != nil {
 			slog.Warn("matchmaker: move failed",
 				"player", c.playerName, "instance", inst.ID, "err", err)
 			_ = c.sendSystemMessage("Couldn't enter " + def.Name + ": " + err.Error())

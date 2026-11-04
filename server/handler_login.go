@@ -26,6 +26,10 @@ import (
 // hold a connection slot. A var so tests can shorten it.
 var loginTimeout = 30 * time.Second
 
+// prePlayTimeout bounds a connection from accept to the play state (status
+// pings included): loginTimeout plus a few seconds for the handshake.
+var prePlayTimeout = loginTimeout + 5*time.Second
+
 // errLoginAborted: the connection closed (or the login deadline hit) while
 // the login was in flight; nothing more to say to the client.
 var errLoginAborted = errors.New("login aborted")

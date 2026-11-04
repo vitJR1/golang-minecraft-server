@@ -131,7 +131,7 @@ func cmdInstanceCreate(c *server.ClientConnection, args []string) {
 	} else {
 		w = world.NewMemoryWorld()
 	}
-	inst := server.NewInstance(id, c.Server(), w)
+	inst := server.NewGameInstance(id, c.Server(), w)
 	c.Server().AddInstance(inst)
 	msg := "Created instance " + id
 	if len(args) == 2 {
@@ -154,8 +154,7 @@ func cmdInstanceJoin(c *server.ClientConnection, args []string) {
 		_ = c.SendMessage("Already in " + target.ID)
 		return
 	}
-	// Default spawn (0, 80, 0). Per-instance spawn config comes later.
-	if err := c.Server().MovePlayer(c, target, 0, 80, 0); err != nil {
+	if err := c.Server().Join(c, target); err != nil {
 		_ = c.SendMessage("Move failed: " + err.Error())
 		return
 	}
@@ -183,7 +182,7 @@ func cmdInstanceDelete(c *server.ClientConnection, args []string) {
 	if inst.Players.Count() == 1 {
 		only, ok := inst.Players.ByName(c.Name())
 		if ok && only == c {
-			if err := c.Server().MovePlayer(c, c.Server().Hub, 0, 80, 0); err != nil {
+			if err := c.Server().Join(c, c.Server().Hub); err != nil {
 				_ = c.SendMessage("Couldn't leave to hub: " + err.Error())
 				return
 			}

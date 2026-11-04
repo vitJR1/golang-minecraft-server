@@ -16,11 +16,14 @@ import (
 	"minecraft-server/protocol"
 )
 
-// bcryptCost mirrors the vanilla server's bcrypt cost — 10 yields
-// ~100ms per hash on a modern laptop, comfortable for a register/login
-// gate that fires at most once per connection. Bump to 12 if you ever
-// care about offline brute-force resistance more than register latency.
-const bcryptCost = 10
+// HashCost is the bcrypt cost of new hashes — 10 yields ~100ms per hash on
+// a modern laptop, comfortable for a register/login gate that fires at most
+// once per connection. Bump to 12 if you ever care about offline
+// brute-force resistance more than register latency. Tests lower it
+// (bcrypt.MinCost): under the race detector and a full parallel test run a
+// cost-10 hash took seconds and timed the auth tests out. Verification
+// reads the cost from the hash itself.
+var HashCost = 10
 
 // MinPasswordLen is the shortest password /register accepts.
 const MinPasswordLen = 4
@@ -41,7 +44,7 @@ var (
 // meaningful message — generation only fails on bogus cost values, which
 // shouldn't happen with our hardcoded const.
 func HashPassword(password string) (string, error) {
-	b, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
+	b, err := bcrypt.GenerateFromPassword([]byte(password), HashCost)
 	if err != nil {
 		return "", err
 	}
