@@ -3,8 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"math"
 	"net"
+	"sync"
 	"time"
 
 	"minecraft-server/protocol"
@@ -37,8 +40,11 @@ func runClient(ctx context.Context, addr string, id int, posHz int, s *stats) {
 	s.loggedIn.Add(1)
 	s.loginLatTotal.Add(int64(time.Since(loginStart)))
 
-	// Async reader for everything after login. Counts but doesn't interpret.
-	go drainPackets(ctx, conn, threshold, s)
+	// Async reader for everything after login: counts, and answers what a
+	// vanilla client answers (teleports, pings) — the server ignores
+	// movement until its teleport is confirmed.
+	ses := &session{conn: conn, threshold: threshold}
+	go drainPackets(ctx, ses, s)
 
 	// Steady-state writer: position updates at posHz.
 	posInterval := time.Second / time.Duration(posHz)
@@ -49,20 +55,89 @@ func runClient(ctx context.Context, addr string, id int, posHz int, s *stats) {
 	defer posTicker.Stop()
 
 	rng := clientRand(id)
-	x, y, z := float64(rng.Intn(64)-32), 80.0, float64(rng.Intn(64)-32)
-
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-posTicker.C:
-			x += (rng.Float64() - 0.5) * 0.6
-			z += (rng.Float64() - 0.5) * 0.6
-			if err := sendSetPos(conn, threshold, x, y, z, true); err != nil {
+			// A small step from where the server last put us (within the
+			// anticheat's walking pace).
+			x, y, z, ok := ses.step((rng.Float64()-0.5)*0.4, (rng.Float64()-0.5)*0.4)
+			if !ok {
+				continue // no position from the server yet
+			}
+			if err := ses.write(packetid.SbPlaySetPos, setPosPayload(x, y, z, true)); err != nil {
 				s.errors.Add(1)
 				return
 			}
 			s.packetsSent.Add(1)
+		}
+	}
+}
+
+// session is a logged-in client's connection, written from the movement
+// loop and the reader (replies).
+type session struct {
+	conn      net.Conn
+	threshold int
+
+	mu      sync.Mutex // writes + position
+	x, y, z float64
+	havePos bool
+}
+
+func (ses *session) write(id int32, payload []byte) error {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	return protocol.WritePacket(ses.conn, id, payload, ses.threshold)
+}
+
+// step moves the position by dx, dz and returns it.
+func (ses *session) step(dx, dz float64) (x, y, z float64, ok bool) {
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	if !ses.havePos {
+		return 0, 0, 0, false
+	}
+	ses.x += dx
+	ses.z += dz
+	return ses.x, ses.y, ses.z, true
+}
+
+// answer replies like a vanilla client: Synchronize Player Position moves
+// us and is confirmed, a Ping is answered with a Pong.
+func (ses *session) answer(id int, body []byte) {
+	switch id {
+	case packetid.CbPlaySyncPos:
+		// x, y, z (3×Double) + yaw, pitch (2×Float) + flags (Byte) + VarInt id.
+		if len(body) < 34 {
+			return
+		}
+		f := func(i int) float64 {
+			return math.Float64frombits(uint64(body[i])<<56 | uint64(body[i+1])<<48 | uint64(body[i+2])<<40 |
+				uint64(body[i+3])<<32 | uint64(body[i+4])<<24 | uint64(body[i+5])<<16 | uint64(body[i+6])<<8 | uint64(body[i+7]))
+		}
+		x, y, z, flags := f(0), f(8), f(16), body[32]
+		tp, _, err := protocol.ReadVarIntFromBytes(body[33:])
+		if err != nil {
+			return
+		}
+		ses.mu.Lock()
+		if flags&0x01 != 0 {
+			x += ses.x
+		}
+		if flags&0x02 != 0 {
+			y += ses.y
+		}
+		if flags&0x04 != 0 {
+			z += ses.z
+		}
+		ses.x, ses.y, ses.z, ses.havePos = x, y, z, true
+		ses.mu.Unlock()
+		_ = ses.write(packetid.SbPlayTeleportConfirm, protocol.WriteVarInt32(int32(tp)))
+	case packetid.CbPlayPing:
+		if len(body) >= 4 {
+			_ = ses.write(packetid.SbPlayPong, append([]byte(nil), body[:4]...))
 		}
 	}
 }
@@ -156,7 +231,8 @@ func readWithDeadline(conn net.Conn, threshold int, deadline time.Duration, s *s
 // drainPackets reads server packets and updates counters. Loops until ctx
 // is cancelled or the connection errors out (which is also how disconnect
 // is observed).
-func drainPackets(ctx context.Context, conn net.Conn, threshold int, s *stats) {
+func drainPackets(ctx context.Context, ses *session, s *stats) {
+	conn, threshold := ses.conn, ses.threshold
 	for {
 		if ctx.Err() != nil {
 			return
@@ -167,7 +243,9 @@ func drainPackets(ctx context.Context, conn net.Conn, threshold int, s *stats) {
 		if err != nil {
 			// Read deadline is mostly a way to notice ctx.Done; only count it
 			// as an error if ctx is still live.
-			if ne, ok := err.(net.Error); ok && ne.Timeout() && ctx.Err() == nil {
+			// ReadPacket wraps the error: errors.As, not a type assertion.
+			var ne net.Error
+			if errors.As(err, &ne) && ne.Timeout() && ctx.Err() == nil {
 				continue
 			}
 			if ctx.Err() == nil {
@@ -177,13 +255,14 @@ func drainPackets(ctx context.Context, conn net.Conn, threshold int, s *stats) {
 		}
 		s.bytesRecv.Add(int64(cr.n))
 		s.packetsRecv.Add(1)
-		_ = buf
+		if id, err := protocol.ReadVarInt(buf); err == nil {
+			ses.answer(id, buf.Bytes())
+		}
 	}
 }
 
-// sendSetPos issues a Set Player Position packet (no rotation) with the
-// given coords.
-func sendSetPos(conn net.Conn, threshold int, x, y, z float64, onGround bool) error {
+// setPosPayload is a Set Player Position body (no rotation).
+func setPosPayload(x, y, z float64, onGround bool) []byte {
 	var buf bytes.Buffer
 	buf.Write(protocol.WriteDouble(x))
 	buf.Write(protocol.WriteDouble(y))
@@ -193,7 +272,7 @@ func sendSetPos(conn net.Conn, threshold int, x, y, z float64, onGround bool) er
 	} else {
 		buf.WriteByte(0)
 	}
-	return protocol.WritePacket(conn, packetid.SbPlaySetPos, buf.Bytes(), threshold)
+	return buf.Bytes()
 }
 
 // --- Small wrappers around net.Conn that count bytes flowing through. ---

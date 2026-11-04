@@ -4,6 +4,7 @@ import (
 	"log/slog"
 
 	"minecraft-server/server/instances/playerlist"
+	"minecraft-server/server/net/conn"
 )
 
 // PlayerList tracks the connections of every logged-in player in an
@@ -32,6 +33,7 @@ func (pl *PlayerList) snapshot() []*ClientConnection { return pl.Snapshot() }
 // Players without a position yet are skipped.
 func (pl *PlayerList) BroadcastNear(x, y, z, radius float64, packetID int32, payload []byte, exceptEntityID int32) {
 	r2 := radius * radius
+	f := conn.NewSharedFrame(packetID, payload)
 	for _, c := range pl.snapshot() {
 		if c.player == nil || c.player.EntityID == exceptEntityID {
 			continue
@@ -41,7 +43,7 @@ func (pl *PlayerList) BroadcastNear(x, y, z, radius float64, packetID int32, pay
 		if dx*dx+dy*dy+dz*dz > r2 {
 			continue
 		}
-		if err := c.safeWrite(packetID, payload); err != nil {
+		if err := c.safeWriteShared(f); err != nil {
 			slog.Warn("broadcast failed",
 				"player", c.player.Name, "packet_id", packetID, "err", err)
 		}
@@ -52,15 +54,17 @@ func (pl *PlayerList) BroadcastNear(x, y, z, radius float64, packetID int32, pay
 // connection with that entity ID is skipped — typical for "tell everyone
 // else what this player just did".
 //
-// Errors from individual writes are logged but not surfaced; one slow or
-// dead client should not block the rest. Each safeWrite has its own
-// 5-second write deadline.
+// The frame is built (and compressed) once per compression threshold, not
+// once per recipient (conn.SharedFrame). Errors from individual writes are
+// logged but not surfaced; one slow or dead client should not block the
+// rest — writes only queue, and a full queue kicks that client.
 func (pl *PlayerList) Broadcast(packetID int32, payload []byte, exceptEntityID int32) {
+	f := conn.NewSharedFrame(packetID, payload)
 	for _, c := range pl.snapshot() {
 		if c.player.EntityID == exceptEntityID {
 			continue
 		}
-		if err := c.safeWrite(packetID, payload); err != nil {
+		if err := c.safeWriteShared(f); err != nil {
 			slog.Warn("broadcast failed",
 				"player", c.player.Name, "packet_id", packetID, "err", err)
 		}

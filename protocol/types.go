@@ -22,13 +22,22 @@ const (
 
 // ReadVarIntFromReader reads a VarInt from an io.Reader (used during packet
 // framing, before the body is fully buffered).
+// A buffered reader (io.ByteReader) is read a byte at a time without a
+// call into the socket per byte.
 func ReadVarIntFromReader(r io.Reader) (int32, error) {
 	var result uint32
 	var shift uint
+	br, buffered := r.(io.ByteReader)
 	var b [1]byte
 
 	for {
-		if _, err := io.ReadFull(r, b[:]); err != nil {
+		if buffered {
+			c, err := br.ReadByte()
+			if err != nil {
+				return 0, fmt.Errorf("VarInt byte: %w", err)
+			}
+			b[0] = c
+		} else if _, err := io.ReadFull(r, b[:]); err != nil {
 			return 0, fmt.Errorf("VarInt byte: %w", err)
 		}
 		result |= uint32(b[0]&varIntSegmentBits) << shift

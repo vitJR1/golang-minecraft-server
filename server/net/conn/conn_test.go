@@ -92,3 +92,39 @@ func TestQueueFull(t *testing.T) {
 		t.Fatal("TakeFrame")
 	}
 }
+
+// TestEncryptRefusesBufferedBytes: bytes the read buffer already holds when
+// encryption starts were read as plaintext and would never be decrypted, so
+// the swap is refused; with an empty buffer it goes through.
+func TestEncryptRefusesBufferedBytes(t *testing.T) {
+	for _, extra := range []bool{false, true} {
+		cli, srv := net.Pipe()
+		c := New(srv, nil)
+		go func() {
+			_ = protocol.WritePacket(cli, 0x01, []byte{1, 2, 3}, protocol.CompressionDisabled)
+			if extra {
+				_ = protocol.WritePacket(cli, 0x02, []byte{4}, protocol.CompressionDisabled)
+			}
+		}()
+		if id, _, err := c.ReadSplit(); err != nil || id != 0x01 {
+			t.Fatalf("ReadSplit: %d %v", id, err)
+		}
+		if extra { // let the second packet land in the read buffer
+			deadline := time.Now().Add(time.Second)
+			for c.rd.Buffered() == 0 && time.Now().Before(deadline) {
+				_ = srv.SetReadDeadline(time.Now().Add(10 * time.Millisecond))
+				_, _ = c.rd.Peek(1)
+			}
+			_ = srv.SetReadDeadline(time.Time{})
+		}
+		err := c.Encrypt(func(n net.Conn) net.Conn { return n })
+		if extra && err != ErrDataBeforeEncryption {
+			t.Errorf("buffered bytes: Encrypt = %v, want ErrDataBeforeEncryption", err)
+		}
+		if !extra && err != nil {
+			t.Errorf("empty buffer: Encrypt = %v", err)
+		}
+		_ = cli.Close()
+		_ = srv.Close()
+	}
+}

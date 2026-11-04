@@ -24,7 +24,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"minecraft-server/cfg"
 	"minecraft-server/server"
+	"minecraft-server/server/net/conn"
 )
 
 func main() {
@@ -37,6 +39,7 @@ func main() {
 		external  = flag.Bool("external", false, "skip starting the in-process server; connect to addr")
 		pprofAddr = flag.String("pprof", "localhost:6060", "pprof HTTP listen address (empty to disable)")
 		quiet     = flag.Bool("quiet", true, "silence server-side fmt.Printf during the run")
+		coalesce  = flag.Duration("coalesce", conn.CoalesceWindow, "in-process server: how long a connection's writer gathers frames before a write")
 	)
 	flag.Parse()
 
@@ -45,7 +48,8 @@ func main() {
 	}
 
 	if !*external {
-		startInProcessServer(*addr)
+		conn.CoalesceWindow = *coalesce
+		startInProcessServer(*addr, *nClients)
 		// Give the listener a moment to come up.
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -95,11 +99,24 @@ func main() {
 	finishedAt := time.Now()
 
 	report(agg, *nClients, steadyEnd.Sub(steadyStart), finishedAt.Sub(startedAt))
+	if !*external {
+		frames, writes := conn.WriteStats()
+		if writes > 0 {
+			fmt.Fprintf(os.Stderr, "server writes: %d frames in %d socket writes (%.1f frames/write)\n",
+				frames, writes, float64(frames)/float64(writes))
+		}
+	}
 }
 
 // startInProcessServer mirrors what main.go does, but without the banlist
 // loader (loadtest needs no bans). Runs in a goroutine and never returns.
-func startInProcessServer(addr string) {
+//
+// Every simulated client connects from 127.0.0.1, so the per-IP caps are
+// lifted and the player cap raised to the client count.
+func startInProcessServer(addr string, clients int) {
+	cfg.MaxConnsPerIP, cfg.ConnRatePerIP = 0, 0
+	cfg.MaxPlayers = max(cfg.MaxPlayers, clients)
+	cfg.MaxConns = max(cfg.MaxConns, clients+16)
 	srv := server.New()
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {

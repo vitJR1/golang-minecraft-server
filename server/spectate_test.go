@@ -8,6 +8,7 @@ import (
 	"minecraft-server/player"
 	"minecraft-server/schem"
 	"minecraft-server/server/bots/botai"
+	"minecraft-server/server/net/conn"
 	"minecraft-server/templates"
 )
 
@@ -23,6 +24,10 @@ func TestBotMatchWatcher(t *testing.T) {
 	}
 	s.RegisterTemplate(templates.BedwarsDotaMap, sch.ToTemplateAt(-int(sch.Width)/2, 64, -int(sch.Length)/2))
 	op := offlineHub(s, "Watcher")
+	// The arena's whole map is queued at once (the chunk cache sends ~170
+	// frames in well under a millisecond): a test queue has no writer, so
+	// it gets room for all of it instead of racing the reader below.
+	op.link = conn.NewQueued(4096)
 	stop := make(chan struct{})
 	defer close(stop)
 	go func() { // the watcher's client reads everything (a whole map of chunks)

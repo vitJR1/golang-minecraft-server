@@ -10,6 +10,8 @@ type encryptedConn struct {
 	net.Conn
 	encrypt cipher.Stream
 	decrypt cipher.Stream
+
+	out []byte // шифротекст для записи; пишет только писатель соединения
 }
 
 func WrapEncryptedConn(conn net.Conn, encrypt, decrypt cipher.Stream) net.Conn {
@@ -29,50 +31,47 @@ func (e *encryptedConn) Read(p []byte) (int, error) {
 }
 
 func (e *encryptedConn) Write(p []byte) (int, error) {
-	// шифруем кусками и гарантируем запись всех байт,
-	// иначе состояние stream уедет.
-	total := 0
-	tmp := make([]byte, 4096)
-
-	for total < len(p) {
-		chunk := len(p) - total
-		if chunk > len(tmp) {
-			chunk = len(tmp)
-		}
-
-		// encrypt chunk -> tmp[:chunk]
-		e.encrypt.XORKeyStream(tmp[:chunk], p[total:total+chunk])
-
-		// writeAll for this encrypted chunk
-		written := 0
-		for written < chunk {
-			n, err := e.Conn.Write(tmp[written:chunk])
-			if err != nil {
-				return total + written, err
-			}
-			if n == 0 {
-				return total + written, io.ErrUnexpectedEOF
-			}
-			written += n
-		}
-
-		total += chunk
-	}
-
-	return total, nil
+	n, err := e.WriteVectored([][]byte{p})
+	return int(n), err
 }
 
-//func (e *encryptedConn) Write(p []byte) (int, error) {
-//	buf := make([]byte, len(p))
-//	e.encrypt.XORKeyStream(buf, p)
-//
-//	n, err := e.Conn.Write(buf)
-//	if err != nil {
-//		return n, err
-//	}
-//	if n != len(buf) {
-//		// Это ПЛОХО: stream продвинулся, а байты не ушли.
-//		return n, fmt.Errorf("PARTIAL WRITE: wrote %d of %d (encryption stream would desync)", n, len(buf))
-//	}
-//	return n, nil
-//}
+// maxKeptOut bounds the encryption buffer kept between writes: a burst (a
+// join's chunk stream) may grow it, but it isn't held on to after.
+const maxKeptOut = 256 << 10
+
+// WriteVectored шифрует все буферы подряд в один (переиспользуемый) буфер и
+// пишет его целиком одним вызовом — так очередь соединения (server/net/conn)
+// отправляет пачку кадров одной записью и через шифрование, как writev без
+// него. Запись всегда полная (цикл до последнего байта), иначе состояние
+// stream уедет: шифр уже продвинут на все байты.
+func (e *encryptedConn) WriteVectored(bufs [][]byte) (int64, error) {
+	total := 0
+	for _, b := range bufs {
+		total += len(b)
+	}
+	if cap(e.out) < total {
+		e.out = make([]byte, total)
+	}
+	out := e.out[:total]
+	off := 0
+	for _, b := range bufs {
+		e.encrypt.XORKeyStream(out[off:off+len(b)], b)
+		off += len(b)
+	}
+	if cap(e.out) > maxKeptOut {
+		e.out = nil
+	}
+
+	written := 0
+	for written < total {
+		n, err := e.Conn.Write(out[written:])
+		if err != nil {
+			return int64(written), err
+		}
+		if n == 0 {
+			return int64(written), io.ErrUnexpectedEOF
+		}
+		written += n
+	}
+	return int64(total), nil
+}

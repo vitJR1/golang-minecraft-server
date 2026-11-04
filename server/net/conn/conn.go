@@ -13,6 +13,7 @@
 package conn
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
@@ -54,6 +55,9 @@ type Conn struct {
 	// which runs on it, so the encryption swap is safe); the writer keeps
 	// its own current-socket pointer, updated through swap messages.
 	raw net.Conn
+	// rd buffers the read side over raw (nil without a socket): a packet
+	// read used to cost a syscall per length byte plus one for the body.
+	rd *bufio.Reader
 
 	// threshold is protocol.CompressionDisabled until Set Compression went
 	// out; both directions use it. Written under sendMu.
@@ -85,8 +89,13 @@ func NewQueued(size int) *Conn {
 }
 
 func newConn(raw net.Conn, size int, onWriteError func(error)) *Conn {
+	var rd *bufio.Reader
+	if raw != nil {
+		rd = bufio.NewReader(raw)
+	}
 	return &Conn{
 		raw:          raw,
+		rd:           rd,
 		threshold:    protocol.CompressionDisabled,
 		out:          make(chan msg, size),
 		done:         make(chan struct{}),
@@ -128,32 +137,42 @@ func (c *Conn) Write(packetID int32, payload []byte) error {
 // connections (an instance's cached chunk data): framing and compression
 // cost once per compression threshold, not once per recipient. Frames are
 // plaintext in the queue (the socket encrypts), so the bytes are shared
-// read-only. Only the frame for the last threshold is kept — the payload
-// is rebuilt by Build for another one: an uncompressed payload can be much
-// bigger (a chunk column's light arrays: ~55 KB, framed ~0.4 KB). Safe for
-// concurrent use.
+// read-only. The frames are kept per threshold (players compress, bots
+// don't), not the payload, which Build makes on demand: an uncompressed
+// payload can be much bigger (a chunk column's light arrays: ~55 KB, framed
+// ~0.4 KB). Safe for concurrent use.
 type SharedFrame struct {
 	ID    int32
 	Build func() []byte // the packet payload
 
-	mu        sync.Mutex
+	mu     sync.Mutex
+	frames []thresholdFrame // one per threshold seen, usually one or two
+}
+
+type thresholdFrame struct {
 	threshold int
 	frame     []byte
 }
 
-// frameFor returns the frame for threshold, building it on first use (or
-// when a connection with another threshold asks).
+// NewSharedFrame shares an already built payload (a broadcast).
+func NewSharedFrame(id int32, payload []byte) *SharedFrame {
+	return &SharedFrame{ID: id, Build: func() []byte { return payload }}
+}
+
+// frameFor returns the frame for threshold, building it on first use.
 func (f *SharedFrame) frameFor(threshold int) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.frame != nil && f.threshold == threshold {
-		return f.frame, nil
+	for _, tf := range f.frames {
+		if tf.threshold == threshold {
+			return tf.frame, nil
+		}
 	}
 	frame, err := protocol.BuildFrame(f.ID, f.Build(), threshold)
 	if err != nil {
 		return nil, err
 	}
-	f.frame, f.threshold = frame, threshold
+	f.frames = append(f.frames, thresholdFrame{threshold, frame})
 	return frame, nil
 }
 
@@ -205,22 +224,35 @@ func (c *Conn) EnableCompression(packetID int32, payload []byte, threshold int) 
 
 // Encrypt swaps the socket for wrap(socket): the read side at once (the
 // caller is the read loop), the write side once every frame queued before
-// it is flushed in plaintext.
+// it is flushed in plaintext. The read buffer must be empty — whatever it
+// holds was read before the swap and is ciphertext nobody would decrypt; a
+// 1.20.1 client sends nothing after its Encryption Response until the
+// server answers, so a non-empty buffer is a protocol violation.
 func (c *Conn) Encrypt(wrap func(net.Conn) net.Conn) error {
-	encrypted := wrap(c.raw)
-	c.raw = encrypted
 	c.sendMu.Lock()
 	defer c.sendMu.Unlock()
 	if c.closed.Load() {
 		return ErrClosed
 	}
+	if c.rd != nil && c.rd.Buffered() > 0 {
+		return ErrDataBeforeEncryption
+	}
+	encrypted := wrap(c.raw)
+	c.raw = encrypted // under sendMu: Finish reads it from another goroutine
+	if c.rd != nil {
+		c.rd.Reset(encrypted)
+	}
 	return c.queue(msg{swap: encrypted})
 }
+
+// ErrDataBeforeEncryption: the client sent more right behind its
+// Encryption Response.
+var ErrDataBeforeEncryption = errors.New("data received before encryption was enabled")
 
 // Read reads the next packet, waiting at most timeout.
 func (c *Conn) Read(timeout time.Duration) (*bytes.Buffer, error) {
 	_ = c.raw.SetReadDeadline(time.Now().Add(timeout))
-	packet, err := protocol.ReadPacket(c.raw, c.threshold)
+	packet, err := protocol.ReadPacket(c.rd, c.threshold)
 	if err != nil {
 		return nil, err
 	}
@@ -231,15 +263,18 @@ func (c *Conn) Read(timeout time.Duration) (*bytes.Buffer, error) {
 // ReadSplit reads the next packet, uncompressed, as id + body — the login
 // handler's Encryption Response, read straight off the socket.
 func (c *Conn) ReadSplit() (int, []byte, error) {
-	return protocol.ReadPacketSplit(c.raw, protocol.CompressionDisabled)
+	return protocol.ReadPacketSplit(c.rd, protocol.CompressionDisabled)
 }
 
 // RemoteAddr is the client's address (nil without a socket).
 func (c *Conn) RemoteAddr() net.Addr {
-	if c.raw == nil {
+	c.sendMu.Lock()
+	raw := c.raw
+	c.sendMu.Unlock()
+	if raw == nil {
 		return nil
 	}
-	return c.raw.RemoteAddr()
+	return raw.RemoteAddr()
 }
 
 // Closed reports whether Shutdown ran.
@@ -292,10 +327,33 @@ func (c *Conn) Shutdown(drain time.Duration) bool {
 
 // Finish closes the socket and signals Done.
 func (c *Conn) Finish() {
-	if c.raw != nil {
-		_ = c.raw.Close()
+	c.sendMu.Lock()
+	raw := c.raw
+	c.sendMu.Unlock()
+	if raw != nil {
+		_ = raw.Close()
 	}
 	close(c.done)
+}
+
+// CoalesceWindow is how long the writer gathers frames after the first one
+// before writing the batch: the latency it adds to a lone packet, well
+// under a tick.
+var CoalesceWindow = time.Millisecond
+
+// framesWritten / flushes count, process-wide, the frames the writers sent
+// and the socket writes that carried them (WriteStats).
+var framesWritten, flushes atomic.Uint64
+
+// WriteStats reports how many frames went out in how many socket writes —
+// the batching ratio of the outbound queues (cmd/loadtest prints it).
+func WriteStats() (frames, writes uint64) { return framesWritten.Load(), flushes.Load() }
+
+// vectorWriter writes several buffers in one call where net.Buffers can't
+// (it falls back to a Write per buffer for anything but a raw socket): the
+// encryption wrapper encrypts the batch into one buffer and writes it once.
+type vectorWriter interface {
+	WriteVectored(bufs [][]byte) (int64, error)
 }
 
 // writerLoop owns the write side of the connection. It batches whatever is
@@ -311,8 +369,15 @@ func (c *Conn) writerLoop() {
 		if len(pending) == 0 {
 			return nil
 		}
+		framesWritten.Add(uint64(len(pending)))
+		flushes.Add(1)
 		_ = current.SetWriteDeadline(time.Now().Add(5 * time.Second))
-		_, err := pending.WriteTo(current)
+		var err error
+		if vw, ok := current.(vectorWriter); ok {
+			_, err = vw.WriteVectored(pending) // the encrypted socket
+		} else {
+			_, err = pending.WriteTo(current) // writev on a TCP socket
+		}
 		_ = current.SetWriteDeadline(time.Time{})
 		pending = pending[:0]
 		return err
@@ -336,6 +401,8 @@ func (c *Conn) writerLoop() {
 		return true
 	}
 
+	window := time.NewTimer(time.Hour)
+	window.Stop()
 	for {
 		// Block waiting for the first message.
 		m, ok := <-c.out
@@ -346,9 +413,13 @@ func (c *Conn) writerLoop() {
 		if !take(m) {
 			return
 		}
-		// Drain whatever else is queued without blocking. Bound the batch
-		// so a single writev doesn't hold the cipher state forever and we
-		// give the scheduler a chance to interleave.
+		// Collect what else arrives within CoalesceWindow, then write it all
+		// at once. The packets of one tick (movement broadcasts, entity
+		// updates) are queued by different goroutines a few microseconds
+		// apart; written as they came, nearly every frame cost its own
+		// syscall (1.2 frames per write under load). Bound the batch so a
+		// single write doesn't hold the cipher state forever.
+		window.Reset(CoalesceWindow)
 	drain:
 		for len(pending) < QueueSize {
 			select {
@@ -360,10 +431,11 @@ func (c *Conn) writerLoop() {
 				if !take(m) {
 					return
 				}
-			default:
+			case <-window.C:
 				break drain
 			}
 		}
+		window.Stop()
 		if err := flush(); err != nil {
 			fail(err)
 			return
